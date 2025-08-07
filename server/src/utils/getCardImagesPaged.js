@@ -1,12 +1,10 @@
 const axios = require("axios");
-
 const SCRYFALL_API = "https://api.scryfall.com/cards/search";
 
-async function getScryfallImagesForCard(cardName) {
+async function getScryfallPngImagesForCard(cardName) {
   const query = `!"${cardName}" include:extras unique:art`;
   const encodedUrl = `${SCRYFALL_API}?q=${encodeURIComponent(query)}`;
-
-  const allImageUrls = [];
+  const allPngUrls = [];
   let nextPageUrl = encodedUrl;
 
   try {
@@ -14,25 +12,25 @@ async function getScryfallImagesForCard(cardName) {
       const response = await axios.get(nextPageUrl);
       const { data, has_more, next_page } = response.data;
 
-      data.forEach((card) => {
-        if (card.image_uris?.normal) {
-          allImageUrls.push(card.image_uris.normal);
-        } else if (card.card_faces) {
-          card.card_faces.forEach((face) => {
-            if (face.image_uris?.normal) {
-              allImageUrls.push(face.image_uris.normal);
+      for (const card of data) {
+        if (card.image_uris?.png) {
+          allPngUrls.push(card.image_uris.png);
+        } else if (card.card_faces?.length) {
+          for (const face of card.card_faces) {
+            if (face.image_uris?.png) {
+              allPngUrls.push(face.image_uris.png);
             }
-          });
+          }
         }
-      });
+      }
 
-      nextPageUrl = has_more ? next_page ?? null : null;
+      nextPageUrl = has_more ? next_page : null;
     }
   } catch (err) {
-    console.warn(`[Scryfall] Failed to fetch images for: ${cardName}`, err.message);
+    console.warn(`[Scryfall] Failed to fetch PNGs for ${cardName}:`, err.message);
   }
 
-  return allImageUrls;
+  return allPngUrls;
 }
 
-module.exports = { getScryfallImagesForCard };
+module.exports = { getScryfallPngImagesForCard };

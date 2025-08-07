@@ -15,14 +15,14 @@ export const exportProxyPagesToPdf = async (pages: HTMLElement[]) => {
       scale: 3,
       useCORS: true,
       logging: false,
-      scrollY: -window.scrollY, // ensure consistent snapshot
+      scrollY: -window.scrollY,
     });
 
     const imgData = canvas.toDataURL('image/png');
 
-    if (i > 0) pdf.addPage(); // add new page after first
+    if (i > 0) pdf.addPage();
 
-    pdf.addImage(imgData, 'PNG', 0, 0, 8.5, 11); // full page
+    pdf.addImage(imgData, 'PNG', 0, 0, 8.5, 11);
   }
 
   pdf.save('mtg-proxies.pdf');

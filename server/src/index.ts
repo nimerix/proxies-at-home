@@ -1,6 +1,6 @@
 import cors from "cors";
 import express from "express";
-import { imageRouter } from "./routes/images";
+import { imageRouter } from "./routes/imageRouter";
 
 const app = express();
 app.use(cors());

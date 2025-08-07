@@ -11,11 +11,13 @@ import {
 } from "flowbite-react";
 import { useRef, useState } from "react";
 import { exportProxyPagesToPdf } from "../helpers/ExportProxyPageToPdf";
+import fullLogo from '../assets/fullLogo.png';
 
 interface CardOption {
   uuid: string;
   name: string;
   imageUrls: string[];
+  isUserUpload: true;
 }
 
 export default function ProxyBuilderPage() {
@@ -43,9 +45,11 @@ export default function ProxyBuilderPage() {
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
   const gridWidthMm = totalCardWidth * 3;
   const gridHeightMm = totalCardHeight * 3;
+  const [pdfPageColor, setPdfPageColor] = useState("#000000");
 
   const handleExport = () => {
     const pageElements = document.querySelectorAll('.proxy-page');
+
     exportProxyPagesToPdf(Array.from(pageElements) as HTMLElement[]);
   };
 
@@ -64,16 +68,108 @@ export default function ProxyBuilderPage() {
 
   const reprocessSelectedImages = async (newBleedWidth: number) => {
     const updated: Record<number, string> = {};
-
-    for (const [index, url] of Object.entries(originalSelectedImages)) { // <-- use original unmodified images
-      const proxiedUrl = getLocalBleedImageUrl(url);
-      const bleedImage = await addBleedEdge(proxiedUrl, newBleedWidth); // 👈 pass new bleed
-      updated[Number(index)] = bleedImage;
+  
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+  
+      if (card.isUserUpload) {
+        const originalBase64 = originalSelectedImages[i];
+        if (originalBase64) {
+          const trimmed = await trimBleedEdge(originalBase64);
+          const bleedImage = await addBleedEdge(trimmed, newBleedWidth);
+          updated[i] = bleedImage;
+        } else if (selectedImages[i]) {
+          const bleedImage = await addBleedEdge(selectedImages[i], newBleedWidth);
+          updated[i] = bleedImage;
+        }
+      }
+  
+      else if (originalSelectedImages[i]) {
+        const proxiedUrl = getLocalBleedImageUrl(originalSelectedImages[i]);
+        const bleedImage = await addBleedEdge(proxiedUrl, newBleedWidth);
+        updated[i] = bleedImage;
+      }
     }
-
+  
     setSelectedImages(updated);
   };
+  
 
+  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+  
+    const fileArray = Array.from(files);
+    const currentIndex = cards.length;
+  
+    const newCards: CardOption[] = fileArray.map((file, i) => ({
+      name: `Custom Art ${currentIndex + i + 1}`,
+      imageUrls: [],
+      uuid: crypto.randomUUID(),
+      isUserUpload: true,
+    }));
+  
+    setCards((prev) => [...prev, ...newCards]);
+  
+    fileArray.forEach((file, i) => {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        if (reader.result) {
+          const base64 = reader.result as string;
+      
+          setOriginalSelectedImages((prev) => ({
+            ...prev,
+            [currentIndex + i]: base64,
+          }));
+      
+          const trimmed = await trimBleedEdge(base64);
+          const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth);
+      
+          setSelectedImages((prev) => ({
+            ...prev,
+            [currentIndex + i]: withBleed,
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  
+    event.target.value = '';
+  };
+
+function trimBleedEdge(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const bleedTrim = 72; 
+      const canvas = document.createElement("canvas");
+      const width = img.width - bleedTrim * 2;
+      const height = img.height - bleedTrim * 2;
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(
+          img,
+          bleedTrim,
+          bleedTrim,
+          width,
+          height,
+          0,
+          0,
+          width,
+          height
+        );
+        resolve(canvas.toDataURL("image/png"));
+      } else {
+        resolve(dataUrl);
+      }
+    };
+    img.src = dataUrl;
+  });
+}
 
   const addBleedEdge = (src: string, bleedOverride?: number): Promise<string> => {
     return new Promise((resolve) => {
@@ -120,9 +216,8 @@ export default function ProxyBuilderPage() {
         const tempCtx = temp.getContext("2d")!;
         tempCtx.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
-        //Fill in rounded corners
         const cornerSize = 20;
-        const sampleInset = 10; // how far inside to sample "nearby" color
+        const sampleInset = 10;
 
         const averageColor = (x: number, y: number, w: number, h: number): string => {
           const data = tempCtx.getImageData(x, y, w, h).data;
@@ -130,14 +225,14 @@ export default function ProxyBuilderPage() {
 
           for (let i = 0; i < data.length; i += 4) {
             const alpha = data[i + 3];
-            if (alpha === 0) continue; // skip transparent
+            if (alpha === 0) continue;
             r += data[i];
             g += data[i + 1];
             b += data[i + 2];
             count++;
           }
 
-          if (count === 0) return "#000"; // fallback if fully transparent
+          if (count === 0) return "#000";
 
           r = Math.round(r / count);
           g = Math.round(g / count);
@@ -150,10 +245,10 @@ export default function ProxyBuilderPage() {
           a === 0 || (r > 200 && g > 200 && b > 200);
 
         const cornerCoords = [
-          { x: 0, y: 0 }, // top-left
-          { x: temp.width - cornerSize, y: 0 }, // top-right
-          { x: 0, y: temp.height - cornerSize }, // bottom-left
-          { x: temp.width - cornerSize, y: temp.height - cornerSize }, // bottom-right
+          { x: 0, y: 0 },
+          { x: temp.width - cornerSize, y: 0 },
+          { x: 0, y: temp.height - cornerSize },
+          { x: temp.width - cornerSize, y: temp.height - cornerSize },
         ];
 
         cornerCoords.forEach(({ x, y }) => {
@@ -172,7 +267,6 @@ export default function ProxyBuilderPage() {
           }
 
           if (shouldFill) {
-            // Sample average color just inside the corner
             const avgColor = averageColor(
               x < temp.width / 2 ? sampleInset : temp.width - sampleInset - 10,
               y < temp.height / 2 ? sampleInset : temp.height - sampleInset - 10,
@@ -185,7 +279,6 @@ export default function ProxyBuilderPage() {
           }
         });
 
-        // === Step 2: Analyze left edge for black pixels ===
         const edgeData = tempCtx.getImageData(0, 0, 1, targetCardHeight).data;
         let blackCount = 0;
 
@@ -202,11 +295,9 @@ export default function ProxyBuilderPage() {
 
         const scaledImg = new Image();
         scaledImg.onload = () => {
-          // === Draw center ===
           ctx.drawImage(scaledImg, bleed, bleed);
 
           if (isMostlyBlack) {
-            // === REPLICATED BLEED ===
             const slice = 8;
             // Edges
             ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight); // Left
@@ -268,7 +359,7 @@ export default function ProxyBuilderPage() {
             ctx.restore();
           }
 
-          resolve(canvas.toDataURL("image/jpeg"));
+          resolve(canvas.toDataURL("image/png"));
         };
 
         scaledImg.src = temp.toDataURL("image/png");
@@ -288,7 +379,7 @@ export default function ProxyBuilderPage() {
 
   const handleSubmit = async () => {
     const names: string[] = [];
-
+  
     deckText.split("\n").forEach((line) => {
       const trimmed = line.trim();
       const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
@@ -300,22 +391,21 @@ export default function ProxyBuilderPage() {
         names.push(trimmed);
       }
     });
-
+  
     const uniqueNames = Array.from(new Set(names));
-
-    const clearCache = await axios.delete("http://localhost:3001/api/cards/images");
-
+  
+    await axios.delete("http://localhost:3001/api/cards/images");
+  
     const response = await axios.post<CardOption[]>(
       "http://localhost:3001/api/cards/images",
       { cardNames: uniqueNames }
     );
-
+  
     const nameToCard: Record<string, CardOption> = {};
     response.data.forEach((card) => {
       nameToCard[card.name] = card;
     });
-
-    // Expand cards by count
+  
     const expandedCards: CardOption[] = names.map((name) => {
       const card = nameToCard[name];
       return {
@@ -323,26 +413,34 @@ export default function ProxyBuilderPage() {
         uuid: crypto.randomUUID(),
       };
     });
-
-    setCards(expandedCards);
-
-    const defaultSelections: Record<number, string> = {};
+  
+    const startIndex = cards.length;
+    setCards((prev) => [...prev, ...expandedCards]);
+  
+    const newOriginals: Record<number, string> = {};
     expandedCards.forEach((card, i) => {
       if (card.imageUrls.length > 0) {
-        defaultSelections[i] = card.imageUrls[0];
+        newOriginals[startIndex + i] = card.imageUrls[0];
       }
     });
-    setOriginalSelectedImages(defaultSelections);
-
+    setOriginalSelectedImages((prev) => ({
+      ...prev,
+      ...newOriginals,
+    }));
+  
     const processed: Record<number, string> = {};
-    for (const [index, url] of Object.entries(defaultSelections)) {
+    for (const [indexStr, url] of Object.entries(newOriginals)) {
       const proxiedUrl = getLocalBleedImageUrl(url);
       const bleedImage = await addBleedEdge(proxiedUrl);
-      processed[Number(index)] = bleedImage;
+      processed[Number(indexStr)] = bleedImage;
     }
-
-    setSelectedImages(processed);
+  
+    setSelectedImages((prev) => ({
+      ...prev,
+      ...processed,
+    }));
   };
+  
 
   const handleSelectImage = (cardName: string, url: string) => {
     setSelectedImages((prev) => ({
@@ -381,8 +479,35 @@ export default function ProxyBuilderPage() {
         </ModalBody>
       </Modal>
 
-      <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden">
-        <h2 className="text-gray-900 text-lg font-semibold">Decklist</h2>
+      <div className="w-1/6 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
+        <div className="bg-white rounded-xl ">
+          <img
+            src={fullLogo}
+            alt="Proxxied Logo"
+          />
+        </div>
+
+        <div className="space-y-2">
+  <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
+
+  <label
+    htmlFor="custom-file-upload"
+    className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+  >
+    Choose Files
+  </label>
+
+  <input
+    id="custom-file-upload"
+    type="file"
+    accept="image/*"
+    multiple
+    onChange={handleUpload}
+    className="hidden"
+  />
+</div>
+<Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
+
         <Textarea
           className="h-64"
           placeholder={`1x Sol Ring
@@ -395,14 +520,31 @@ export default function ProxyBuilderPage() {
         </Button>
       </div>
 
-      <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center">
+      <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center  dark:bg-gray-800 ">
+        {/* <div className="flex flex-col items-center">
+          <div className="flex flex-row items-center">
+            <Label className="text-7xl justify-center font-bold">
+              Welcome to
+            </Label>
+            <img
+              src={fullLogo}
+              alt="Proxxied Logo"
+              className="h-36 mt-[1rem]"
+            />
+
+          </div>
+          <Label className="text-2xl text-gray-600 justify-center">
+            Enter a decklist to the left to get started
+          </Label>
+
+        </div> */}
         <div ref={pageRef} className="flex flex-col gap-[1rem]">
           {chunkCards(cards, 9).map((page, pageIndex) => (
             <div
               key={pageIndex}
               className="proxy-page relative bg-white"
               style={{
-                zoom:'1.2',
+                zoom: '1.2',
                 width: '8.5in',
                 height: '11in',
                 display: 'flex',
@@ -417,7 +559,6 @@ export default function ProxyBuilderPage() {
             >
 
               <div
-                className="bg-gray-950"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: `repeat(3, ${totalCardWidth}mm)`,
@@ -476,11 +617,10 @@ export default function ProxyBuilderPage() {
         </div>
 
       </div>
+      <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden dark:bg-gray-700 ">
+        <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
 
-      <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden">
-        <Label className="text-lg font-semibold">Settings</Label>
-
-        <div>
+        {/* <div>
           <Label>Page Width ({unit})</Label>
           <TextInput
             type="number"
@@ -496,16 +636,16 @@ export default function ProxyBuilderPage() {
             value={pageHeight}
             onChange={(e) => setPageHeight(parseFloat(e.target.value))}
           />
-        </div>
+        </div> */}
 
-        <div>
+        {/* <div>
           <Label>Columns</Label>
           <TextInput
             type="number"
             value={columns}
             onChange={(e) => setColumns(parseInt(e.target.value))}
           />
-        </div>
+        </div> */}
 
         <div>
           <Label>Bleed Edge ({unit})</Label>

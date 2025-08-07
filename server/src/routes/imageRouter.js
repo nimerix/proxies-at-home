@@ -2,7 +2,9 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
-const { getScryfallImagesForCard } = require("../utils/getCardImagesPaged");
+const multer = require("multer");
+const upload = multer({ dest: path.join(__dirname, "../uploaded-images") });
+const { getScryfallPngImagesForCard } = require("../utils/getCardImagesPaged");
 
 const imageRouter = express.Router();
 
@@ -13,14 +15,13 @@ if (!fs.existsSync(cacheDir)) {
 
 imageRouter.post("/", async (req, res) => {
   const cardNames = req.body.cardNames;
-
   if (!Array.isArray(cardNames)) {
     return res.status(400).json({ error: "cardNames must be an array of strings" });
   }
 
   const results = await Promise.all(
     cardNames.map(async (name) => {
-      const imageUrls = await getScryfallImagesForCard(name);
+      const imageUrls = await getScryfallPngImagesForCard(name);
       return { name, imageUrls };
     })
   );
@@ -70,6 +71,15 @@ imageRouter.delete("/", (req, res) => {
     }
 
     return res.json({ message: "Cached images cleared." });
+  });
+});
+
+imageRouter.post("/upload", upload.array("images"), (req, res) => {
+  return res.json({
+    uploaded: req.files.map(file => ({
+      name: file.originalname,
+      path: file.filename
+    }))
   });
 });
 
