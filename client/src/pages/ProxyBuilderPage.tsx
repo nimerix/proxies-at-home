@@ -9,19 +9,20 @@ import {
   Textarea,
   TextInput
 } from "flowbite-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { exportProxyPagesToPdf } from "../helpers/ExportProxyPageToPdf";
 import fullLogo from '../assets/fullLogo.png';
 
-interface CardOption {
+export interface CardOption {
   uuid: string;
   name: string;
   imageUrls: string[];
-  isUserUpload: true;
+  isUserUpload: boolean;
 }
 
 export default function ProxyBuilderPage() {
   const [deckText, setDeckText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [cards, setCards] = useState<CardOption[]>([]);
   const [originalSelectedImages, setOriginalSelectedImages] = useState<Record<number, string>>({});
   const [selectedImages, setSelectedImages] = useState<Record<number, string>>({});
@@ -32,7 +33,7 @@ export default function ProxyBuilderPage() {
   const [bleedEdge, setBleedEdge] = useState(true);
   const [bleedEdgeWidth, setBleedEdgeWidth] = useState(1);
   const [guideColor, setGuideColor] = useState("#FFFFFF");
-  const [guideWidth, setGuideWidth] = useState(1);
+  const [guideWidth, setGuideWidth] = useState(.5);
   const unit = "mm";
   const [pageWidth, setPageWidth] = useState(8.5);
   const [pageHeight, setPageHeight] = useState(11);
@@ -45,12 +46,77 @@ export default function ProxyBuilderPage() {
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
   const gridWidthMm = totalCardWidth * 3;
   const gridHeightMm = totalCardHeight * 3;
-  const [pdfPageColor, setPdfPageColor] = useState("#000000");
+  const [pdfPageColor, setPdfPageColor] = useState("#FFFFFF");
+  const [contextMenu, setContextMenu] = useState({
+  visible: false,
+  x: 0,
+  y: 0,
+  cardIndex: null as number | null,
+});
 
-  const handleExport = () => {
-    const pageElements = document.querySelectorAll('.proxy-page');
+useEffect(() => {
+  const handler = () => setContextMenu((prev) => ({ ...prev, visible: false }));
+  window.addEventListener("click", handler);
+  return () => window.removeEventListener("click", handler);
+}, []);
 
-    exportProxyPagesToPdf(Array.from(pageElements) as HTMLElement[]);
+function duplicateCard(index: number) {
+  const cardToCopy = cards[index];
+  const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
+
+  // Insert the new card
+  const newCards = [...cards];
+  newCards.splice(index + 1, 0, newCard);
+
+  // Update selectedImages (shift all keys after index)
+  const newSelectedImages: Record<number, string> = {};
+  for (const [i, url] of Object.entries(selectedImages)) {
+    const key = parseInt(i, 10);
+    if (key <= index) {
+      newSelectedImages[key] = url;
+    } else {
+      newSelectedImages[key + 1] = url;
+    }
+  }
+
+  newSelectedImages[index + 1] = selectedImages[index];
+
+  setCards(newCards);
+  setSelectedImages(newSelectedImages);
+}
+
+function deleteCard(index: number) {
+  const newCards = cards.filter((_, i) => i !== index);
+
+  // Update selectedImages (reindex after deletion)
+  const newSelectedImages: Record<number, string> = {};
+  for (const [i, url] of Object.entries(selectedImages)) {
+    const key = parseInt(i, 10);
+    if (key < index) {
+      newSelectedImages[key] = url;
+    } else if (key > index) {
+      newSelectedImages[key - 1] = url;
+    }
+    // else: skip the deleted one
+  }
+
+  setCards(newCards);
+  setSelectedImages(newSelectedImages);
+}
+
+
+  const handleExport = async () => {
+    await exportProxyPagesToPdf({
+      cards,
+      originalSelectedImages,         // <- full-res base64 for uploads OR cached PNG URL for fetched
+      bleedEdge,
+      bleedEdgeWidthMm: bleedEdgeWidth,
+      guideColor,
+      guideWidthPx: guideWidth,       // you already track this
+      pageWidthInches: pageWidth,
+      pageHeightInches: pageHeight,
+      pdfPageColor,                   // your bg color (export white in light mode, still looks fine)
+    });
   };
 
 
@@ -68,10 +134,10 @@ export default function ProxyBuilderPage() {
 
   const reprocessSelectedImages = async (newBleedWidth: number) => {
     const updated: Record<number, string> = {};
-  
+
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
-  
+
       if (card.isUserUpload) {
         const originalBase64 = originalSelectedImages[i];
         if (originalBase64) {
@@ -83,48 +149,48 @@ export default function ProxyBuilderPage() {
           updated[i] = bleedImage;
         }
       }
-  
+
       else if (originalSelectedImages[i]) {
         const proxiedUrl = getLocalBleedImageUrl(originalSelectedImages[i]);
         const bleedImage = await addBleedEdge(proxiedUrl, newBleedWidth);
         updated[i] = bleedImage;
       }
     }
-  
+
     setSelectedImages(updated);
   };
-  
+
 
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
-  
+
     const fileArray = Array.from(files);
     const currentIndex = cards.length;
-  
+
     const newCards: CardOption[] = fileArray.map((file, i) => ({
       name: `Custom Art ${currentIndex + i + 1}`,
       imageUrls: [],
       uuid: crypto.randomUUID(),
       isUserUpload: true,
     }));
-  
+
     setCards((prev) => [...prev, ...newCards]);
-  
+
     fileArray.forEach((file, i) => {
       const reader = new FileReader();
       reader.onloadend = async () => {
         if (reader.result) {
           const base64 = reader.result as string;
-      
+
           setOriginalSelectedImages((prev) => ({
             ...prev,
             [currentIndex + i]: base64,
           }));
-      
+
           const trimmed = await trimBleedEdge(base64);
           const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth);
-      
+
           setSelectedImages((prev) => ({
             ...prev,
             [currentIndex + i]: withBleed,
@@ -133,43 +199,84 @@ export default function ProxyBuilderPage() {
       };
       reader.readAsDataURL(file);
     });
-  
+
     event.target.value = '';
   };
 
-function trimBleedEdge(dataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const bleedTrim = 72; 
-      const canvas = document.createElement("canvas");
-      const width = img.width - bleedTrim * 2;
-      const height = img.height - bleedTrim * 2;
+  function trimBleedEdge(dataUrl: string): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const bleedTrim = 72;
+        const canvas = document.createElement("canvas");
+        const width = img.width - bleedTrim * 2;
+        const height = img.height - bleedTrim * 2;
 
-      canvas.width = width;
-      canvas.height = height;
+        canvas.width = width;
+        canvas.height = height;
 
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(
-          img,
-          bleedTrim,
-          bleedTrim,
-          width,
-          height,
-          0,
-          0,
-          width,
-          height
-        );
-        resolve(canvas.toDataURL("image/png"));
-      } else {
-        resolve(dataUrl);
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(
+            img,
+            bleedTrim,
+            bleedTrim,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height
+          );
+          resolve(canvas.toDataURL("image/png"));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  function blackenAllNearBlackPixels(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    threshold: number,
+    borderThickness = {
+      top: 96,
+      bottom: 400,
+      left: 48,
+      right: 48,
+    }
+  ) {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const inBorder =
+          y < borderThickness.top ||
+          y >= height - borderThickness.bottom ||
+          x < borderThickness.left ||
+          x >= width - borderThickness.right;
+
+        if (!inBorder) continue;
+
+        const index = (y * width + x) * 4;
+        const r = data[index];
+        const g = data[index + 1];
+        const b = data[index + 2];
+
+        if (r < threshold && g < threshold && b < threshold) {
+          data[index] = 0;
+          data[index + 1] = 0;
+          data[index + 2] = 0;
+        }
       }
-    };
-    img.src = dataUrl;
-  });
-}
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  }
 
   const addBleedEdge = (src: string, bleedOverride?: number): Promise<string> => {
     return new Promise((resolve) => {
@@ -178,14 +285,13 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
       const bleed = Math.round(getBleedInPixels(bleedOverride ?? bleedEdgeWidth, unit));
       const finalWidth = targetCardWidth + bleed * 2;
       const finalHeight = targetCardHeight + bleed * 2;
-      const blackThreshold = 20; // max RGB value to still consider "black"
+      const blackThreshold = 30; // max RGB value to still consider "black"
       const blackToleranceRatio = 0.7; // how much of the edge must be black to switch modes
 
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d")!;
       canvas.width = finalWidth;
       canvas.height = finalHeight;
-
 
       const img = new Image();
       img.crossOrigin = "anonymous";
@@ -216,7 +322,7 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
         const tempCtx = temp.getContext("2d")!;
         tempCtx.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
-        const cornerSize = 20;
+        const cornerSize = 30;
         const sampleInset = 10;
 
         const averageColor = (x: number, y: number, w: number, h: number): string => {
@@ -278,6 +384,8 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
             tempCtx.fillRect(x, y, cornerSize, cornerSize);
           }
         });
+
+        blackenAllNearBlackPixels(tempCtx, targetCardWidth, targetCardHeight, blackThreshold);
 
         const edgeData = tempCtx.getImageData(0, 0, 1, targetCardHeight).data;
         let blackCount = 0;
@@ -379,7 +487,7 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
 
   const handleSubmit = async () => {
     const names: string[] = [];
-  
+
     deckText.split("\n").forEach((line) => {
       const trimmed = line.trim();
       const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
@@ -391,21 +499,21 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
         names.push(trimmed);
       }
     });
-  
+
     const uniqueNames = Array.from(new Set(names));
-  
+
     await axios.delete("http://localhost:3001/api/cards/images");
-  
+
     const response = await axios.post<CardOption[]>(
       "http://localhost:3001/api/cards/images",
       { cardNames: uniqueNames }
     );
-  
+
     const nameToCard: Record<string, CardOption> = {};
     response.data.forEach((card) => {
       nameToCard[card.name] = card;
     });
-  
+
     const expandedCards: CardOption[] = names.map((name) => {
       const card = nameToCard[name];
       return {
@@ -413,10 +521,10 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
         uuid: crypto.randomUUID(),
       };
     });
-  
+
     const startIndex = cards.length;
     setCards((prev) => [...prev, ...expandedCards]);
-  
+
     const newOriginals: Record<number, string> = {};
     expandedCards.forEach((card, i) => {
       if (card.imageUrls.length > 0) {
@@ -427,20 +535,20 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
       ...prev,
       ...newOriginals,
     }));
-  
+
     const processed: Record<number, string> = {};
     for (const [indexStr, url] of Object.entries(newOriginals)) {
       const proxiedUrl = getLocalBleedImageUrl(url);
       const bleedImage = await addBleedEdge(proxiedUrl);
       processed[Number(indexStr)] = bleedImage;
     }
-  
+
     setSelectedImages((prev) => ({
       ...prev,
       ...processed,
     }));
   };
-  
+
 
   const handleSelectImage = (cardName: string, url: string) => {
     setSelectedImages((prev) => ({
@@ -454,6 +562,62 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
       <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} size="4xl">
         <ModalHeader>Select Artwork</ModalHeader>
         <ModalBody>
+        <div className="mb-4">
+    <TextInput
+      type="text"
+      placeholder="Replace with a different card..."
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+      onKeyDown={async (e) => {
+        if (e.key === "Enter" && searchQuery.trim() && modalIndex !== null) {
+          const res = await axios.post<CardOption[]>(
+            "http://localhost:3001/api/cards/images",
+            { cardNames: [searchQuery.trim()] }
+          );
+      
+          if (res.data.length > 0) {
+            const newCard = res.data[0];
+      
+            setCards((prev) => {
+              const updated = [...prev];
+              updated[modalIndex] = {
+                uuid: newCard.uuid,
+                name: newCard.name,
+                imageUrls: newCard.imageUrls,
+                isUserUpload: false, // or true if user-uploaded?
+              };
+              return updated;
+            });
+      
+            // ✅ Update modalCard so it re-renders
+            setModalCard({
+              uuid: newCard.uuid,
+              name: newCard.name,
+              imageUrls: newCard.imageUrls,
+              isUserUpload: false,
+            });
+      
+            // ✅ Set default selected image for new card
+            const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
+            const processed = await addBleedEdge(proxiedUrl);
+      
+            setSelectedImages((prev) => ({
+              ...prev,
+              [modalIndex]: processed,
+            }));
+      
+            setOriginalSelectedImages((prev) => ({
+              ...prev,
+              [modalIndex]: newCard.imageUrls[0],
+            }));
+      
+            setSearchQuery(""); // clear the search input
+          }
+        }
+      }}
+      
+    />
+  </div>
           {modalCard && (
             <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
               {modalCard.imageUrls.map((url, i) => (
@@ -464,14 +628,23 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
                   className={`w-full cursor-pointer border-4 ${selectedImages[modalIndex!] === url ? "border-green-500" : "border-transparent"
                     }`}
                   onClick={async () => {
+                    // Store the ORIGINAL source for export (full-res via your cache)
+                    setOriginalSelectedImages(prev => ({
+                      ...prev,
+                      [modalIndex!]: url, // keep the raw/cached png url
+                    }));
+
+                    // Still show the processed preview with bleed in the UI
                     const proxiedUrl = getLocalBleedImageUrl(url);
                     const processed = await addBleedEdge(proxiedUrl);
-                    setSelectedImages((prev) => ({
+                    setSelectedImages(prev => ({
                       ...prev,
                       [modalIndex!]: processed,
                     }));
+
                     setIsModalOpen(false);
                   }}
+
                 />
               ))}
             </div>
@@ -488,25 +661,25 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
         </div>
 
         <div className="space-y-2">
-  <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
+          <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
 
-  <label
-    htmlFor="custom-file-upload"
-    className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-  >
-    Choose Files
-  </label>
+          <label
+            htmlFor="custom-file-upload"
+            className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+          >
+            Choose Files
+          </label>
 
-  <input
-    id="custom-file-upload"
-    type="file"
-    accept="image/*"
-    multiple
-    onChange={handleUpload}
-    className="hidden"
-  />
-</div>
-<Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
+          <input
+            id="custom-file-upload"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleUpload}
+            className="hidden"
+          />
+        </div>
+        <Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
 
         <Textarea
           className="h-64"
@@ -539,6 +712,36 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
 
         </div> */}
         <div ref={pageRef} className="flex flex-col gap-[1rem]">
+        {contextMenu.visible && contextMenu.cardIndex !== null && (
+  <div
+    className="absolute bg-white border border-gray-300 rounded shadow-md z-50 text-sm space-y-1"
+    style={{
+      top: contextMenu.y,
+      left: contextMenu.x,
+      padding: "0.25rem",
+    }}
+    onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })}
+  >
+    <Button
+      className="bg-gray-400 hover:bg-gray-500 w-full"
+      onClick={() => {
+        duplicateCard(contextMenu.cardIndex!);
+        setContextMenu({ ...contextMenu, visible: false });
+      }}
+    >
+      Duplicate
+    </Button>
+    <Button
+      className="bg-red-700 hover:bg-red-800 w-full"
+      onClick={() => {
+        deleteCard(contextMenu.cardIndex!);
+        setContextMenu({ ...contextMenu, visible: false });
+      }}
+    >
+      Delete
+    </Button>
+  </div>
+)}
           {chunkCards(cards, 9).map((page, pageIndex) => (
             <div
               key={pageIndex}
@@ -582,6 +785,15 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
                         alt={card.name}
                         className="cursor-pointer block w-full h-full p-0 m-0"
                         style={{ display: 'block', lineHeight: 0 }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setContextMenu({
+                            visible: true,
+                            x: e.clientX,
+                            y: e.clientY,
+                            cardIndex: globalIndex,
+                          });
+                        }}
                         onClick={() => {
                           setModalCard(card);
                           setModalIndex(globalIndex);
@@ -683,10 +895,12 @@ function trimBleedEdge(dataUrl: string): Promise<string> {
         </div>
 
         <div>
-          <Label>Guides Width (px)</Label>
+          <Label>Guides Width (mm)</Label>
           <TextInput
             type="number"
             value={guideWidth}
+            step="0.1"
+            min="0"
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               if (!isNaN(val)) setGuideWidth(val);
