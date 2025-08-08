@@ -12,6 +12,25 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { exportProxyPagesToPdf } from "../helpers/ExportProxyPageToPdf";
 import fullLogo from '../assets/fullLogo.png';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type {
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import SortableCard from "../components/SortableCard";
+import LoadingOverlay from "../components/LoadingOverlay";
+
 
 export interface CardOption {
   uuid: string;
@@ -48,75 +67,81 @@ export default function ProxyBuilderPage() {
   const gridHeightMm = totalCardHeight * 3;
   const [pdfPageColor, setPdfPageColor] = useState("#FFFFFF");
   const [contextMenu, setContextMenu] = useState({
-  visible: false,
-  x: 0,
-  y: 0,
-  cardIndex: null as number | null,
-});
+    visible: false,
+    x: 0,
+    y: 0,
+    cardIndex: null as number | null,
+  });
+  const [zoom, setZoom] = useState(1.0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingTask, setLoadingTask] = useState<"Fetching cards" | "Processing Images" | "Generating PDF" | null>(null);
 
-useEffect(() => {
-  const handler = () => setContextMenu((prev) => ({ ...prev, visible: false }));
-  window.addEventListener("click", handler);
-  return () => window.removeEventListener("click", handler);
-}, []);
 
-function duplicateCard(index: number) {
-  const cardToCopy = cards[index];
-  const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
+  useEffect(() => {
+    const handler = () => setContextMenu((prev) => ({ ...prev, visible: false }));
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, []);
 
-  // Insert the new card
-  const newCards = [...cards];
-  newCards.splice(index + 1, 0, newCard);
+  function duplicateCard(index: number) {
+    const cardToCopy = cards[index];
+    const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
 
-  // Update selectedImages (shift all keys after index)
-  const newSelectedImages: Record<number, string> = {};
-  for (const [i, url] of Object.entries(selectedImages)) {
-    const key = parseInt(i, 10);
-    if (key <= index) {
-      newSelectedImages[key] = url;
-    } else {
-      newSelectedImages[key + 1] = url;
+    // Insert the new card
+    const newCards = [...cards];
+    newCards.splice(index + 1, 0, newCard);
+
+    // Update selectedImages (shift all keys after index)
+    const newSelectedImages: Record<number, string> = {};
+    for (const [i, url] of Object.entries(selectedImages)) {
+      const key = parseInt(i, 10);
+      if (key <= index) {
+        newSelectedImages[key] = url;
+      } else {
+        newSelectedImages[key + 1] = url;
+      }
     }
+
+    newSelectedImages[index + 1] = selectedImages[index];
+
+    setCards(newCards);
+    setSelectedImages(newSelectedImages);
   }
 
-  newSelectedImages[index + 1] = selectedImages[index];
+  function deleteCard(index: number) {
+    const newCards = cards.filter((_, i) => i !== index);
 
-  setCards(newCards);
-  setSelectedImages(newSelectedImages);
-}
-
-function deleteCard(index: number) {
-  const newCards = cards.filter((_, i) => i !== index);
-
-  // Update selectedImages (reindex after deletion)
-  const newSelectedImages: Record<number, string> = {};
-  for (const [i, url] of Object.entries(selectedImages)) {
-    const key = parseInt(i, 10);
-    if (key < index) {
-      newSelectedImages[key] = url;
-    } else if (key > index) {
-      newSelectedImages[key - 1] = url;
+    const newSelectedImages: Record<number, string> = {};
+    for (const [i, url] of Object.entries(selectedImages)) {
+      const key = parseInt(i, 10);
+      if (key < index) {
+        newSelectedImages[key] = url;
+      } else if (key > index) {
+        newSelectedImages[key - 1] = url;
+      }
     }
-    // else: skip the deleted one
-  }
 
-  setCards(newCards);
-  setSelectedImages(newSelectedImages);
-}
+    setCards(newCards);
+    setSelectedImages(newSelectedImages);
+  }
 
 
   const handleExport = async () => {
+    setLoadingTask("Generating PDF");
+    setIsLoading(true);
     await exportProxyPagesToPdf({
       cards,
-      originalSelectedImages,         // <- full-res base64 for uploads OR cached PNG URL for fetched
+      originalSelectedImages,
       bleedEdge,
       bleedEdgeWidthMm: bleedEdgeWidth,
       guideColor,
-      guideWidthPx: guideWidth,       // you already track this
+      guideWidthPx: guideWidth,
       pageWidthInches: pageWidth,
       pageHeightInches: pageHeight,
-      pdfPageColor,                   // your bg color (export white in light mode, still looks fine)
+      pdfPageColor,
     });
+    setIsLoading(false);
+    setLoadingTask(null);
   };
 
 
@@ -297,7 +322,6 @@ function deleteCard(index: number) {
       img.crossOrigin = "anonymous";
 
       img.onload = () => {
-        // === Step 1: Crop and scale to 745x1045 ===
         const aspectRatio = img.width / img.height;
         const targetAspect = targetCardWidth / targetCardHeight;
 
@@ -419,7 +443,6 @@ function deleteCard(index: number) {
             ctx.drawImage(scaledImg, 0, targetCardHeight - slice, slice, slice, 0, targetCardHeight + bleed, bleed, bleed); // BL
             ctx.drawImage(scaledImg, targetCardWidth - slice, targetCardHeight - slice, slice, slice, targetCardWidth + bleed, targetCardHeight + bleed, bleed, bleed); // BR
           } else {
-            // === MIRRORED BLEED ===
 
             // Left
             ctx.save();
@@ -486,6 +509,8 @@ function deleteCard(index: number) {
   }
 
   const handleSubmit = async () => {
+    setLoadingTask("Fetching cards");
+    setIsLoading(true);
     const names: string[] = [];
 
     deckText.split("\n").forEach((line) => {
@@ -536,6 +561,8 @@ function deleteCard(index: number) {
       ...newOriginals,
     }));
 
+    setLoadingTask("Processing Images");
+
     const processed: Record<number, string> = {};
     for (const [indexStr, url] of Object.entries(newOriginals)) {
       const proxiedUrl = getLocalBleedImageUrl(url);
@@ -547,6 +574,9 @@ function deleteCard(index: number) {
       ...prev,
       ...processed,
     }));
+    setIsLoading(false);
+    setLoadingTask(null);
+    setDeckText("");
   };
 
 
@@ -557,282 +587,290 @@ function deleteCard(index: number) {
     }));
   };
 
+  const handleClear = async () => {
+    await axios.delete("http://localhost:3001/api/cards/images");
+    setCards([]);
+    setSelectedImages({});
+    setOriginalSelectedImages({});
+  };
+  
+
   return (
-    <div className="flex flex-row h-screen justify-between overflow-hidden">
-      <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} size="4xl">
-        <ModalHeader>Select Artwork</ModalHeader>
-        <ModalBody>
-        <div className="mb-4">
-    <TextInput
-      type="text"
-      placeholder="Replace with a different card..."
-      value={searchQuery}
-      onChange={(e) => setSearchQuery(e.target.value)}
-      onKeyDown={async (e) => {
-        if (e.key === "Enter" && searchQuery.trim() && modalIndex !== null) {
-          const res = await axios.post<CardOption[]>(
-            "http://localhost:3001/api/cards/images",
-            { cardNames: [searchQuery.trim()] }
-          );
-      
-          if (res.data.length > 0) {
-            const newCard = res.data[0];
-      
-            setCards((prev) => {
-              const updated = [...prev];
-              updated[modalIndex] = {
-                uuid: newCard.uuid,
-                name: newCard.name,
-                imageUrls: newCard.imageUrls,
-                isUserUpload: false, // or true if user-uploaded?
-              };
-              return updated;
-            });
-      
-            // ✅ Update modalCard so it re-renders
-            setModalCard({
-              uuid: newCard.uuid,
-              name: newCard.name,
-              imageUrls: newCard.imageUrls,
-              isUserUpload: false,
-            });
-      
-            // ✅ Set default selected image for new card
-            const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
-            const processed = await addBleedEdge(proxiedUrl);
-      
-            setSelectedImages((prev) => ({
-              ...prev,
-              [modalIndex]: processed,
-            }));
-      
-            setOriginalSelectedImages((prev) => ({
-              ...prev,
-              [modalIndex]: newCard.imageUrls[0],
-            }));
-      
-            setSearchQuery(""); // clear the search input
-          }
-        }
-      }}
-      
-    />
-  </div>
-          {modalCard && (
-            <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
-              {modalCard.imageUrls.map((url, i) => (
-                <img
-                  key={i}
-                  src={url}
-                  alt={`${modalCard.name} alt ${i}`}
-                  className={`w-full cursor-pointer border-4 ${selectedImages[modalIndex!] === url ? "border-green-500" : "border-transparent"
-                    }`}
-                  onClick={async () => {
-                    // Store the ORIGINAL source for export (full-res via your cache)
-                    setOriginalSelectedImages(prev => ({
-                      ...prev,
-                      [modalIndex!]: url, // keep the raw/cached png url
-                    }));
+    <>
+      {isLoading && loadingTask && <LoadingOverlay task={loadingTask} />}
+      <div className="flex flex-row h-screen justify-between overflow-hidden">
+        <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} size="4xl">
+          <ModalHeader>Select Artwork</ModalHeader>
+          <ModalBody>
+            <div className="mb-4">
+              <TextInput
+                type="text"
+                placeholder="Replace with a different card..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" && searchQuery.trim() && modalIndex !== null) {
+                    const res = await axios.post<CardOption[]>(
+                      "http://localhost:3001/api/cards/images",
+                      { cardNames: [searchQuery.trim()] }
+                    );
 
-                    // Still show the processed preview with bleed in the UI
-                    const proxiedUrl = getLocalBleedImageUrl(url);
-                    const processed = await addBleedEdge(proxiedUrl);
-                    setSelectedImages(prev => ({
-                      ...prev,
-                      [modalIndex!]: processed,
-                    }));
+                    if (res.data.length > 0) {
+                      const newCard = res.data[0];
 
-                    setIsModalOpen(false);
-                  }}
+                      setCards((prev) => {
+                        const updated = [...prev];
+                        updated[modalIndex] = {
+                          uuid: newCard.uuid,
+                          name: newCard.name,
+                          imageUrls: newCard.imageUrls,
+                          isUserUpload: false, // or true if user-uploaded?
+                        };
+                        return updated;
+                      });
 
-                />
-              ))}
+                      setModalCard({
+                        uuid: newCard.uuid,
+                        name: newCard.name,
+                        imageUrls: newCard.imageUrls,
+                        isUserUpload: false,
+                      });
+
+                      const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
+                      const processed = await addBleedEdge(proxiedUrl);
+
+                      setSelectedImages((prev) => ({
+                        ...prev,
+                        [modalIndex]: processed,
+                      }));
+
+                      setOriginalSelectedImages((prev) => ({
+                        ...prev,
+                        [modalIndex]: newCard.imageUrls[0],
+                      }));
+
+                      setSearchQuery("");
+                    }
+                  }
+                }}
+
+              />
             </div>
-          )}
-        </ModalBody>
-      </Modal>
+            {modalCard && (
+              <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
+                {modalCard.imageUrls.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`${modalCard.name} alt ${i}`}
+                    className={`w-full cursor-pointer border-4 ${selectedImages[modalIndex!] === url ? "border-green-500" : "border-transparent"
+                      }`}
+                    onClick={async () => {
+                      setOriginalSelectedImages(prev => ({
+                        ...prev,
+                        [modalIndex!]: url,
+                      }));
 
-      <div className="w-1/6 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
-        <div className="bg-white rounded-xl ">
-          <img
-            src={fullLogo}
-            alt="Proxxied Logo"
-          />
-        </div>
+                      const proxiedUrl = getLocalBleedImageUrl(url);
+                      const processed = await addBleedEdge(proxiedUrl);
+                      setSelectedImages(prev => ({
+                        ...prev,
+                        [modalIndex!]: processed,
+                      }));
 
-        <div className="space-y-2">
-          <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
+                      setIsModalOpen(false);
+                    }}
 
-          <label
-            htmlFor="custom-file-upload"
-            className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-          >
-            Choose Files
-          </label>
+                  />
+                ))}
+              </div>
+            )}
+          </ModalBody>
+        </Modal>
 
-          <input
-            id="custom-file-upload"
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={handleUpload}
-            className="hidden"
-          />
-        </div>
-        <Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
-
-        <Textarea
-          className="h-64"
-          placeholder={`1x Sol Ring
-2x Counterspell`}
-          value={deckText}
-          onChange={(e) => setDeckText(e.target.value)}
-        />
-        <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
-          Parse Decklist
-        </Button>
-      </div>
-
-      <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center  dark:bg-gray-800 ">
-        {/* <div className="flex flex-col items-center">
-          <div className="flex flex-row items-center">
-            <Label className="text-7xl justify-center font-bold">
-              Welcome to
-            </Label>
+        <div className="w-1/6 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
+          <div className="bg-white rounded-xl ">
             <img
               src={fullLogo}
               alt="Proxxied Logo"
-              className="h-36 mt-[1rem]"
             />
-
           </div>
-          <Label className="text-2xl text-gray-600 justify-center">
-            Enter a decklist to the left to get started
-          </Label>
 
-        </div> */}
-        <div ref={pageRef} className="flex flex-col gap-[1rem]">
-        {contextMenu.visible && contextMenu.cardIndex !== null && (
-  <div
-    className="absolute bg-white border border-gray-300 rounded shadow-md z-50 text-sm space-y-1"
-    style={{
-      top: contextMenu.y,
-      left: contextMenu.x,
-      padding: "0.25rem",
-    }}
-    onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })}
-  >
-    <Button
-      className="bg-gray-400 hover:bg-gray-500 w-full"
-      onClick={() => {
-        duplicateCard(contextMenu.cardIndex!);
-        setContextMenu({ ...contextMenu, visible: false });
-      }}
-    >
-      Duplicate
-    </Button>
-    <Button
-      className="bg-red-700 hover:bg-red-800 w-full"
-      onClick={() => {
-        deleteCard(contextMenu.cardIndex!);
-        setContextMenu({ ...contextMenu, visible: false });
-      }}
-    >
-      Delete
-    </Button>
-  </div>
-)}
-          {chunkCards(cards, 9).map((page, pageIndex) => (
-            <div
-              key={pageIndex}
-              className="proxy-page relative bg-white"
-              style={{
-                zoom: '1.2',
-                width: '8.5in',
-                height: '11in',
-                display: 'flex',
-                flexShrink: 0,
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                breakAfter: 'page',
-                padding: 0,
-                margin: 0,
-              }}
+          <div className="space-y-2">
+            <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
+
+            <label
+              htmlFor="custom-file-upload"
+              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
             >
+              Choose Files
+            </label>
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(3, ${totalCardWidth}mm)`,
-                  gridTemplateRows: `repeat(3, ${totalCardHeight}mm)`,
-                  width: `${gridWidthMm}mm`,
-                  height: `${gridHeightMm}mm`,
-                  gap: 0
-                }}
-              >
-                {page.map((card, index) => {
-                  const globalIndex = pageIndex * 9 + index;
-                  return (
+            <input
+              id="custom-file-upload"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleUpload}
+              className="hidden"
+            />
+          </div>
+          <Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
 
-                    <div
-                      key={`${card.uuid}-${index}`}
-                      className="bg-black relative"
-                      style={{ width: '${totalCardWidth}mm', height: '${totalCardHeight}mm' }}
-                    >
-                      <img
-                        src={selectedImages[globalIndex]}
-                        alt={card.name}
-                        className="cursor-pointer block w-full h-full p-0 m-0"
-                        style={{ display: 'block', lineHeight: 0 }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setContextMenu({
-                            visible: true,
-                            x: e.clientX,
-                            y: e.clientY,
-                            cardIndex: globalIndex,
-                          });
-                        }}
-                        onClick={() => {
-                          setModalCard(card);
-                          setModalIndex(globalIndex);
-                          setIsModalOpen(true);
-                        }}
-                      />
-
-                      {bleedEdge && (
-                        <>
-                          {/* Top-left */}
-                          <div style={{ position: 'absolute', top: guideOffset, left: guideOffset, width: `${guideWidth}px`, height: '4mm', backgroundColor: guideColor }} />
-                          <div style={{ position: 'absolute', top: guideOffset, left: guideOffset, width: '4mm', height: `${guideWidth}px`, backgroundColor: guideColor }} />
-
-                          {/* Top-right */}
-                          <div style={{ position: 'absolute', top: guideOffset, right: guideOffset, width: `${guideWidth}px`, height: '4mm', backgroundColor: guideColor }} />
-                          <div style={{ position: 'absolute', top: guideOffset, right: guideOffset, width: '4mm', height: `${guideWidth}px`, backgroundColor: guideColor }} />
-
-                          {/* Bottom-left */}
-                          <div style={{ position: 'absolute', bottom: guideOffset, left: guideOffset, width: `${guideWidth}px`, height: '4mm', backgroundColor: guideColor }} />
-                          <div style={{ position: 'absolute', bottom: guideOffset, left: guideOffset, width: '4mm', height: `${guideWidth}px`, backgroundColor: guideColor }} />
-
-                          {/* Bottom-right */}
-                          <div style={{ position: 'absolute', bottom: guideOffset, right: guideOffset, width: `${guideWidth}px`, height: '4mm', backgroundColor: guideColor }} />
-                          <div style={{ position: 'absolute', bottom: guideOffset, right: guideOffset, width: '4mm', height: `${guideWidth}px`, backgroundColor: guideColor }} />
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+          <Textarea
+            className="h-64"
+            placeholder={`1x Sol Ring
+2x Counterspell`}
+            value={deckText}
+            onChange={(e) => setDeckText(e.target.value)}
+          />
+          <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
+            Fetch Cards
+          </Button>
+          <Button className="bg-red-700 hover:bg-red-700 w-full" onClick={handleClear}>
+  Clear Cards
+</Button>
         </div>
 
-      </div>
-      <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden dark:bg-gray-700 ">
-        <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
+        <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center  dark:bg-gray-800 ">
+          {cards.length === 0 ? (
+            <div className="flex flex-col items-center">
+              <div className="flex flex-row items-center">
+                <Label className="text-7xl justify-center font-bold">
+                  Welcome to
+                </Label>
+                <img
+                  src={fullLogo}
+                  alt="Proxxied Logo"
+                  className="h-36 mt-[1rem]"
+                />
+              </div>
+              <Label className="text-xl text-gray-600 justify-center">
+                Enter a decklist to the left or Upload Files to get started
+              </Label>
+            </div>
+          ) : null}
+          <div ref={pageRef} className="flex flex-col gap-[1rem]">
+            {contextMenu.visible && contextMenu.cardIndex !== null && (
+              <div
+                className="absolute bg-white border border-gray-300 rounded shadow-md z-50 text-sm space-y-1"
+                style={{
+                  top: contextMenu.y,
+                  left: contextMenu.x,
+                  padding: "0.25rem",
+                }}
+                onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })}
+              >
+                <Button
+                  className="bg-gray-400 hover:bg-gray-500 w-full"
+                  onClick={() => {
+                    duplicateCard(contextMenu.cardIndex!);
+                    setContextMenu({ ...contextMenu, visible: false });
+                  }}
+                >
+                  Duplicate
+                </Button>
+                <Button
+                  className="bg-red-700 hover:bg-red-800 w-full"
+                  onClick={() => {
+                    deleteCard(contextMenu.cardIndex!);
+                    setContextMenu({ ...contextMenu, visible: false });
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            )}
+            <DndContext
+              sensors={useSensors(useSensor(PointerSensor))}
+              collisionDetection={closestCenter}
+              onDragEnd={(event: DragEndEvent) => {
+                const { active, over } = event;
+                if (over && active.id !== over.id) {
+                  const oldIndex = Number(active.id);
+                  const newIndex = Number(over.id);
 
-        {/* <div>
+                  const updated = arrayMove(cards, oldIndex, newIndex);
+                  setCards(updated);
+
+                  const reorderImageMap = (map: Record<number, string>) => {
+                    const entries = cards.map((_, i) => map[i]); // Get old order
+                    const newEntries = arrayMove(entries, oldIndex, newIndex); // Reorder
+                    const newMap: Record<number, string> = {};
+                    newEntries.forEach((img, i) => {
+                      if (img) newMap[i] = img;
+                    });
+                    return newMap;
+                  };
+
+                  setSelectedImages(reorderImageMap(selectedImages));
+                  setOriginalSelectedImages(reorderImageMap(originalSelectedImages));
+                }
+              }}
+            >
+              <SortableContext items={cards.map((_, i) => i)} strategy={rectSortingStrategy}>
+                {chunkCards(cards, 9).map((page, pageIndex) => (
+                  <div
+                    key={pageIndex}
+                    className="proxy-page relative bg-white"
+                    style={{
+                      zoom: zoom,
+                      width: '8.5in',
+                      height: '11in',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      breakAfter: 'page',
+                      flexShrink: 0,
+                      padding: 0,
+                      margin: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(3, ${totalCardWidth}mm)`,
+                        gridTemplateRows: `repeat(3, ${totalCardHeight}mm)`,
+                        width: `${gridWidthMm}mm`,
+                        height: `${gridHeightMm}mm`,
+                        gap: 0,
+                      }}
+                    >
+                      {page.map((card, index) => {
+                        const globalIndex = pageIndex * 9 + index;
+                        return (
+                          <SortableCard
+                            key={globalIndex}
+                            card={card}
+                            index={index}
+                            globalIndex={globalIndex}
+                            imageSrc={selectedImages[globalIndex]}
+                            totalCardWidth={totalCardWidth}
+                            totalCardHeight={totalCardHeight}
+                            bleedEdge={bleedEdge}
+                            guideOffset={guideOffset}
+                            guideWidth={guideWidth}
+                            guideColor={guideColor}
+                            setContextMenu={setContextMenu}
+                            setModalCard={setModalCard}
+                            setModalIndex={setModalIndex}
+                            setIsModalOpen={setIsModalOpen}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </SortableContext>
+            </DndContext>
+
+          </div>
+
+        </div>
+        <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden dark:bg-gray-700 ">
+          <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
+          {/* <div>
           <Label>Page Width ({unit})</Label>
           <TextInput
             type="number"
@@ -850,7 +888,7 @@ function deleteCard(index: number) {
           />
         </div> */}
 
-        {/* <div>
+          {/* <div>
           <Label>Columns</Label>
           <TextInput
             type="number"
@@ -858,60 +896,69 @@ function deleteCard(index: number) {
             onChange={(e) => setColumns(parseInt(e.target.value))}
           />
         </div> */}
+          <div>
+            <Label>Bleed Edge ({unit})</Label>
+            <TextInput
+              type="number"
+              value={bleedEdgeWidth}
+              max={2}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val)) {
+                  setBleedEdgeWidth(val);
+                  reprocessSelectedImages(val);
+                }
+              }}
+            />
+          </div>
 
-        <div>
-          <Label>Bleed Edge ({unit})</Label>
-          <TextInput
-            type="number"
-            value={bleedEdgeWidth}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              if (!isNaN(val)) {
-                setBleedEdgeWidth(val);
-                reprocessSelectedImages(val);
-              }
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="bleed-edge"
+              checked={bleedEdge}
+              onChange={(e) => setBleedEdge(e.target.checked)}
+            />
+            <Label htmlFor="bleed-edge">Enable Guide</Label>
+          </div>
+
+          <div>
+            <Label>Guides Color</Label>
+            <input
+              type="color"
+              value={guideColor}
+              onChange={(e) => setGuideColor(e.target.value)}
+              className="w-full h-10 p-0 border rounded"
+            />
+          </div>
+
+          <div>
+            <Label>Guides Width (mm)</Label>
+            <TextInput
+              type="number"
+              value={guideWidth}
+              step="0.1"
+              min="0"
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) setGuideWidth(val);
+              }} />
+          </div>
+          <div>
+            <Label>Zoom</Label>
+            <div className="flex items-center gap-2 jutify-space-between w-full">
+
+              <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>-</Button>
+              <Label className="w-full text-center">{zoom.toFixed(1)}x</Label>
+
+              <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => z + 0.1)}>+</Button>
+            </div>
+          </div>
+
+          <Button className="bg-green-700 w-full" color="success" onClick={handleExport}>
+            Export to PDF
+          </Button>
         </div>
-
-
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="bleed-edge"
-            checked={bleedEdge}
-            onChange={(e) => setBleedEdge(e.target.checked)}
-          />
-          <Label htmlFor="bleed-edge">Enable Guide</Label>
-        </div>
-
-        <div>
-          <Label>Guides Color</Label>
-          <input
-            type="color"
-            value={guideColor}
-            onChange={(e) => setGuideColor(e.target.value)}
-            className="w-full h-10 p-0 border rounded"
-          />
-        </div>
-
-        <div>
-          <Label>Guides Width (mm)</Label>
-          <TextInput
-            type="number"
-            value={guideWidth}
-            step="0.1"
-            min="0"
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              if (!isNaN(val)) setGuideWidth(val);
-            }} />
-        </div>
-
-        <Button className="bg-green-700 w-full" color="success" onClick={handleExport}>
-          Export to PDF
-        </Button>
       </div>
-    </div>
+    </>
   );
-
 }

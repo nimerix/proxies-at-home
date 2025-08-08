@@ -21,7 +21,7 @@ function preferPng(url: string) {
       u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
       return u.toString();
     }
-  } catch {}
+  } catch { }
   return url;
 }
 
