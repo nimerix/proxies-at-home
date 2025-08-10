@@ -42,17 +42,16 @@ export default function SortableCard({
   setIsModalOpen,
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: globalIndex });
+  useSortable({ id: card.uuid });
     const { active, over } = useDndContext();
-const isOver = over?.id === globalIndex && active?.id !== globalIndex;
+    const isOver = over?.id === card.uuid && active?.id !== card.uuid;
 
-
-const style = {
-  transform: CSS.Transform.toString(transform),
-  transition, 
-  width: `${totalCardWidth}mm`,
-  height: `${totalCardHeight}mm`,
-};
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    width: `${totalCardWidth}mm`,
+    height: `${totalCardHeight}mm`,
+  };
 
 
   return (
@@ -104,7 +103,7 @@ const style = {
               top: guideOffset,
               left: guideOffset,
               width: `${guideWidth}px`,
-              height: "4mm",
+              height: "2mm",
               backgroundColor: guideColor,
             }}
           />
@@ -113,7 +112,7 @@ const style = {
               position: "absolute",
               top: guideOffset,
               left: guideOffset,
-              width: "4mm",
+              width: "2mm",
               height: `${guideWidth}px`,
               backgroundColor: guideColor,
             }}
@@ -125,7 +124,7 @@ const style = {
               top: guideOffset,
               right: guideOffset,
               width: `${guideWidth}px`,
-              height: "4mm",
+              height: "2mm",
               backgroundColor: guideColor,
             }}
           />
@@ -134,7 +133,7 @@ const style = {
               position: "absolute",
               top: guideOffset,
               right: guideOffset,
-              width: "4mm",
+              width: "2mm",
               height: `${guideWidth}px`,
               backgroundColor: guideColor,
             }}
@@ -146,7 +145,7 @@ const style = {
               bottom: guideOffset,
               left: guideOffset,
               width: `${guideWidth}px`,
-              height: "4mm",
+              height: "2mm",
               backgroundColor: guideColor,
             }}
           />
@@ -155,7 +154,7 @@ const style = {
               position: "absolute",
               bottom: guideOffset,
               left: guideOffset,
-              width: "4mm",
+              width: "2mm",
               height: `${guideWidth}px`,
               backgroundColor: guideColor,
             }}
@@ -167,7 +166,7 @@ const style = {
               bottom: guideOffset,
               right: guideOffset,
               width: `${guideWidth}px`,
-              height: "4mm",
+              height: "2mm",
               backgroundColor: guideColor,
             }}
           />
@@ -176,7 +175,7 @@ const style = {
               position: "absolute",
               bottom: guideOffset,
               right: guideOffset,
-              width: "4mm",
+              width: "2mm",
               height: `${guideWidth}px`,
               backgroundColor: guideColor,
             }}

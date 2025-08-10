@@ -1,19 +1,16 @@
-// /utils/print.ts
 import jsPDF from "jspdf";
 import type { CardOption } from "../pages/ProxyBuilderPage";
 
-/** 300 DPI conversions */
 const DPI = 1200;
 const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
 const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
 
-/** Match your component helper */
 function getLocalBleedImageUrl(originalUrl: string): string {
   return `http://localhost:3001/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
 }
 
-/** Prefer PNG assets when given a Scryfall JPG */
+// Prefer PNG assets when given a Scryfall JPG 
 function preferPng(url: string) {
   try {
     const u = new URL(url);
@@ -25,7 +22,7 @@ function preferPng(url: string) {
   return url;
 }
 
-/** Load an image */
+// Load an image 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -36,20 +33,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Decide black edge (same heuristic you used) */
-function isLeftEdgeMostlyBlack(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
-  const data = ctx.getImageData(0, 0, 1, h).data;
-  let black = 0;
-  const threshold = 20;
-  for (let y = 0; y < h; y++) {
-    const i = y * 4;
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    if (r < threshold && g < threshold && b < threshold) black++;
-  }
-  return black / h > 0.7;
-}
-
-/** Only uploads get trimmed (parity with your preview) */
+// Only uploads get trimmed (parity with your preview) 
 async function trimExistingBleedIfAny(src: string, bleedTrimPx = 72): Promise<HTMLImageElement> {
   const img = await loadImage(src);
   const w = img.width - bleedTrimPx * 2;
@@ -107,23 +91,64 @@ function blackenAllNearBlackPixels(
   ctx.putImageData(imageData, 0, 0);
 }
 
+// Edge stubs from page edges up to the same cut lines as the corner ticks 
+function drawEdgeStubs(
+  ctx: CanvasRenderingContext2D,
+  pageW: number, pageH: number,
+  startX: number, startY: number,
+  cols: number, rows: number,
+  contentW: number, contentH: number,
+  cardW: number, cardH: number,
+  bleedPx: number,
+  guideWidthPx: number
+) {
+  // All vertical cut x-positions
+  const xCuts: number[] = [];
+  for (let c = 0; c < cols; c++) {
+    const cellLeft = startX + c * cardW;
+    xCuts.push(cellLeft + bleedPx);            
+    xCuts.push(cellLeft + bleedPx + contentW); 
+  }
 
-/**
- * Build one card @300DPI to match preview math exactly:
- * - content = 63.5mm × 88.9mm
- * - bleed = bleedEdgeWidthMm on all sides
- * - uploads get trimmed first (like preview), fetched art does not
- */
+  // All horizontal cut y-positions
+  const yCuts: number[] = [];
+  for (let r = 0; r < rows; r++) {
+    const cellTop = startY + r * cardH;
+    yCuts.push(cellTop + bleedPx);             
+    yCuts.push(cellTop + bleedPx + contentH);  
+  }
+
+  const topStubH = startY + bleedPx;               
+  const botStubH = startY + bleedPx;               
+  const leftStubW = startX + bleedPx;               
+  const rightStubW = startX + bleedPx;                
+
+  ctx.save();
+  ctx.fillStyle = "#000000"; //Black outside guides (fixed for now)
+
+  // Vertical stubs
+  for (const x of xCuts) {
+    ctx.fillRect(x, 0, guideWidthPx, topStubH);
+    ctx.fillRect(x, pageH - botStubH, guideWidthPx, botStubH);
+  }
+
+  // Horizontal stubs
+  for (const y of yCuts) {
+    ctx.fillRect(0, y, leftStubW, guideWidthPx);
+    ctx.fillRect(pageW - rightStubW, y, rightStubW, guideWidthPx);
+  }
+
+  ctx.restore();
+}
+
 async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: boolean): Promise<HTMLCanvasElement> {
-  const contentW = MM_TO_PX(63.5); // 2.5in @ 300 DPI = 750
-  const contentH = MM_TO_PX(88.9); // 3.5in @ 300 DPI = 1050
+  const contentW = MM_TO_PX(63.5); 
+  const contentH = MM_TO_PX(88.9);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
-  // Load source (uploads get trimmed, fetched art does not)
   const baseImg = isUserUpload ? await trimExistingBleedIfAny(src) : await loadImage(src);
 
-  // Cover-fit into content area
   const aspect = baseImg.width / baseImg.height;
   const targetAspect = contentW / contentH;
   let drawW = contentW, drawH = contentH, offX = 0, offY = 0;
@@ -145,11 +170,11 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
   bctx.imageSmoothingQuality = "high";
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
-  // === Corner fill logic (preview parity) ===
-  const cornerSize = 120;     // same as preview
-  const sampleInset = 40;    // same as preview
-  const blackThreshold = 30; // (used later for edge test)
-  // Top edge
+  // Corner fill logic (preview parity)
+  const cornerSize = 120;    
+  const sampleInset = 40;   
+  const blackThreshold = 30;
+
   const fillIfLight = (r: number, g: number, b: number, a: number) =>
     a === 0 || (r > 200 && g > 200 && b > 200);
 
@@ -190,14 +215,13 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
     }
   });
   blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold);
-  // === Compose final with bleed ===
+
   const out = document.createElement("canvas");
   out.width = finalW; out.height = finalH;
   const ctx = out.getContext("2d")!;
   ctx.drawImage(base, bleedPx, bleedPx);
 
   if (bleedPx > 0) {
-    // Re-evaluate edge AFTER corner fills (matches your preview order)
     const mostlyBlack = (() => {
       const edge = bctx.getImageData(0, 0, 1, contentH).data;
       let blackCount = 0;
@@ -206,23 +230,22 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
         const r = edge[idx], g = edge[idx + 1], b = edge[idx + 2];
         if (r < blackThreshold && g < blackThreshold && b < blackThreshold) blackCount++;
       }
-      return blackCount / contentH > 0.7; // blackToleranceRatio
+      return blackCount / contentH > 0.7;
     })();
 
     if (mostlyBlack) {
       const slice = Math.min(8, Math.floor(contentW / 100));
-      // sides
+
       ctx.drawImage(base, 0, 0, slice, contentH, 0, bleedPx, bleedPx, contentH);
       ctx.drawImage(base, contentW - slice, 0, slice, contentH, contentW + bleedPx, bleedPx, bleedPx, contentH);
       ctx.drawImage(base, 0, 0, contentW, slice, bleedPx, 0, contentW, bleedPx);
       ctx.drawImage(base, 0, contentH - slice, contentW, slice, bleedPx, contentH + bleedPx, contentW, bleedPx);
-      // corners
+
       ctx.drawImage(base, 0, 0, slice, slice, 0, 0, bleedPx, bleedPx);
       ctx.drawImage(base, contentW - slice, 0, slice, slice, contentW + bleedPx, 0, bleedPx, bleedPx);
       ctx.drawImage(base, 0, contentH - slice, slice, slice, 0, contentH + bleedPx, bleedPx, bleedPx);
       ctx.drawImage(base, contentW - slice, contentH - slice, slice, slice, contentW + bleedPx, contentH + bleedPx, bleedPx, bleedPx);
     } else {
-      // mirrored bleed
       ctx.save(); ctx.scale(-1, 1);
       ctx.drawImage(base, 0, 0, bleedPx, contentH, -bleedPx, bleedPx, bleedPx, contentH); ctx.restore();
       ctx.save(); ctx.scale(-1, 1);
@@ -231,7 +254,7 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
       ctx.drawImage(base, 0, 0, contentW, bleedPx, bleedPx, -bleedPx, contentW, bleedPx); ctx.restore();
       ctx.save(); ctx.scale(1, -1);
       ctx.drawImage(base, 0, contentH - bleedPx, contentW, bleedPx, bleedPx, -(contentH + 2 * bleedPx), contentW, bleedPx); ctx.restore();
-      // corners
+
       ctx.save(); ctx.scale(-1, -1);
       ctx.drawImage(base, 0, 0, bleedPx, bleedPx, -bleedPx, -bleedPx, bleedPx, bleedPx); ctx.restore();
       ctx.save(); ctx.scale(-1, -1);
@@ -250,14 +273,14 @@ function scaleGuideWidthForDPI(screenPx: number, screenPPI = 96, targetDPI = 120
   return Math.round((screenPx / screenPPI) * targetDPI);
 }
 
-/** Draw the same 4mm corner L-guides you render in preview */
+// Draw the same 2mm corner L-guides rendered in preview 
 function drawCornerGuides(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, contentW: number, contentH: number,
   bleedPx: number, guideColor: string, guideWidthPx: number
 ) {
-  const guideLenPx = MM_TO_PX(4); // 4mm like preview
-  const gx = x + bleedPx;         // inset by bleed (guideOffset in preview)
+  const guideLenPx = MM_TO_PX(2);
+  const gx = x + bleedPx;        
   const gy = y + bleedPx;
 
   ctx.save();
@@ -279,19 +302,17 @@ function drawCornerGuides(
   ctx.restore();
 }
 
-/**
- * POST EXPORT — matches preview layout exactly
- */
+// POST EXPORT — matches preview layout exactly 
 export async function exportProxyPagesToPdf(opts: {
   cards: CardOption[];
-  originalSelectedImages: Record<number, string>;
-  bleedEdge: boolean;          // previews toggle says "Enable Guide" but we also use it for bleed here
-  bleedEdgeWidthMm: number;    // mm
-  guideColor: string;          // hex
-  guideWidthPx: number;        // px
-  pageWidthInches: number;     // 8.5
-  pageHeightInches: number;    // 11
-  pdfPageColor?: string;       // default white
+  originalSelectedImages: Record<string, string>;
+  bleedEdge: boolean;       
+  bleedEdgeWidthMm: number;  
+  guideColor: string;         
+  guideWidthPx: number;        
+  pageWidthInches: number;     
+  pageHeightInches: number;   
+  pdfPageColor?: string;      
 }) {
   const {
     cards,
@@ -305,24 +326,18 @@ export async function exportProxyPagesToPdf(opts: {
     pdfPageColor = "#FFFFFF",
   } = opts;
 
-  // Page @300dpi
   const pageW = IN(pageWidthInches);
   const pageH = IN(pageHeightInches);
-
-  // Card/content sizes in px @300dpi (from mm)
   const contentW = MM_TO_PX(63.5);
   const contentH = MM_TO_PX(88.9);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardW = contentW + 2 * bleedPx;
   const cardH = contentH + 2 * bleedPx;
-
-  // 3x3 centered grid (preview parity)
   const cols = 3, rows = 3, perPage = cols * rows;
   const gridW = cols * cardW, gridH = rows * cardH;
   const startX = Math.round((pageW - gridW) / 2);
   const startY = Math.round((pageH - gridH) / 2);
 
-  // Chunk cards by 9
   const pages: CardOption[][] = [];
   for (let i = 0; i < cards.length; i += perPage) pages.push(cards.slice(i, i + perPage));
 
@@ -335,8 +350,6 @@ export async function exportProxyPagesToPdf(opts: {
 
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
     const pageCards = pages[pageIndex];
-
-    // Offscreen page canvas @300dpi
     const canvas = document.createElement("canvas");
     canvas.width = pageW; canvas.height = pageH;
     const ctx = canvas.getContext("2d")!;
@@ -351,31 +364,35 @@ export async function exportProxyPagesToPdf(opts: {
       const x = startX + col * cardW;
       const y = startY + row * cardH;
 
-      // Resolve full‑res source:
-      let src = originalSelectedImages[globalIndex] ?? card.imageUrls?.[0] ?? "";
-      if (!src) continue;
+      // Resolve full resolution image source
+      let src = originalSelectedImages[card.uuid] ?? card.imageUrls?.[0] ?? "";
 
       if (!card.isUserUpload) {
-        // Fetched art — use your local proxy/cached PNG (no trim)
         src = getLocalBleedImageUrl(preferPng(src));
       }
-      // Uploads keep base64 original; will be trimmed inside build
-
       const cardCanvas = await buildCardWithBleed(src, bleedPx, !!card.isUserUpload);
       ctx.drawImage(cardCanvas, x, y);
 
-      // Corner guides exactly like preview (only if enabled)
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
         drawCornerGuides(ctx, x, y, contentW, contentH, bleedPx, guideColor, scaledGuideWidth);
+        drawEdgeStubs(
+          ctx,
+          pageW, pageH,
+          startX, startY,
+          cols, rows,
+          contentW, contentH,
+          cardW, cardH,
+          bleedPx,
+          scaledGuideWidth
+        );
       }
     }
 
-    // Add to PDF at native page size (keeps 300dpi)
     const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
     pdf.addImage(pageImg, "JPEG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
   }
 
-  pdf.save(`proxies_${new Date().toISOString().slice(0, 10)}.pdf`);
+  pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
