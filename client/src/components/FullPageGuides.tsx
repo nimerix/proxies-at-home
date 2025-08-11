@@ -1,17 +1,16 @@
-// components/EdgeCutLines.tsx
 import React from "react";
 
 type Props = {
-  pageWidthIn: number;         // 8.5
-  pageHeightIn: number;        // 11
-  cols?: number;               // 3
-  rows?: number;               // 3
-  totalCardWidthMm: number;    // base + 2*bleed
-  totalCardHeightMm: number;   // base + 2*bleed
-  baseCardWidthMm: number;     // 63.5
-  baseCardHeightMm: number;    // 88.9
-  bleedEdgeWidthMm: number;    // same as your guideOffset in mm
-  guideWidthPx: number;        // match your corner tick thickness
+  pageWidthIn: number;         
+  pageHeightIn: number;      
+  cols?: number;             
+  rows?: number;              
+  totalCardWidthMm: number;    
+  totalCardHeightMm: number;  
+  baseCardWidthMm: number;     
+  baseCardHeightMm: number;    
+  bleedEdgeWidthMm: number;    
+  guideWidthPx: number;       
 };
 
 const EdgeCutLines: React.FC<Props> = ({
@@ -32,17 +31,15 @@ const EdgeCutLines: React.FC<Props> = ({
   const gridWidthMm  = cols * totalCardWidthMm;
   const gridHeightMm = rows * totalCardHeightMm;
 
-  // center the grid
   const startXmm = (pageWidthMm - gridWidthMm) / 2;
   const startYmm = (pageHeightMm - gridHeightMm) / 2;
 
-  // where your corner ticks sit inside each cell:
-  const cutInX  = bleedEdgeWidthMm;                    // from cell left
-  const cutOutX = bleedEdgeWidthMm + baseCardWidthMm;  // from cell left
-  const cutInY  = bleedEdgeWidthMm;                    // from cell top
-  const cutOutY = bleedEdgeWidthMm + baseCardHeightMm; // from cell top
+  const cutInX  = bleedEdgeWidthMm;                    
+  const cutOutX = bleedEdgeWidthMm + baseCardWidthMm;  
+  const cutInY  = bleedEdgeWidthMm;                   
+  const cutOutY = bleedEdgeWidthMm + baseCardHeightMm; 
 
-  // collect all vertical/horizontal cut positions
+  // Collect all vertical/horizontal cut positions
   const xCuts = new Set<number>();
   for (let c = 0; c < cols; c++) {
     const cellLeft = startXmm + c * totalCardWidthMm;
@@ -61,7 +58,7 @@ const EdgeCutLines: React.FC<Props> = ({
   // For each vertical cut, draw two stubs:
   // top: page top -> top corner tick
   // bottom: page bottom -> bottom corner tick
-  const stubH = startYmm + cutInY; // distance from page edge to the tick
+  const stubH = startYmm + cutInY;
   [...xCuts].forEach((x, i) => {
     els.push(
       <div
@@ -91,9 +88,7 @@ const EdgeCutLines: React.FC<Props> = ({
     );
   });
 
-  // For each horizontal cut, draw two stubs:
-  // left: page left -> left corner tick
-  // right: page right -> right corner tick
+  // Same as above for horizontal cuts
   const stubW = startXmm + cutInX;
   [...yCuts].forEach((y, i) => {
     els.push(

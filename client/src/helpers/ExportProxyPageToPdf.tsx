@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import type { CardOption } from "../pages/ProxyBuilderPage";
 
-const DPI = 1200;
+const DPI = 600;
 const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
 const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
@@ -56,10 +56,10 @@ function blackenAllNearBlackPixels(
   height: number,
   threshold: number,
   borderThickness = {
-    top: 384,
-    bottom: 1600,
-    left: 192,
-    right: 192,
+    top: 192,
+    bottom: 800,
+    left: 96,
+    right: 96,
   }
 ) {
   const imageData = ctx.getImageData(0, 0, width, height);
@@ -171,8 +171,8 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
   // Corner fill logic (preview parity)
-  const cornerSize = 120;    
-  const sampleInset = 40;   
+  const cornerSize = 60;    
+  const sampleInset = 20;   
   const blackThreshold = 30;
 
   const fillIfLight = (r: number, g: number, b: number, a: number) =>
@@ -389,9 +389,9 @@ export async function exportProxyPagesToPdf(opts: {
       }
     }
 
-    const pageImg = canvas.toDataURL("image/jpeg", 0.95);
+    const pageImg = canvas.toDataURL("image/png");
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "JPEG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
+    pdf.addImage(pageImg, "PNG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);

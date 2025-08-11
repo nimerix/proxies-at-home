@@ -9,7 +9,7 @@ import {
   Textarea,
   TextInput
 } from "flowbite-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { exportProxyPagesToPdf } from "../helpers/ExportProxyPageToPdf";
 import fullLogo from '../assets/fullLogo.png';
 import {
@@ -19,19 +19,13 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type {
-  DragEndEvent
-} from '@dnd-kit/core';
 import {
   SortableContext,
   arrayMove,
-  rectSortingStrategy,
-  verticalListSortingStrategy,
+  rectSortingStrategy
 } from '@dnd-kit/sortable';
 import SortableCard from "../components/SortableCard";
 import LoadingOverlay from "../components/LoadingOverlay";
-import FullPageGuides from "../components/FullPageGuides";
-import FullPageCutLines from "../components/FullPageGuides";
 import EdgeCutLines from "../components/FullPageGuides";
 
 
@@ -54,7 +48,7 @@ export default function ProxyBuilderPage() {
   const [columns, setColumns] = useState(3);
   const [bleedEdge, setBleedEdge] = useState(true);
   const [bleedEdgeWidth, setBleedEdgeWidth] = useState(1);
-  const [guideColor, setGuideColor] = useState("#FFFFFF");
+  const [guideColor, setGuideColor] = useState("#39FF14");
   const [guideWidth, setGuideWidth] = useState(.5);
   const unit = "mm";
   const [pageWidth, setPageWidth] = useState(8.5);
@@ -667,8 +661,7 @@ export default function ProxyBuilderPage() {
                       setSearchQuery("");
                     }
                   }
-                }}
-              />
+                }} />
             </div>
             {modalCard && (
               <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
@@ -704,20 +697,16 @@ export default function ProxyBuilderPage() {
         </Modal>
 
         <div className="w-1/6 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
-          <div className="bg-white rounded-xl ">
-            <img
-              src={fullLogo}
-              alt="Proxxied Logo"
-            />
-          </div>
+          <img
+            src={fullLogo}
+            alt="Proxxied Logo" />
 
           <div className="space-y-2">
-            <Label className="block text-gray-700 dark:text-gray-300">Upload Custom Images</Label>
+            <Label className="block text-gray-700 dark:text-gray-300">Upload MPC Images</Label>
 
             <label
               htmlFor="custom-file-upload"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
+              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500" >
               Choose Files
             </label>
 
@@ -737,8 +726,7 @@ export default function ProxyBuilderPage() {
             placeholder={`1x Sol Ring
 2x Counterspell`}
             value={deckText}
-            onChange={(e) => setDeckText(e.target.value)}
-          />
+            onChange={(e) => setDeckText(e.target.value)} />
           <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
             Fetch Cards
           </Button>
@@ -747,7 +735,7 @@ export default function ProxyBuilderPage() {
           </Button>
         </div>
 
-        <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center  dark:bg-gray-800 ">
+        <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center dark:bg-gray-800 ">
           {cards.length === 0 ? (
             <div className="flex flex-col items-center">
               <div className="flex flex-row items-center">
@@ -774,15 +762,13 @@ export default function ProxyBuilderPage() {
                   left: contextMenu.x,
                   padding: "0.25rem",
                 }}
-                onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })}
-              >
+                onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })} >
                 <Button
                   className="bg-gray-400 hover:bg-gray-500 w-full"
                   onClick={() => {
                     duplicateCard(contextMenu.cardIndex!);
                     setContextMenu({ ...contextMenu, visible: false });
-                  }}
-                >
+                  }} >
                   Duplicate
                 </Button>
                 <Button
@@ -815,13 +801,12 @@ export default function ProxyBuilderPage() {
                     reorderImageMap(cards, oldIndex, newIndex, originalSelectedImages)
                   );
                 }
-              }}
-            >
+              }} >
               <SortableContext items={cards.map((card) => card.uuid)} strategy={rectSortingStrategy}>
                 {chunkCards(cards, 9).map((page, pageIndex) => (
                   <div
                     key={pageIndex}
-                    className="proxy-page relative bg-white"
+                    className="proxy-page relative bg-white dark:bg-gray-700"
                     style={{
                       zoom: zoom,
                       width: '8.5in',
@@ -888,10 +873,9 @@ export default function ProxyBuilderPage() {
                 ))}
               </SortableContext>
             </DndContext>
-
           </div>
-
         </div>
+
         <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden dark:bg-gray-700 ">
           <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
           {/* TODO: Add more page configuration */}
@@ -941,8 +925,7 @@ export default function ProxyBuilderPage() {
             <Checkbox
               id="bleed-edge"
               checked={bleedEdge}
-              onChange={(e) => setBleedEdge(e.target.checked)}
-            />
+              onChange={(e) => setBleedEdge(e.target.checked)} />
             <Label htmlFor="bleed-edge">Enable Guide</Label>
           </div>
 
@@ -957,7 +940,7 @@ export default function ProxyBuilderPage() {
           </div>
 
           <div>
-            <Label>Guides Width (mm)</Label>
+            <Label>Guides Width (px)</Label>
             <TextInput
               type="number"
               value={guideWidth}
@@ -971,10 +954,8 @@ export default function ProxyBuilderPage() {
           <div>
             <Label>Zoom</Label>
             <div className="flex items-center gap-2 jutify-space-between w-full">
-
               <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>-</Button>
               <Label className="w-full text-center">{zoom.toFixed(1)}x</Label>
-
               <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => z + 0.1)}>+</Button>
             </div>
           </div>
