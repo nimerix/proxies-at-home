@@ -3,7 +3,6 @@ const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const multer = require("multer");
-const upload = multer({ dest: path.join(__dirname, "../uploaded-images") });
 const { getScryfallPngImagesForCard } = require("../utils/getCardImagesPaged");
 
 const imageRouter = express.Router();
@@ -12,6 +11,12 @@ const cacheDir = path.join(__dirname, "..", "cached-images");
 if (!fs.existsSync(cacheDir)) {
   fs.mkdirSync(cacheDir);
 }
+
+const uploadDir = path.join(__dirname, "..", "uploaded-images");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir });
 
 imageRouter.post("/", async (req, res) => {
   const cardNames = req.body.cardNames;
