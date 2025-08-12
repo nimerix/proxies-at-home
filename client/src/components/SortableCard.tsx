@@ -1,7 +1,6 @@
 import { CSS } from "@dnd-kit/utilities";
 import { useSortable } from "@dnd-kit/sortable";
 import type { CardOption } from "../pages/ProxyBuilderPage";
-import { useDndContext } from "@dnd-kit/core";
 
 type SortableCardProps = {
   card: CardOption;
@@ -43,9 +42,6 @@ export default function SortableCard({
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
   useSortable({ id: card.uuid });
-    const { active, over } = useDndContext();
-    const isOver = over?.id === card.uuid && active?.id !== card.uuid;
-
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -94,7 +90,6 @@ export default function SortableCard({
         ⠿
       </div>
 
-      {/* Guide Overlays */}
       {bleedEdge && (
         <>
           <div

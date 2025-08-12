@@ -47,14 +47,16 @@ export default function ProxyBuilderPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalCard, setModalCard] = useState<CardOption | null>(null);
   const [modalIndex, setModalIndex] = useState<number | null>(null);
-  const [columns, setColumns] = useState(3);
+  // const [columns, setColumns] = useState(3);
   const [bleedEdge, setBleedEdge] = useState(true);
   const [bleedEdgeWidth, setBleedEdgeWidth] = useState(1);
   const [guideColor, setGuideColor] = useState("#39FF14");
   const [guideWidth, setGuideWidth] = useState(.5);
   const unit = "mm";
-  const [pageWidth, setPageWidth] = useState(8.5);
-  const [pageHeight, setPageHeight] = useState(11);
+  // const [pageWidth, setPageWidth] = useState(8.5);
+  // const [pageHeight, setPageHeight] = useState(11);
+  const pageWidth = 8.5
+  const pageHeight = 11;
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
   const pageRef = useRef<HTMLDivElement>(null);
@@ -64,7 +66,8 @@ export default function ProxyBuilderPage() {
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
   const gridWidthMm = totalCardWidth * 3;
   const gridHeightMm = totalCardHeight * 3;
-  const [pdfPageColor, setPdfPageColor] = useState("#FFFFFF");
+  // const [pdfPageColor, setPdfPageColor] = useState("#FFFFFF");
+  const pdfPageColor = "#FFFFFF";
   const [isGettingMore, setIsGettingMore] = useState(false);
   const [contextMenu, setContextMenu] = useState({
     visible: false,
@@ -194,7 +197,7 @@ export default function ProxyBuilderPage() {
     const fileArray = Array.from(files);
     const currentIndex = cards.length;
 
-    const newCards: CardOption[] = fileArray.map((file, i) => ({
+    const newCards: CardOption[] = fileArray.map((_, i) => ({
       name: `Custom Art ${currentIndex + i + 1}`,
       imageUrls: [],
       uuid: crypto.randomUUID(),

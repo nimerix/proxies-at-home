@@ -358,7 +358,6 @@ export async function exportProxyPagesToPdf(opts: {
     ctx.fillRect(0, 0, pageW, pageH);
 
     for (let idx = 0; idx < pageCards.length; idx++) {
-      const globalIndex = pageIndex * perPage + idx;
       const card = pageCards[idx];
       const col = idx % cols;
       const row = Math.floor(idx / cols);
