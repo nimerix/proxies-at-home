@@ -28,6 +28,7 @@ import SortableCard from "../components/SortableCard";
 import LoadingOverlay from "../components/LoadingOverlay";
 import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
+import { API_BASE } from "../constants";
 
 
 export interface CardOption {
@@ -245,7 +246,7 @@ export default function ProxyBuilderPage() {
   }
 
   function getLocalBleedImageUrl(originalUrl: string): string {
-    return `http://localhost:3001/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
+    return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
   }
 
   function trimBleedEdge(dataUrl: string): Promise<string> {
@@ -543,10 +544,10 @@ export default function ProxyBuilderPage() {
 
     const uniqueNames = Array.from(new Set(names));
 
-    await axios.delete("http://localhost:3001/api/cards/images");
+    await axios.delete(`${API_BASE}/api/cards/images`);
 
     const response = await axios.post<CardOption[]>(
-      "http://localhost:3001/api/cards/images",
+      `${API_BASE}/api/cards/images`,
       { cardNames: uniqueNames, cardArt: "art" }
     );
 
@@ -597,7 +598,7 @@ export default function ProxyBuilderPage() {
   const handleClear = async () => {
     setLoadingTask("Clearing Images");
     setIsLoading(true);
-    await axios.delete("http://localhost:3001/api/cards/images");
+    await axios.delete(`${API_BASE}/api/cards/images`);
     setCards([]);
     setSelectedImages({});
     setOriginalSelectedImages({});
@@ -610,7 +611,7 @@ export default function ProxyBuilderPage() {
     setIsGettingMore(true);
     try {
       const res = await axios.post<CardOption[]>(
-        "http://localhost:3001/api/cards/images",
+        `${API_BASE}/api/cards/images`,
         { cardNames: [modalCard.name], cardArt: "prints" }
       );
 
@@ -697,7 +698,7 @@ export default function ProxyBuilderPage() {
                   if (!name || modalIndex === null) return;
 
                   const res = await axios.post<CardOption[]>(
-                    "http://localhost:3001/api/cards/images",
+                    `${API_BASE}/api/cards/images`,
                     { cardNames: [name] } // unique:art default happens server-side
                   );
 
