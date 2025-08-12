@@ -5,5 +5,8 @@ export const API_BASE =
   (import.meta.env.DEV ? "http://localhost:3001" : "");
 
 // Helper to safely prefix with API_BASE (or keep relative)
-export const apiUrl = (path: string) =>
-  API_BASE ? `${API_BASE}${path}` : path;
+export const apiUrl = (path: string) => {
+  const base = API_BASE?.replace(/\/+$/, "") || "";
+  const cleanPath = path.replace(/^\/+/, "");
+  return base ? `${base}/${cleanPath}` : `/${cleanPath}`;
+};
