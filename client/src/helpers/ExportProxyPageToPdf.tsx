@@ -8,8 +8,11 @@ const MM_TO_IN = (mm: number) => mm / 25.4;
 const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
 
 function getLocalBleedImageUrl(originalUrl: string): string {
-  return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
+  const base = (API_BASE || "").replace(/\/$/, ""); 
+  const path = "/api/cards/images/proxy";          
+  return `${base}${path}?url=${encodeURIComponent(originalUrl)}`;
 }
+
 
 // Prefer PNG assets when given a Scryfall JPG 
 function preferPng(url: string) {
