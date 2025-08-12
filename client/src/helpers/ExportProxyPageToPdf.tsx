@@ -389,9 +389,9 @@ export async function exportProxyPagesToPdf(opts: {
       }
     }
 
-    const pageImg = canvas.toDataURL("image/png");
+    const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "PNG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
+    pdf.addImage(pageImg, "JPEG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);

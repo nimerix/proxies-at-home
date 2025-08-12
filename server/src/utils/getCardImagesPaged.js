@@ -1,8 +1,8 @@
 const axios = require("axios");
 const SCRYFALL_API = "https://api.scryfall.com/cards/search";
 
-async function getScryfallPngImagesForCard(cardName) {
-  const query = `!"${cardName}" include:extras unique:art`;
+async function getScryfallPngImagesForCard(cardName, unique = "art") {
+  const query = `!"${cardName}" include:extras unique:${unique}`;
   const encodedUrl = `${SCRYFALL_API}?q=${encodeURIComponent(query)}`;
   const allPngUrls = [];
   let nextPageUrl = encodedUrl;
@@ -33,4 +33,8 @@ async function getScryfallPngImagesForCard(cardName) {
   return allPngUrls;
 }
 
-module.exports = { getScryfallPngImagesForCard };
+module.exports = {
+  getScryfallPngImagesForCard,
+  getScryfallPngImagesForCardPrints: (name) =>
+    getScryfallPngImagesForCard(name, "prints"),
+};

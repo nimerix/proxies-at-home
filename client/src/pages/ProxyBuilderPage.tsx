@@ -27,6 +27,7 @@ import {
 import SortableCard from "../components/SortableCard";
 import LoadingOverlay from "../components/LoadingOverlay";
 import EdgeCutLines from "../components/FullPageGuides";
+import cardBack from "../assets/cardBack.png";
 
 
 export interface CardOption {
@@ -63,6 +64,7 @@ export default function ProxyBuilderPage() {
   const gridWidthMm = totalCardWidth * 3;
   const gridHeightMm = totalCardHeight * 3;
   const [pdfPageColor, setPdfPageColor] = useState("#FFFFFF");
+  const [isGettingMore, setIsGettingMore] = useState(false);
   const [contextMenu, setContextMenu] = useState({
     visible: false,
     x: 0,
@@ -545,7 +547,7 @@ export default function ProxyBuilderPage() {
 
     const response = await axios.post<CardOption[]>(
       "http://localhost:3001/api/cards/images",
-      { cardNames: uniqueNames }
+      { cardNames: uniqueNames, cardArt: "art" }
     );
 
     const nameToCard: Record<string, CardOption> = {};
@@ -603,6 +605,76 @@ export default function ProxyBuilderPage() {
     setLoadingTask(null);
   };
 
+  async function getMoreCards() {
+    if (!modalCard) return;
+    setIsGettingMore(true);
+    try {
+      const res = await axios.post<CardOption[]>(
+        "http://localhost:3001/api/cards/images",
+        { cardNames: [modalCard.name], cardArt: "prints" }
+      );
+
+      const urls = res.data?.[0]?.imageUrls ?? [];
+      setModalCard(prev => (prev ? { ...prev, imageUrls: urls } : prev));
+    } finally {
+      setIsGettingMore(false);
+    }
+  }
+
+  function pngToNormal(pngUrl: string) {
+    try {
+      const u = new URL(pngUrl);
+      u.pathname = u.pathname.replace("/png/", "/normal/").replace(/\.png$/i, ".jpg");
+      return u.toString();
+    } catch {
+      return pngUrl; // fallback if anything looks odd
+    }
+  }
+
+  async function urlToDataUrl(url: string): Promise<string> {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const addCardBackPage = async () => {
+    setLoadingTask("Uploading Images");
+    setIsLoading(true);
+    try {
+      const base64 = await urlToDataUrl(cardBack);
+      const trimmed = await trimBleedEdge(base64);
+      const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth);
+
+      const newCards: CardOption[] = Array.from({ length: 9 }).map(() => ({
+        uuid: crypto.randomUUID(),
+        name: "Default Card Back",
+        imageUrls: [],
+        isUserUpload: true,
+      }));
+
+      setCards((prev) => [...prev, ...newCards]);
+
+      setOriginalSelectedImages((prev) => {
+        const next = { ...prev };
+        for (const c of newCards) next[c.uuid] = base64;
+        return next;
+      });
+      setSelectedImages((prev) => {
+        const next = { ...prev };
+        for (const c of newCards) next[c.uuid] = withBleed;
+        return next;
+      });
+    } finally {
+      setIsLoading(false);
+      setLoadingTask(null);
+    }
+  };
+
+
   return (
     <>
       {isLoading && loadingTask && <LoadingOverlay task={loadingTask} />}
@@ -617,81 +689,94 @@ export default function ProxyBuilderPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={async (e) => {
-                  if (e.key === "Enter" && searchQuery.trim() && modalIndex !== null) {
-                    const res = await axios.post<CardOption[]>(
-                      "http://localhost:3001/api/cards/images",
-                      { cardNames: [searchQuery.trim()] }
-                    );
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  e.stopPropagation();
 
-                    if (res.data.length > 0) {
-                      const newCard = res.data[0];
+                  const name = searchQuery.trim();
+                  if (!name || modalIndex === null) return;
 
-                      const newUuid = crypto.randomUUID();
-                      const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
-                      const processed = await addBleedEdge(proxiedUrl);
+                  const res = await axios.post<CardOption[]>(
+                    "http://localhost:3001/api/cards/images",
+                    { cardNames: [name] } // unique:art default happens server-side
+                  );
 
-                      setCards((prev) => {
-                        const updated = [...prev];
-                        updated[modalIndex] = {
-                          uuid: newUuid,
-                          name: newCard.name,
-                          imageUrls: newCard.imageUrls,
-                          isUserUpload: false,
-                        };
-                        return updated;
-                      });
+                  if (!res.data.length) return;
 
-                      setModalCard({
-                        uuid: newUuid,
-                        name: newCard.name,
-                        imageUrls: newCard.imageUrls,
-                        isUserUpload: false,
-                      });
+                  const newCard = res.data[0]; // shape: { name, imageUrls }
+                  if (!newCard.imageUrls?.length) return;
 
-                      setSelectedImages((prev) => ({
-                        ...prev,
-                        [newUuid]: processed,
-                      }));
+                  const newUuid = crypto.randomUUID();
+                  const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
+                  const processed = await addBleedEdge(proxiedUrl);
 
-                      setOriginalSelectedImages((prev) => ({
-                        ...prev,
-                        [newUuid]: newCard.imageUrls[0],
-                      }));
+                  setCards((prev) => {
+                    const updated = [...prev];
+                    updated[modalIndex] = {
+                      uuid: newUuid,
+                      name: newCard.name,
+                      imageUrls: newCard.imageUrls,
+                      isUserUpload: false,
+                    };
+                    return updated;
+                  });
 
-                      setSearchQuery("");
-                    }
-                  }
-                }} />
+                  setModalCard({
+                    uuid: newUuid,
+                    name: newCard.name,
+                    imageUrls: newCard.imageUrls,
+                    isUserUpload: false,
+                  });
+
+                  setSelectedImages((prev) => ({ ...prev, [newUuid]: processed }));
+                  setOriginalSelectedImages((prev) => ({ ...prev, [newUuid]: newCard.imageUrls[0] }));
+
+                  setSearchQuery("");
+                }}
+              />
+
             </div>
             {modalCard && (
-              <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
-                {modalCard.imageUrls.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    className={`w-full cursor-pointer border-4 ${selectedImages[modalCard.uuid] === url
-                      ? "border-green-500"
-                      : "border-transparent"
-                      }`}
-                    onClick={async () => {
-                      const proxiedUrl = getLocalBleedImageUrl(url);
-                      const processed = await addBleedEdge(proxiedUrl);
+              <>
+                <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
+                  {modalCard.imageUrls.map((pngUrl, i) => {
+                    const thumbUrl = pngToNormal(pngUrl);
+                    return (
+                      <img
+                        key={i}
+                        src={thumbUrl}
+                        loading="lazy"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = pngUrl; }} // fallback
+                        className={`w-full cursor-pointer border-4 ${selectedImages[modalCard.uuid] === pngUrl ? "border-green-500" : "border-transparent"
+                          }`}
+                        onClick={async () => {
+                          const proxiedUrl = getLocalBleedImageUrl(pngUrl);
+                          const processed = await addBleedEdge(proxiedUrl);
 
-                      setSelectedImages((prev) => ({
-                        ...prev,
-                        [modalCard.uuid]: processed,
-                      }));
+                          setSelectedImages((prev) => ({
+                            ...prev,
+                            [modalCard.uuid]: processed,
+                          }));
 
-                      setOriginalSelectedImages((prev) => ({
-                        ...prev,
-                        [modalCard.uuid]: url,
-                      }));
+                          setOriginalSelectedImages((prev) => ({
+                            ...prev,
+                            [modalCard.uuid]: pngUrl,
+                          }));
 
-                      setIsModalOpen(false);
-                    }}
-                  />
-                ))}
-              </div>
+                          setIsModalOpen(false);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <Button
+                  className="bg-blue-800 w-full"
+                  onClick={getMoreCards}
+                  disabled={isGettingMore}
+                >
+                  {isGettingMore ? "Loading prints..." : "Get All Prints"}
+                </Button>
+              </>
             )}
           </ModalBody>
         </Modal>
@@ -702,7 +787,7 @@ export default function ProxyBuilderPage() {
             alt="Proxxied Logo" />
 
           <div className="space-y-2">
-            <Label className="block text-gray-700 dark:text-gray-300">Upload MPC Images</Label>
+            <Label className="block text-gray-700 dark:text-gray-300">Upload Images (MPC Autofill)</Label>
 
             <label
               htmlFor="custom-file-upload"
@@ -732,6 +817,9 @@ export default function ProxyBuilderPage() {
           </Button>
           <Button className="bg-red-700 hover:bg-red-700 w-full" onClick={handleClear}>
             Clear Cards
+          </Button>
+          <Button className="bg-purple-700 w-full mt-[4rem]" onClick={addCardBackPage}>
+            Add Card Backs
           </Button>
         </div>
 
@@ -833,13 +921,50 @@ export default function ProxyBuilderPage() {
                     >
                       {page.map((card, index) => {
                         const globalIndex = pageIndex * 9 + index;
+                        const img = selectedImages[card.uuid];
+                        const noImages =
+                          !img &&
+                          !(originalSelectedImages[card.uuid]) &&
+                          (!(card.imageUrls && card.imageUrls.length));
+
+                        if (noImages) {
+                          return (
+                            <div
+                              key={globalIndex}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setContextMenu({
+                                  visible: true,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  cardIndex: globalIndex,
+                                });
+                              }}
+                              onClick={() => {
+                                setModalCard(card);
+                                setModalIndex(globalIndex);
+                                setIsModalOpen(true);
+                              }}
+                              className="flex items-center justify-center border-2 border-dashed border-red-500 bg-gray-50 text-center p-2 select-none"
+                              style={{
+                                boxSizing: "border-box",
+                              }}
+                              title={`"${card.name}" not found`}
+                            >
+                              <div>
+                                <div className="font-semibold text-red-700">"{card.name}"</div>
+                                <div className="text-xs text-gray-600">not found</div>
+                              </div>
+                            </div>
+                          );
+                        }
                         return (
                           <SortableCard
                             key={globalIndex}
                             card={card}
                             index={index}
                             globalIndex={globalIndex}
-                            imageSrc={selectedImages[card.uuid]}
+                            imageSrc={img}
                             totalCardWidth={totalCardWidth}
                             totalCardHeight={totalCardHeight}
                             bleedEdge={bleedEdge}
@@ -853,6 +978,7 @@ export default function ProxyBuilderPage() {
                           />
                         );
                       })}
+
                     </div>
                     {bleedEdge && (
                       <EdgeCutLines

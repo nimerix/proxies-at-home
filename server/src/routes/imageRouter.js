@@ -15,13 +15,14 @@ if (!fs.existsSync(cacheDir)) {
 
 imageRouter.post("/", async (req, res) => {
   const cardNames = req.body.cardNames;
+  const cardArt = req.body.cardArt;
   if (!Array.isArray(cardNames)) {
     return res.status(400).json({ error: "cardNames must be an array of strings" });
   }
 
   const results = await Promise.all(
     cardNames.map(async (name) => {
-      const imageUrls = await getScryfallPngImagesForCard(name);
+      const imageUrls = await getScryfallPngImagesForCard(name, cardArt);
       return { name, imageUrls };
     })
   );
