@@ -1,19 +1,30 @@
+# syntax=docker/dockerfile:1
+
+# --- Install deps for the server package
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package*.json ./
+# Only copy the server package manifest to avoid pulling the root one
+COPY server/package*.json ./
 RUN npm ci
 
-FROM deps AS build
+# --- Build TypeScript -> dist
+FROM node:20-alpine AS build
 WORKDIR /app
-COPY . .
+COPY --from=deps /app/node_modules ./node_modules
+# Copy the actual server source (tsconfig.json is inside server/)
+COPY server/ ./
 RUN npm run build
 
+# --- Runtime image
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package*.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/dist ./dist
 
+# Only ship what we need to run
+COPY --from=build /app/dist ./dist
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+
+# Koyeb will set PORT; make sure your code uses process.env.PORT
 EXPOSE 3001
-CMD ["node","dist/index.js"]
+CMD ["node", "dist/index.js"]
