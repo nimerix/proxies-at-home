@@ -1,16 +1,16 @@
 import React from "react";
 
 type Props = {
-  pageWidthIn: number;         
-  pageHeightIn: number;      
-  cols?: number;             
-  rows?: number;              
-  totalCardWidthMm: number;    
-  totalCardHeightMm: number;  
-  baseCardWidthMm: number;     
-  baseCardHeightMm: number;    
-  bleedEdgeWidthMm: number;    
-  guideWidthPx: number;       
+  pageWidthIn: number;
+  pageHeightIn: number;
+  cols?: number;
+  rows?: number;
+  totalCardWidthMm: number;
+  totalCardHeightMm: number;
+  baseCardWidthMm: number;
+  baseCardHeightMm: number;
+  bleedEdgeWidthMm: number;
+  guideWidthPx: number;
 };
 
 const EdgeCutLines: React.FC<Props> = ({
@@ -25,19 +25,19 @@ const EdgeCutLines: React.FC<Props> = ({
   bleedEdgeWidthMm,
   guideWidthPx,
 }) => {
-  const pageWidthMm  = pageWidthIn * 25.4;
+  const pageWidthMm = pageWidthIn * 25.4;
   const pageHeightMm = pageHeightIn * 25.4;
 
-  const gridWidthMm  = cols * totalCardWidthMm;
+  const gridWidthMm = cols * totalCardWidthMm;
   const gridHeightMm = rows * totalCardHeightMm;
 
   const startXmm = (pageWidthMm - gridWidthMm) / 2;
   const startYmm = (pageHeightMm - gridHeightMm) / 2;
 
-  const cutInX  = bleedEdgeWidthMm;                    
-  const cutOutX = bleedEdgeWidthMm + baseCardWidthMm;  
-  const cutInY  = bleedEdgeWidthMm;                   
-  const cutOutY = bleedEdgeWidthMm + baseCardHeightMm; 
+  const cutInX = bleedEdgeWidthMm;
+  const cutOutX = bleedEdgeWidthMm + baseCardWidthMm;
+  const cutInY = bleedEdgeWidthMm;
+  const cutOutY = bleedEdgeWidthMm + baseCardHeightMm;
 
   // Collect all vertical/horizontal cut positions
   const xCuts = new Set<number>();

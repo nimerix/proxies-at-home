@@ -27,7 +27,10 @@ async function getScryfallPngImagesForCard(cardName, unique = "art") {
       nextPageUrl = has_more ? next_page : null;
     }
   } catch (err) {
-    console.warn(`[Scryfall] Failed to fetch PNGs for ${cardName}:`, err.message);
+    console.warn(
+      `[Scryfall] Failed to fetch PNGs for ${cardName}:`,
+      err.message
+    );
   }
 
   return allPngUrls;

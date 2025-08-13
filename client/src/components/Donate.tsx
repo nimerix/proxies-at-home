@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, TextInput } from "flowbite-react";
 
-function VenmoDonate({ username = "Kaiser-Clipston-1" }) {
+export default function Donate({ username = "Kaiser-Clipston-1" }) {
   const PRESETS = [1, 5, 10];
   const [preset, setPreset] = useState<number>(5);
   const [custom, setCustom] = useState<string>("");
@@ -47,11 +47,14 @@ function VenmoDonate({ username = "Kaiser-Clipston-1" }) {
         />
       </div>
 
-      <Button size="sm" onClick={handleDonate} className="bg-blue-700 w-full mt-[1rem]">
-        Venmo ${custom && Number(custom) > 0 ? Math.floor(Number(custom)) : preset}
+      <Button
+        size="sm"
+        onClick={handleDonate}
+        className="bg-blue-700 w-full mt-[1rem]"
+      >
+        Venmo $
+        {custom && Number(custom) > 0 ? Math.floor(Number(custom)) : preset}
       </Button>
     </div>
   );
 }
-
-export default VenmoDonate;

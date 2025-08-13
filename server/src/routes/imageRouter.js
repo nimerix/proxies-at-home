@@ -22,7 +22,9 @@ imageRouter.post("/", async (req, res) => {
   const cardNames = req.body.cardNames;
   const cardArt = req.body.cardArt;
   if (!Array.isArray(cardNames)) {
-    return res.status(400).json({ error: "cardNames must be an array of strings" });
+    return res
+      .status(400)
+      .json({ error: "cardNames must be an array of strings" });
   }
 
   const results = await Promise.all(
@@ -82,10 +84,10 @@ imageRouter.delete("/", (req, res) => {
 
 imageRouter.post("/upload", upload.array("images"), (req, res) => {
   return res.json({
-    uploaded: req.files.map(file => ({
+    uploaded: req.files.map((file) => ({
       name: file.originalname,
-      path: file.filename
-    }))
+      path: file.filename,
+    })),
   });
 });
 

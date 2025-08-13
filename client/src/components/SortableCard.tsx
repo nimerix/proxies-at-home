@@ -41,14 +41,13 @@ export default function SortableCard({
   setIsModalOpen,
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-  useSortable({ id: card.uuid });
+    useSortable({ id: card.uuid });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     width: `${totalCardWidth}mm`,
     height: `${totalCardHeight}mm`,
   };
-
 
   return (
     <div
@@ -58,7 +57,6 @@ export default function SortableCard({
       className="bg-black relative group"
       style={style}
     >
-
       <img
         src={imageSrc}
         alt={card.name}

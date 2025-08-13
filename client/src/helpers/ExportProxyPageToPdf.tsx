@@ -11,19 +11,22 @@ function getLocalBleedImageUrl(originalUrl: string): string {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
 }
 
-// Prefer PNG assets when given a Scryfall JPG 
+// Prefer PNG assets when given a Scryfall JPG
 function preferPng(url: string) {
   try {
     const u = new URL(url);
-    if (u.hostname.endsWith("scryfall.io") && u.pathname.match(/\.(jpg|jpeg)$/i)) {
+    if (
+      u.hostname.endsWith("scryfall.io") &&
+      u.pathname.match(/\.(jpg|jpeg)$/i)
+    ) {
       u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
       return u.toString();
     }
-  } catch { }
+  } catch {}
   return url;
 }
 
-// Load an image 
+// Load an image
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -34,20 +37,24 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// Only uploads get trimmed (parity with your preview) 
-async function trimExistingBleedIfAny(src: string, bleedTrimPx = 72): Promise<HTMLImageElement> {
+// Only uploads get trimmed (parity with your preview)
+async function trimExistingBleedIfAny(
+  src: string,
+  bleedTrimPx = 72
+): Promise<HTMLImageElement> {
   const img = await loadImage(src);
   const w = img.width - bleedTrimPx * 2;
   const h = img.height - bleedTrimPx * 2;
   if (w <= 0 || h <= 0) return img;
 
   const c = document.createElement("canvas");
-  c.width = w; c.height = h;
+  c.width = w;
+  c.height = h;
   const ctx = c.getContext("2d")!;
   ctx.drawImage(img, -bleedTrimPx, -bleedTrimPx);
   const out = new Image();
   out.src = c.toDataURL("image/png");
-  await new Promise(r => (out.onload = r));
+  await new Promise((r) => (out.onload = r));
   return out;
 }
 
@@ -92,14 +99,19 @@ function blackenAllNearBlackPixels(
   ctx.putImageData(imageData, 0, 0);
 }
 
-// Edge stubs from page edges up to the same cut lines as the corner ticks 
+// Edge stubs from page edges up to the same cut lines as the corner ticks
 function drawEdgeStubs(
   ctx: CanvasRenderingContext2D,
-  pageW: number, pageH: number,
-  startX: number, startY: number,
-  cols: number, rows: number,
-  contentW: number, contentH: number,
-  cardW: number, cardH: number,
+  pageW: number,
+  pageH: number,
+  startX: number,
+  startY: number,
+  cols: number,
+  rows: number,
+  contentW: number,
+  contentH: number,
+  cardW: number,
+  cardH: number,
   bleedPx: number,
   guideWidthPx: number
 ) {
@@ -107,22 +119,22 @@ function drawEdgeStubs(
   const xCuts: number[] = [];
   for (let c = 0; c < cols; c++) {
     const cellLeft = startX + c * cardW;
-    xCuts.push(cellLeft + bleedPx);            
-    xCuts.push(cellLeft + bleedPx + contentW); 
+    xCuts.push(cellLeft + bleedPx);
+    xCuts.push(cellLeft + bleedPx + contentW);
   }
 
   // All horizontal cut y-positions
   const yCuts: number[] = [];
   for (let r = 0; r < rows; r++) {
     const cellTop = startY + r * cardH;
-    yCuts.push(cellTop + bleedPx);             
-    yCuts.push(cellTop + bleedPx + contentH);  
+    yCuts.push(cellTop + bleedPx);
+    yCuts.push(cellTop + bleedPx + contentH);
   }
 
-  const topStubH = startY + bleedPx;               
-  const botStubH = startY + bleedPx;               
-  const leftStubW = startX + bleedPx;               
-  const rightStubW = startX + bleedPx;                
+  const topStubH = startY + bleedPx;
+  const botStubH = startY + bleedPx;
+  const leftStubW = startX + bleedPx;
+  const rightStubW = startX + bleedPx;
 
   ctx.save();
   ctx.fillStyle = "#000000"; //Black outside guides (fixed for now)
@@ -142,17 +154,26 @@ function drawEdgeStubs(
   ctx.restore();
 }
 
-async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: boolean): Promise<HTMLCanvasElement> {
-  const contentW = MM_TO_PX(63.5); 
+async function buildCardWithBleed(
+  src: string,
+  bleedPx: number,
+  isUserUpload: boolean
+): Promise<HTMLCanvasElement> {
+  const contentW = MM_TO_PX(63.5);
   const contentH = MM_TO_PX(88.9);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
-  const baseImg = isUserUpload ? await trimExistingBleedIfAny(src) : await loadImage(src);
+  const baseImg = isUserUpload
+    ? await trimExistingBleedIfAny(src)
+    : await loadImage(src);
 
   const aspect = baseImg.width / baseImg.height;
   const targetAspect = contentW / contentH;
-  let drawW = contentW, drawH = contentH, offX = 0, offY = 0;
+  let drawW = contentW,
+    drawH = contentH,
+    offX = 0,
+    offY = 0;
   if (aspect > targetAspect) {
     drawH = contentH;
     drawW = Math.round(baseImg.width * (contentH / baseImg.height));
@@ -165,48 +186,68 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
 
   // Base canvas at content size
   const base = document.createElement("canvas");
-  base.width = contentW; base.height = contentH;
+  base.width = contentW;
+  base.height = contentH;
   const bctx = base.getContext("2d")!;
   bctx.imageSmoothingEnabled = true;
   bctx.imageSmoothingQuality = "high";
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
   // Corner fill logic (preview parity)
-  const cornerSize = 60;    
-  const sampleInset = 20;   
+  const cornerSize = 60;
+  const sampleInset = 20;
   const blackThreshold = 30;
 
   const fillIfLight = (r: number, g: number, b: number, a: number) =>
     a === 0 || (r > 200 && g > 200 && b > 200);
 
-  const averageColor = (sx: number, sy: number, w: number, h: number): string => {
+  const averageColor = (
+    sx: number,
+    sy: number,
+    w: number,
+    h: number
+  ): string => {
     const clampedX = Math.max(0, Math.min(contentW - w, sx));
     const clampedY = Math.max(0, Math.min(contentH - h, sy));
     const data = bctx.getImageData(clampedX, clampedY, w, h).data;
-    let r = 0, g = 0, b = 0, count = 0;
+    let r = 0,
+      g = 0,
+      b = 0,
+      count = 0;
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
       if (a === 0) continue;
-      r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      count++;
     }
     if (count === 0) return "rgb(0,0,0)";
-    r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
     return `rgb(${r}, ${g}, ${b})`;
   };
 
   const corners = [
-    { x: 0, y: 0 },                                              // TL
-    { x: contentW - cornerSize, y: 0 },                          // TR
-    { x: 0, y: contentH - cornerSize },                          // BL
-    { x: contentW - cornerSize, y: contentH - cornerSize },      // BR
+    { x: 0, y: 0 }, // TL
+    { x: contentW - cornerSize, y: 0 }, // TR
+    { x: 0, y: contentH - cornerSize }, // BL
+    { x: contentW - cornerSize, y: contentH - cornerSize }, // BR
   ];
 
   corners.forEach(({ x, y }) => {
     const data = bctx.getImageData(x, y, cornerSize, cornerSize).data;
     let shouldFill = false;
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-      if (fillIfLight(r, g, b, a)) { shouldFill = true; break; }
+      const r = data[i],
+        g = data[i + 1],
+        b = data[i + 2],
+        a = data[i + 3];
+      if (fillIfLight(r, g, b, a)) {
+        shouldFill = true;
+        break;
+      }
     }
     if (shouldFill) {
       const sx = x < contentW / 2 ? sampleInset : contentW - sampleInset - 10;
@@ -218,7 +259,8 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
   blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold);
 
   const out = document.createElement("canvas");
-  out.width = finalW; out.height = finalH;
+  out.width = finalW;
+  out.height = finalH;
   const ctx = out.getContext("2d")!;
   ctx.drawImage(base, bleedPx, bleedPx);
 
@@ -228,8 +270,11 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
       let blackCount = 0;
       for (let i = 0; i < contentH; i++) {
         const idx = i * 4;
-        const r = edge[idx], g = edge[idx + 1], b = edge[idx + 2];
-        if (r < blackThreshold && g < blackThreshold && b < blackThreshold) blackCount++;
+        const r = edge[idx],
+          g = edge[idx + 1],
+          b = edge[idx + 2];
+        if (r < blackThreshold && g < blackThreshold && b < blackThreshold)
+          blackCount++;
       }
       return blackCount / contentH > 0.7;
     })();
@@ -238,50 +283,205 @@ async function buildCardWithBleed(src: string, bleedPx: number, isUserUpload: bo
       const slice = Math.min(8, Math.floor(contentW / 100));
 
       ctx.drawImage(base, 0, 0, slice, contentH, 0, bleedPx, bleedPx, contentH);
-      ctx.drawImage(base, contentW - slice, 0, slice, contentH, contentW + bleedPx, bleedPx, bleedPx, contentH);
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        0,
+        slice,
+        contentH,
+        contentW + bleedPx,
+        bleedPx,
+        bleedPx,
+        contentH
+      );
       ctx.drawImage(base, 0, 0, contentW, slice, bleedPx, 0, contentW, bleedPx);
-      ctx.drawImage(base, 0, contentH - slice, contentW, slice, bleedPx, contentH + bleedPx, contentW, bleedPx);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - slice,
+        contentW,
+        slice,
+        bleedPx,
+        contentH + bleedPx,
+        contentW,
+        bleedPx
+      );
 
       ctx.drawImage(base, 0, 0, slice, slice, 0, 0, bleedPx, bleedPx);
-      ctx.drawImage(base, contentW - slice, 0, slice, slice, contentW + bleedPx, 0, bleedPx, bleedPx);
-      ctx.drawImage(base, 0, contentH - slice, slice, slice, 0, contentH + bleedPx, bleedPx, bleedPx);
-      ctx.drawImage(base, contentW - slice, contentH - slice, slice, slice, contentW + bleedPx, contentH + bleedPx, bleedPx, bleedPx);
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        0,
+        slice,
+        slice,
+        contentW + bleedPx,
+        0,
+        bleedPx,
+        bleedPx
+      );
+      ctx.drawImage(
+        base,
+        0,
+        contentH - slice,
+        slice,
+        slice,
+        0,
+        contentH + bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        contentH - slice,
+        slice,
+        slice,
+        contentW + bleedPx,
+        contentH + bleedPx,
+        bleedPx,
+        bleedPx
+      );
     } else {
-      ctx.save(); ctx.scale(-1, 1);
-      ctx.drawImage(base, 0, 0, bleedPx, contentH, -bleedPx, bleedPx, bleedPx, contentH); ctx.restore();
-      ctx.save(); ctx.scale(-1, 1);
-      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, contentH, -(contentW + 2 * bleedPx), bleedPx, bleedPx, contentH); ctx.restore();
-      ctx.save(); ctx.scale(1, -1);
-      ctx.drawImage(base, 0, 0, contentW, bleedPx, bleedPx, -bleedPx, contentW, bleedPx); ctx.restore();
-      ctx.save(); ctx.scale(1, -1);
-      ctx.drawImage(base, 0, contentH - bleedPx, contentW, bleedPx, bleedPx, -(contentH + 2 * bleedPx), contentW, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        bleedPx,
+        contentH,
+        -bleedPx,
+        bleedPx,
+        bleedPx,
+        contentH
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        0,
+        bleedPx,
+        contentH,
+        -(contentW + 2 * bleedPx),
+        bleedPx,
+        bleedPx,
+        contentH
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        contentW,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        contentW,
+        bleedPx
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - bleedPx,
+        contentW,
+        bleedPx,
+        bleedPx,
+        -(contentH + 2 * bleedPx),
+        contentW,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, 0, 0, bleedPx, bleedPx, -bleedPx, -bleedPx, bleedPx, bleedPx); ctx.restore();
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -bleedPx, bleedPx, bleedPx); ctx.restore();
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, 0, contentH - bleedPx, bleedPx, bleedPx, -bleedPx, -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, contentW - bleedPx, contentH - bleedPx, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        -bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        0,
+        bleedPx,
+        bleedPx,
+        -(contentW + 2 * bleedPx),
+        -bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - bleedPx,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        -(contentH + 2 * bleedPx),
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        contentH - bleedPx,
+        bleedPx,
+        bleedPx,
+        -(contentW + 2 * bleedPx),
+        -(contentH + 2 * bleedPx),
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
     }
   }
 
   return out;
 }
 
-function scaleGuideWidthForDPI(screenPx: number, screenPPI = 96, targetDPI = 1200): number {
+function scaleGuideWidthForDPI(
+  screenPx: number,
+  screenPPI = 96,
+  targetDPI = 1200
+): number {
   return Math.round((screenPx / screenPPI) * targetDPI);
 }
 
-// Draw the same 2mm corner L-guides rendered in preview 
+// Draw the same 2mm corner L-guides rendered in preview
 function drawCornerGuides(
   ctx: CanvasRenderingContext2D,
-  x: number, y: number, contentW: number, contentH: number,
-  bleedPx: number, guideColor: string, guideWidthPx: number
+  x: number,
+  y: number,
+  contentW: number,
+  contentH: number,
+  bleedPx: number,
+  guideColor: string,
+  guideWidthPx: number
 ) {
   const guideLenPx = MM_TO_PX(2);
-  const gx = x + bleedPx;        
+  const gx = x + bleedPx;
   const gy = y + bleedPx;
 
   ctx.save();
@@ -292,28 +492,48 @@ function drawCornerGuides(
   ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
   // TR
   ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
+  ctx.fillRect(
+    gx + contentW - guideLenPx + guideWidthPx,
+    gy,
+    guideLenPx,
+    guideWidthPx
+  );
   // BL
-  ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
+  ctx.fillRect(
+    gx,
+    gy + contentH - guideLenPx + guideWidthPx,
+    guideWidthPx,
+    guideLenPx
+  );
   ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
   // BR
-  ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
+  ctx.fillRect(
+    gx + contentW,
+    gy + contentH - guideLenPx + guideWidthPx,
+    guideWidthPx,
+    guideLenPx
+  );
+  ctx.fillRect(
+    gx + contentW - guideLenPx + guideWidthPx,
+    gy + contentH,
+    guideLenPx,
+    guideWidthPx
+  );
 
   ctx.restore();
 }
 
-// POST EXPORT — matches preview layout exactly 
+// POST EXPORT — matches preview layout exactly
 export async function exportProxyPagesToPdf(opts: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
-  bleedEdge: boolean;       
-  bleedEdgeWidthMm: number;  
-  guideColor: string;         
-  guideWidthPx: number;        
-  pageWidthInches: number;     
-  pageHeightInches: number;   
-  pdfPageColor?: string;      
+  bleedEdge: boolean;
+  bleedEdgeWidthMm: number;
+  guideColor: string;
+  guideWidthPx: number;
+  pageWidthInches: number;
+  pageHeightInches: number;
+  pdfPageColor?: string;
 }) {
   const {
     cards,
@@ -334,13 +554,17 @@ export async function exportProxyPagesToPdf(opts: {
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardW = contentW + 2 * bleedPx;
   const cardH = contentH + 2 * bleedPx;
-  const cols = 3, rows = 3, perPage = cols * rows;
-  const gridW = cols * cardW, gridH = rows * cardH;
+  const cols = 3,
+    rows = 3,
+    perPage = cols * rows;
+  const gridW = cols * cardW,
+    gridH = rows * cardH;
   const startX = Math.round((pageW - gridW) / 2);
   const startY = Math.round((pageH - gridH) / 2);
 
   const pages: CardOption[][] = [];
-  for (let i = 0; i < cards.length; i += perPage) pages.push(cards.slice(i, i + perPage));
+  for (let i = 0; i < cards.length; i += perPage)
+    pages.push(cards.slice(i, i + perPage));
 
   const pdf = new jsPDF({
     orientation: pageW >= pageH ? "landscape" : "portrait",
@@ -352,7 +576,8 @@ export async function exportProxyPagesToPdf(opts: {
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
     const pageCards = pages[pageIndex];
     const canvas = document.createElement("canvas");
-    canvas.width = pageW; canvas.height = pageH;
+    canvas.width = pageW;
+    canvas.height = pageH;
     const ctx = canvas.getContext("2d")!;
     ctx.fillStyle = pdfPageColor;
     ctx.fillRect(0, 0, pageW, pageH);
@@ -370,19 +595,37 @@ export async function exportProxyPagesToPdf(opts: {
       if (!card.isUserUpload) {
         src = getLocalBleedImageUrl(preferPng(src));
       }
-      const cardCanvas = await buildCardWithBleed(src, bleedPx, !!card.isUserUpload);
+      const cardCanvas = await buildCardWithBleed(
+        src,
+        bleedPx,
+        !!card.isUserUpload
+      );
       ctx.drawImage(cardCanvas, x, y);
 
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
-        drawCornerGuides(ctx, x, y, contentW, contentH, bleedPx, guideColor, scaledGuideWidth);
+        drawCornerGuides(
+          ctx,
+          x,
+          y,
+          contentW,
+          contentH,
+          bleedPx,
+          guideColor,
+          scaledGuideWidth
+        );
         drawEdgeStubs(
           ctx,
-          pageW, pageH,
-          startX, startY,
-          cols, rows,
-          contentW, contentH,
-          cardW, cardH,
+          pageW,
+          pageH,
+          startX,
+          startY,
+          cols,
+          rows,
+          contentW,
+          contentH,
+          cardW,
+          cardH,
           bleedPx,
           scaledGuideWidth
         );
@@ -391,7 +634,14 @@ export async function exportProxyPagesToPdf(opts: {
 
     const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "JPEG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
+    pdf.addImage(
+      pageImg,
+      "JPEG",
+      0,
+      0,
+      pageWidthInches * 25.4,
+      pageHeightInches * 25.4
+    );
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
