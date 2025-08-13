@@ -21,13 +21,11 @@ function VenmoDonate({ username = "Kaiser-Clipston-1" }) {
 
   return (
     <div className="mt-4 rounded-xl p-3 bg-white dark:bg-gray-800 w-full">
-      <Label className="text-sm font-semibold dark:text-gray-300">Donate</Label>
-
       <div className="mt-2 flex items-center gap-2 w-full">
         {PRESETS.map((v) => (
           <Button
             key={v}
-            size="sm"
+            size="xs"
             onClick={() => setPreset(v)}
             className={`min-w-12 ${
               preset === v && (!custom || Number(custom) <= 0)
@@ -45,12 +43,12 @@ function VenmoDonate({ username = "Kaiser-Clipston-1" }) {
           placeholder="Custom"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
-          className="w-24"
+          className="w-full"
         />
       </div>
 
-      <Button onClick={handleDonate} className="bg-blue-700 w-full mt-[1rem]">
-        Donate ${custom && Number(custom) > 0 ? Math.floor(Number(custom)) : preset} via Venmo
+      <Button size="sm" onClick={handleDonate} className="bg-blue-700 w-full mt-[1rem]">
+        Venmo ${custom && Number(custom) > 0 ? Math.floor(Number(custom)) : preset}
       </Button>
     </div>
   );
