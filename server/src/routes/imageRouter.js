@@ -4,6 +4,23 @@ const fs = require("fs");
 const axios = require("axios");
 const multer = require("multer");
 const { getScryfallPngImagesForCard } = require("../utils/getCardImagesPaged");
+const crypto = require("crypto");
+
+// Make a stable cache filename from the FULL raw URL (path + query)
+function cachePathFromUrl(originalUrl) {
+  const hash = crypto.createHash("sha1").update(originalUrl).digest("hex");
+
+  // try to preserve the real extension; default to .png
+  let ext = ".png";
+  try {
+    const u = new URL(originalUrl);
+    const m = u.pathname.match(/\.(png|jpg|jpeg|webp)$/i);
+    if (m) ext = m[0].toLowerCase();
+  } catch {
+    // ignore; keep .png
+  }
+  return path.join(cacheDir, `${hash}${ext}`);
+}
 
 const imageRouter = express.Router();
 
@@ -39,26 +56,45 @@ imageRouter.post("/", async (req, res) => {
 
 imageRouter.get("/proxy", async (req, res) => {
   const url = req.query.url;
-
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "Missing or invalid ?url" });
   }
 
+  const originalUrl = (() => {
+    try { return decodeURIComponent(url); } catch { return url; }
+  })();
+
   try {
-    const imageUrl = decodeURIComponent(url);
-    const fileName = path.basename(imageUrl.split("?")[0]);
-    const localPath = path.join(cacheDir, fileName);
+    const localPath = cachePathFromUrl(originalUrl);
 
     if (fs.existsSync(localPath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       return res.sendFile(localPath);
     }
 
-    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
+    const response = await axios.get(originalUrl, { responseType: "arraybuffer" });
     fs.writeFileSync(localPath, response.data);
+
+    const contentType =
+      response.headers["content-type"]?.startsWith?.("image/")
+        ? response.headers["content-type"]
+        : "image/png";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     return res.sendFile(localPath);
   } catch (err) {
-    console.error("Failed to proxy image:", err.message);
-    return res.status(500).json({ error: "Failed to download image" });
+    const status = err.response?.status;
+    console.error("Proxy error:", {
+      message: err.message,
+      status,
+      from: originalUrl,
+    });
+    return res.status(502).json({
+      error: "Failed to download image",
+      status,
+      from: originalUrl
+    });
   }
 });
 
