@@ -29,6 +29,7 @@ import LoadingOverlay from "../components/LoadingOverlay";
 import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
 import { API_BASE } from "../constants";
+import VenmoDonate from "../components/Donate";
 
 
 export interface CardOption {
@@ -785,14 +786,24 @@ export default function ProxyBuilderPage() {
           </ModalBody>
         </Modal>
 
-        <div className="w-1/6 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
+        <div className="w-1/5 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
           <img
             src={fullLogo}
             alt="Proxxied Logo" />
 
           <div className="space-y-2">
-            <Label className="block text-gray-700 dark:text-gray-300">Upload Images (MPC Autofill)</Label>
-
+            <Label className="block text-gray-700 dark:text-gray-300">
+              Upload Images (
+              <a
+                href="https://mpcfill.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                MPC Autofill
+              </a>
+              )
+            </Label>
             <label
               htmlFor="custom-file-upload"
               className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500" >
@@ -808,8 +819,18 @@ export default function ProxyBuilderPage() {
               className="hidden"
             />
           </div>
-          <Label className="block text-gray-700 dark:text-gray-300">Add Cards from Scryfall</Label>
-
+          <Label className="block text-gray-700 dark:text-gray-300">
+            Add Cards (
+            <a
+              href="https://scryfall.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              Scryfall
+            </a>
+            )
+          </Label>
           <Textarea
             className="h-64"
             placeholder={`1x Sol Ring
@@ -822,7 +843,19 @@ export default function ProxyBuilderPage() {
           <Button className="bg-red-700 hover:bg-red-700 w-full" onClick={handleClear}>
             Clear Cards
           </Button>
-          <Button className="bg-purple-700 w-full mt-[4rem]" onClick={addCardBackPage}>
+          <Label className="block text-gray-700 dark:text-gray-300">
+            Tips:
+          </Label>
+          <Label className="block text-gray-700 dark:text-gray-300">
+            To change a card art - click it
+          </Label>
+          <Label className="block text-gray-700 dark:text-gray-300">
+            To move a card - drag from the box at the top right
+          </Label>
+          <Label className="block text-gray-700 dark:text-gray-300">
+            To duplicate or delete a card - right click it
+          </Label>
+          <Button className="bg-purple-700 w-full mt-[2rem]" onClick={addCardBackPage}>
             Add Card Backs
           </Button>
         </div>
@@ -1006,93 +1039,88 @@ export default function ProxyBuilderPage() {
           </div>
         </div>
 
-        <div className="w-1/4 p-4 space-y-4 bg-gray-100 overflow-hidden dark:bg-gray-700 ">
+        <div className="w-1/4 min-w-[18rem] max-w-[26rem] p-4 bg-gray-100 dark:bg-gray-700 h-full flex flex-col overflow-y-auto">
           <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
-          {/* TODO: Add more page configuration */}
-          {/* <div>
-          <Label>Page Width ({unit})</Label>
-          <TextInput
-            type="number"
-            value={pageWidth}
-            onChange={(e) => setPageWidth(parseFloat(e.target.value))}
-          />
-        </div>
 
-        <div>
-          <Label>Page Height ({unit})</Label>
-          <TextInput
-            type="number"
-            value={pageHeight}
-            onChange={(e) => setPageHeight(parseFloat(e.target.value))}
-          />
-        </div> */}
-
-          {/* <div>
-          <Label>Columns</Label>
-          <TextInput
-            type="number"
-            value={columns}
-            onChange={(e) => setColumns(parseInt(e.target.value))}
-          />
-        </div> */}
-          <div>
-            <Label>Bleed Edge ({unit})</Label>
-            <TextInput
-              type="number"
-              value={bleedEdgeWidth}
-              max={2}
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                if (!isNaN(val)) {
-                  setBleedEdgeWidth(val);
-                  reprocessSelectedImages(val);
-                }
-              }}
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="bleed-edge"
-              checked={bleedEdge}
-              onChange={(e) => setBleedEdge(e.target.checked)} />
-            <Label htmlFor="bleed-edge">Enable Guide</Label>
-          </div>
-
-          <div>
-            <Label>Guides Color</Label>
-            <input
-              type="color"
-              value={guideColor}
-              onChange={(e) => setGuideColor(e.target.value)}
-              className="w-full h-10 p-0 border rounded"
-            />
-          </div>
-
-          <div>
-            <Label>Guides Width (px)</Label>
-            <TextInput
-              type="number"
-              value={guideWidth}
-              step="0.1"
-              min="0"
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) setGuideWidth(val);
-              }} />
-          </div>
-          <div>
-            <Label>Zoom</Label>
-            <div className="flex items-center gap-2 jutify-space-between w-full">
-              <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>-</Button>
-              <Label className="w-full text-center">{zoom.toFixed(1)}x</Label>
-              <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0" onClick={() => setZoom((z) => z + 0.1)}>+</Button>
+          <div className="space-y-4">
+            <div>
+              <Label>Bleed Edge ({unit})</Label>
+              <TextInput
+                className="w-full"
+                type="number"
+                value={bleedEdgeWidth}
+                max={2}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  if (!isNaN(val)) {
+                    setBleedEdgeWidth(val);
+                    reprocessSelectedImages(val);
+                  }
+                }}
+              />
             </div>
-          </div>
 
-          <Button className="bg-green-700 w-full" color="success" onClick={handleExport}>
-            Export to PDF
-          </Button>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="bleed-edge"
+                checked={bleedEdge}
+                onChange={(e) => setBleedEdge(e.target.checked)}
+              />
+              <Label htmlFor="bleed-edge">Enable Guide</Label>
+            </div>
+
+            <div>
+              <Label>Guides Color</Label>
+              <input
+                type="color"
+                value={guideColor}
+                onChange={(e) => setGuideColor(e.target.value)}
+                className="w-full h-10 p-0 border rounded"
+              />
+            </div>
+
+            <div>
+              <Label>Guides Width (px)</Label>
+              <TextInput
+                className="w-full"
+                type="number"
+                value={guideWidth}
+                step="0.1"
+                min="0"
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) setGuideWidth(val);
+                }}
+              />
+            </div>
+
+            <div>
+              <Label>Zoom</Label>
+              <div className="flex items-center gap-2 justify-between w-full">
+                <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0"
+                  onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>-</Button>
+                <Label className="w-full text-center">{zoom.toFixed(1)}x</Label>
+                <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0"
+                  onClick={() => setZoom((z) => z + 0.1)}>+</Button>
+              </div>
+            </div>
+
+            <Button className="bg-green-700 w-full" color="success" onClick={handleExport}>
+              Export to PDF
+            </Button>
+          </div>
+          
+          <div className="mt-auto space-y-3 pt-4">
+            <VenmoDonate username="Kaiser-Clipston-1" />
+            <a
+              href="https://github.com/kclipsto/proxies-at-home"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-md underline text-center text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
+            >
+              Code by Kaiser Clipston (Github)
+            </a>
+          </div>
         </div>
       </div>
     </>
