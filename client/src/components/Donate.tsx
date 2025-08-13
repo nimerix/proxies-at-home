@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Label, TextInput } from "flowbite-react";
+import { Button, TextInput } from "flowbite-react";
 
 function VenmoDonate({ username = "Kaiser-Clipston-1" }) {
   const PRESETS = [1, 5, 10];
