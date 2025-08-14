@@ -30,6 +30,7 @@ import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
 import { API_BASE } from "../constants";
 import Donate from "../components/Donate";
+import ExtractCardName from "../helpers/ExtractCardName";
 
 export interface CardOption {
   uuid: string;
@@ -539,10 +540,10 @@ export default function ProxyBuilderPage() {
       const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
       if (match) {
         const count = parseInt(match[1], 10);
-        const cardName = match[2];
+        const cardName = ExtractCardName(match[2]);
         for (let i = 0; i < count; i++) names.push(cardName);
       } else if (trimmed.length > 0) {
-        names.push(trimmed);
+        names.push(ExtractCardName(trimmed));
       }
     });
 
