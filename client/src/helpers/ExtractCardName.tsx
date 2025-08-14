@@ -1,21 +1,22 @@
 export default function ExtractCardName(input: string): string {
-  let s = input.trim();
+    let s = input.trim();
 
-  // 1) Strip leading quantity like "2x " or "3 "
-  s = s.replace(/^\s*\d+\s*x?\s+/i, "");
+    // 1) Strip leading quantity like "2x " or "3 "
+    s = s.replace(/^\s*\d+\s*x?\s+/i, "");
 
-  // 2) Drop trailing bracketed metadata like "[Sorcery]" (only at the end)
-  s = s.replace(/\s*\[[^\]]+\]\s*$/i, "").trim();
+    // 2) Repeatedly strip trailing noise until stable (order‑agnostic)
+    const caretTail = /\s*\^[^^]*\^\s*$/;                // ^...^ at end
+    const bracketTail = /\s*\[[^\]]*]\s*$/;              // [...] at end
+    const setNumTail = /\s*\([a-z0-9]{2,5}\)\s*\d*\s*$/i; // (set) [num] at end
 
-  // 3) Drop a trailing "(setcode)" and optional collector number at the end
-  //    e.g., "(cmm) 321", "(cmm)", "(CMM)   012"
-  s = s.replace(/\s*\([a-z0-9]{2,5}\)\s*\d*\s*$/i, "").trim();
+    let changed = true;
+    while (changed) {
+        const before = s;
+        s = s.replace(caretTail, "").trim();
+        s = s.replace(bracketTail, "").trim();
+        s = s.replace(setNumTail, "").trim();
+        changed = s !== before;
+    }
 
-  // If there are multiple trailing set/number chunks, strip repeatedly
-  // (rare, but harmless)
-  while (/\s*\([a-z0-9]{2,5}\)\s*\d*\s*$/i.test(s)) {
-    s = s.replace(/\s*\([a-z0-9]{2,5}\)\s*\d*\s*$/i, "").trim();
-  }
-
-  return s;
+    return s;
 }

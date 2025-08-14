@@ -30,7 +30,6 @@ import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
 import { API_BASE } from "../constants";
 import Donate from "../components/Donate";
-import ExtractCardName from "../helpers/ExtractCardName";
 
 export interface CardOption {
   uuid: string;
@@ -329,41 +328,6 @@ export default function ProxyBuilderPage() {
     ctx.putImageData(imageData, 0, 0);
   }
 
-function drawHoloOvalWithBottomColor(
-  ctx: CanvasRenderingContext2D,
-  cardW: number,   // 750
-  cardH: number,   // 1050
-  bleed: number
-) {
-  // --- sample a strip of pixels along the bottom edge ---
-  const sampleHeight = 5; // pixels high
-  const y = bleed + cardH - sampleHeight;
-  const imageData = ctx.getImageData(bleed, y, cardW, sampleHeight).data;
-
-  let r = 0, g = 0, b = 0, count = 0;
-  for (let i = 0; i < imageData.length; i += 4) {
-    r += imageData[i];
-    g += imageData[i + 1];
-    b += imageData[i + 2];
-    count++;
-  }
-  r = Math.round(r / count);
-  g = Math.round(g / count);
-  b = Math.round(b / count);
-  const fillColor = `rgb(${r}, ${g}, ${b})`;
-
-  // --- oval position & size ---
-  const cx = bleed + cardW * 0.50;
-  const cy = bleed + cardH * 0.93;
-  const rx = cardW * 0.05;
-  const ry = cardH * 0.018;
-
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle = fillColor;
-  ctx.fill();
-}
-
   const addBleedEdge = (src: string, bleedOverride?: number): Promise<string> => {
     return new Promise((resolve) => {
       const targetCardWidth = 750;
@@ -489,8 +453,6 @@ function drawHoloOvalWithBottomColor(
         const scaledImg = new Image();
         scaledImg.onload = () => {
           ctx.drawImage(scaledImg, bleed, bleed);
-            drawHoloOvalWithBottomColor(ctx, targetCardWidth, targetCardHeight, bleed);
-
 
           if (isMostlyBlack) {
             const slice = 8;
@@ -573,16 +535,16 @@ function drawHoloOvalWithBottomColor(
     const names: string[] = [];
 
     deckText.split("\n").forEach((line) => {
-  const trimmed = line.trim();
-  const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
-  if (match) {
-    const count = parseInt(match[1], 10);
-    const cardName = ExtractCardName(match[2]); 
-    for (let i = 0; i < count; i++) names.push(cardName);
-  } else if (trimmed.length > 0) {
-    names.push(ExtractCardName(trimmed)); 
-  }
-});
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
+      if (match) {
+        const count = parseInt(match[1], 10);
+        const cardName = match[2];
+        for (let i = 0; i < count; i++) names.push(cardName);
+      } else if (trimmed.length > 0) {
+        names.push(trimmed);
+      }
+    });
 
     const uniqueNames = Array.from(new Set(names));
 
@@ -720,7 +682,7 @@ function drawHoloOvalWithBottomColor(
 
   return (
     <>
-      <h1 className="sr-only">Proxxied — MTG Proxy Build and Print</h1>
+      <h1 className="sr-only">Proxxied — MTG Proxy Builder and Print</h1>
       {isLoading && loadingTask && <LoadingOverlay task={loadingTask} />}
       <div className="flex flex-row h-screen justify-between overflow-hidden">
         <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} size="4xl">
