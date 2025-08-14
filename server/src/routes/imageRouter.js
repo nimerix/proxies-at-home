@@ -3,7 +3,9 @@ const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const multer = require("multer");
-const { getScryfallPngImagesForCard } = require("../utils/getCardImagesPaged");
+const { getScryfallPngImagesForCard,
+  getImagesForCardInfo,
+  getScryfallPngImagesForCardPrints } = require("../utils/getCardImagesPaged");
 const crypto = require("crypto");
 
 // Make a stable cache filename from the FULL raw URL (path + query)
@@ -36,23 +38,31 @@ if (!fs.existsSync(uploadDir)) {
 const upload = multer({ dest: uploadDir });
 
 imageRouter.post("/", async (req, res) => {
-  const cardNames = req.body.cardNames;
-  const cardArt = req.body.cardArt;
-  if (!Array.isArray(cardNames)) {
-    return res
-      .status(400)
-      .json({ error: "cardNames must be an array of strings" });
+  const cardQueries = Array.isArray(req.body.cardQueries) ? req.body.cardQueries : null;
+  const cardNames = Array.isArray(req.body.cardNames) ? req.body.cardNames : null;
+  const unique = (req.body.cardArt || "art");
+  if (!cardQueries && !cardNames) {
+    return res.status(400).json({ error: "Provide cardQueries (preferred) or cardNames." });
   }
 
-  const results = await Promise.all(
-    cardNames.map(async (name) => {
-      const imageUrls = await getScryfallPngImagesForCard(name, cardArt);
-      return { name, imageUrls };
-    })
-  );
+  const infos = cardQueries
+    ? cardQueries.map((q) => ({ name: q.name, set: q.set, number: q.number }))
+    : cardNames.map((name) => ({ name }));
 
-  return res.json(results);
+  try {
+    const results = await Promise.all(
+      infos.map(async (ci) => {
+        const imageUrls = await getImagesForCardInfo(ci, unique);
+        return { name: ci.name, set: ci.set, number: ci.number, imageUrls };
+      })
+    );
+    return res.json(results);
+  } catch (err) {
+    console.error("Fetch error:", err?.message);
+    return res.status(500).json({ error: "Failed to fetch images from Scryfall." });
+  }
 });
+
 
 imageRouter.get("/proxy", async (req, res) => {
   const url = req.query.url;

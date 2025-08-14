@@ -30,7 +30,7 @@ import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
 import { API_BASE } from "../constants";
 import Donate from "../components/Donate";
-import ExtractCardName from "../helpers/ExtractCardName";
+import { cardKey, parseDeckToInfos, type CardInfo } from "../helpers/CardInfoHelper";
 
 export interface CardOption {
   uuid: string;
@@ -531,74 +531,85 @@ export default function ProxyBuilderPage() {
   }
 
   const handleSubmit = async () => {
-    setLoadingTask("Fetching cards");
-    setIsLoading(true);
-    const names: string[] = [];
+  setLoadingTask("Fetching cards");
+  setIsLoading(true);
 
-    deckText.split("\n").forEach((line) => {
-      const trimmed = line.trim();
-      const match = trimmed.match(/^(\d+)x?\s+(.*)/i);
-      if (match) {
-        const count = parseInt(match[1], 10);
-        const cardName = ExtractCardName(match[2]);
-        for (let i = 0; i < count; i++) names.push(cardName);
-      } else if (trimmed.length > 0) {
-        names.push(ExtractCardName(trimmed));
-      }
-    });
+  // 1) Parse deck text into infos (preserving quantities)
+  const infos = parseDeckToInfos(deckText);
 
-    const uniqueNames = Array.from(new Set(names));
+  // 2) Unique by (name|set|number) for the fetch
+  const uniqueMap = new Map<string, CardInfo>();
+  for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
+  const uniqueInfos = Array.from(uniqueMap.values());
 
-    await axios.delete(`${API_BASE}/api/cards/images`);
+  // For backward-compat servers that still expect only names
+  const uniqueNames = Array.from(
+    new Set(uniqueInfos.map((ci) => ci.name))
+  );
 
-    const response = await axios.post<CardOption[]>(
-      `${API_BASE}/api/cards/images`,
-      { cardNames: uniqueNames, cardArt: "art" }
-    );
+  await axios.delete(`${API_BASE}/api/cards/images`);
 
-    const nameToCard: Record<string, CardOption> = {};
-    response.data.forEach((card) => {
-      nameToCard[card.name] = card;
-    });
-
-    const expandedCards: CardOption[] = names.map((name) => {
-      const card = nameToCard[name];
-      return {
-        ...card,
-        uuid: crypto.randomUUID(),
-      };
-    });
-
-    setCards((prev) => [...prev, ...expandedCards]);
-
-    const newOriginals: Record<string, string> = {};
-    expandedCards.forEach((card) => {
-      if (card.imageUrls.length > 0) {
-        newOriginals[card.uuid] = card.imageUrls[0];
-      }
-    });
-    setOriginalSelectedImages((prev) => ({
-      ...prev,
-      ...newOriginals,
-    }));
-
-    setLoadingTask("Processing Images");
-
-    const processed: Record<string, string> = {};
-    for (const [uuid, url] of Object.entries(newOriginals)) {
-      const proxiedUrl = getLocalBleedImageUrl(url);
-      const bleedImage = await addBleedEdge(proxiedUrl);
-      processed[uuid] = bleedImage;
+  // 3) Prefer new shape { cardQueries }, but also include { cardNames }
+  const response = await axios.post<CardOption[]>(
+    `${API_BASE}/api/cards/images`,
+    {
+      // New: lets server lock onto exact art when set/number present
+      cardQueries: uniqueInfos, // [{ name, set?, number? }, ...]
+      // Old: servers can ignore cardQueries and just use this for now
+      cardNames: uniqueNames,
+      cardArt: "art",
     }
+  );
 
-    setSelectedImages((prev) => ({
-      ...prev,
-      ...processed,
-    }));
-    setIsLoading(false);
-    setLoadingTask(null);
-    setDeckText("");
-  };
+  // 4) Build a lookup from response
+  // If your server echoes set/number back on CardOption, use that for keying.
+  // Fallback to name-only if not present.
+  const optionByKey: Record<string, CardOption> = {};
+  for (const opt of response.data) {
+    const k =
+      `${opt.name.toLowerCase()}|${(opt as any).set ?? ""}|${(opt as any).number ?? ""}`;
+    optionByKey[k] = opt;
+    // Also store by name-only as a fallback:
+    const nameOnlyKey = `${opt.name.toLowerCase()}||`;
+    if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
+  }
+
+  // 5) Expand back out to match quantities in original order
+  const expandedCards: CardOption[] = infos.map((ci) => {
+    const k = cardKey(ci);
+    const fallbackK = `${ci.name.toLowerCase()}||`;
+    const card = optionByKey[k] ?? optionByKey[fallbackK];
+    return {
+      ...card,
+      uuid: crypto.randomUUID(),
+    };
+  });
+
+  setCards((prev) => [...prev, ...expandedCards]);
+
+  // 6) Originals + processing (unchanged)
+  const newOriginals: Record<string, string> = {};
+  for (const card of expandedCards) {
+    if (card?.imageUrls?.length > 0) {
+      newOriginals[card.uuid] = card.imageUrls[0];
+    }
+  }
+  setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
+
+  setLoadingTask("Processing Images");
+
+  const processed: Record<string, string> = {};
+  for (const [uuid, url] of Object.entries(newOriginals)) {
+    const proxiedUrl = getLocalBleedImageUrl(url);
+    const bleedImage = await addBleedEdge(proxiedUrl);
+    processed[uuid] = bleedImage;
+  }
+
+  setSelectedImages((prev) => ({ ...prev, ...processed }));
+  setIsLoading(false);
+  setLoadingTask(null);
+  setDeckText("");
+};
 
   const handleClear = async () => {
     setLoadingTask("Clearing Images");
@@ -836,7 +847,10 @@ export default function ProxyBuilderPage() {
           <Textarea
             className="h-64"
             placeholder={`1x Sol Ring
-2x Counterspell`}
+2x Counterspell
+For specific art include set / CN
+eg. Strionic Resonator (lcc)
+or Repurposing Bay (dft) 380`}
             value={deckText}
             onChange={(e) => setDeckText(e.target.value)} />
           <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
