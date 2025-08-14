@@ -9,8 +9,8 @@ export function extractCardInfo(input: string): CardInfo {
 
   s = s.replace(/^\s*\d+\s*x?\s+/i, "");
 
-  const caretTail = /\s*\^[^^]*\^\s*$/;              
-  const bracketTail = /\s*\[[^\]]*]\s*$/;           
+  const caretTail = /\s*\^[^^]*\^\s*$/;
+  const bracketTail = /\s*\[[^\]]*]\s*$/;
   let changed = true;
   while (changed) {
     const before = s;

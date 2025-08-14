@@ -7,30 +7,34 @@ import {
   ModalBody,
   ModalHeader,
   Textarea,
-  TextInput
+  TextInput,
 } from "flowbite-react";
 import { useEffect, useRef, useState } from "react";
 import { exportProxyPagesToPdf } from "../helpers/ExportProxyPageToPdf";
-import fullLogo from '../assets/fullLogo.png';
+import fullLogo from "../assets/fullLogo.png";
 import {
   DndContext,
   closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   SortableContext,
   arrayMove,
-  rectSortingStrategy
-} from '@dnd-kit/sortable';
+  rectSortingStrategy,
+} from "@dnd-kit/sortable";
 import SortableCard from "../components/SortableCard";
 import LoadingOverlay from "../components/LoadingOverlay";
 import EdgeCutLines from "../components/FullPageGuides";
 import cardBack from "../assets/cardBack.png";
 import { API_BASE } from "../constants";
 import Donate from "../components/Donate";
-import { cardKey, parseDeckToInfos, type CardInfo } from "../helpers/CardInfoHelper";
+import {
+  cardKey,
+  parseDeckToInfos,
+  type CardInfo,
+} from "../helpers/CardInfoHelper";
 
 export interface CardOption {
   uuid: string;
@@ -43,16 +47,24 @@ export default function ProxyBuilderPage() {
   const [deckText, setDeckText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [cards, setCards] = useState<CardOption[]>([]);
-  const [originalSelectedImages, setOriginalSelectedImages] = useState<Record<string, string>>({});
-  const [selectedImages, setSelectedImages] = useState<Record<string, string>>({});
+  const [originalSelectedImages, setOriginalSelectedImages] = useState<
+    Record<string, string>
+  >({});
+  const [selectedImages, setSelectedImages] = useState<Record<string, string>>(
+    {}
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalCard, setModalCard] = useState<CardOption | null>(null);
   const [modalIndex, setModalIndex] = useState<number | null>(null);
   const [bleedEdge, setBleedEdge] = useState(true);
   const [bleedEdgeWidth, setBleedEdgeWidth] = useState(1);
   const [guideColor, setGuideColor] = useState("#39FF14");
-  const [guideWidth, setGuideWidth] = useState(.5);
+  const [guideWidth, setGuideWidth] = useState(0.5);
   const [isGettingMore, setIsGettingMore] = useState(false);
+  const [pageWidthIn, setPageWidthIn] = useState(8.5);
+  const [pageHeightIn, setPageHeightIn] = useState(11);
+  const [cols, setCols] = useState(3);
+  const [rows, setRows] = useState(3);
   const [contextMenu, setContextMenu] = useState({
     visible: false,
     x: 0,
@@ -62,15 +74,14 @@ export default function ProxyBuilderPage() {
   const [zoom, setZoom] = useState(1.0);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingTask, setLoadingTask] = useState<
-    "Fetching cards" |
-    "Processing Images" |
-    "Generating PDF" |
-    "Uploading Images" |
-    "Clearing Images" |
-    null>(null);
+    | "Fetching cards"
+    | "Processing Images"
+    | "Generating PDF"
+    | "Uploading Images"
+    | "Clearing Images"
+    | null
+  >(null);
   const unit = "mm";
-  const pageWidth = 8.5
-  const pageHeight = 11;
   const pdfPageColor = "#FFFFFF";
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
@@ -79,8 +90,9 @@ export default function ProxyBuilderPage() {
   const baseCardHeightMm = 88.9;
   const totalCardWidth = baseCardWidthMm + bleedEdgeWidth * 2;
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
-  const gridWidthMm = totalCardWidth * 3;
-  const gridHeightMm = totalCardHeight * 3;
+  const gridWidthMm = totalCardWidth * cols;
+  const gridHeightMm = totalCardHeight * rows;
+  const pageCapacity = cols * rows;
   const reorderImageMap = (
     cards: CardOption[],
     oldIndex: number,
@@ -100,9 +112,9 @@ export default function ProxyBuilderPage() {
     return newMap;
   };
 
-
   useEffect(() => {
-    const handler = () => setContextMenu((prev) => ({ ...prev, visible: false }));
+    const handler = () =>
+      setContextMenu((prev) => ({ ...prev, visible: false }));
     window.addEventListener("click", handler);
     return () => window.removeEventListener("click", handler);
   }, []);
@@ -136,7 +148,8 @@ export default function ProxyBuilderPage() {
     const newCards = cards.filter((_, i) => i !== index);
 
     const { [cardUuid]: _, ...newSelectedImages } = selectedImages;
-    const { [cardUuid]: __, ...newOriginalSelectedImages } = originalSelectedImages;
+    const { [cardUuid]: __, ...newOriginalSelectedImages } =
+      originalSelectedImages;
 
     setCards(newCards);
     setSelectedImages(newSelectedImages);
@@ -153,9 +166,11 @@ export default function ProxyBuilderPage() {
       bleedEdgeWidthMm: bleedEdgeWidth,
       guideColor,
       guideWidthPx: guideWidth,
-      pageWidthInches: pageWidth,
-      pageHeightInches: pageHeight,
+      pageWidthInches: pageWidthIn,
+      pageHeightInches: pageHeightIn,
       pdfPageColor,
+      cols,
+      rows,
     });
     setIsLoading(false);
     setLoadingTask(null);
@@ -175,7 +190,10 @@ export default function ProxyBuilderPage() {
           const bleedImage = await addBleedEdge(trimmed, newBleedWidth);
           updated[uuid] = bleedImage;
         } else if (selectedImages[uuid]) {
-          const bleedImage = await addBleedEdge(selectedImages[uuid], newBleedWidth);
+          const bleedImage = await addBleedEdge(
+            selectedImages[uuid],
+            newBleedWidth
+          );
           updated[uuid] = bleedImage;
         }
       } else if (originalSelectedImages[uuid]) {
@@ -187,7 +205,6 @@ export default function ProxyBuilderPage() {
 
     setSelectedImages(updated);
   };
-
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     setLoadingTask("Uploading Images");
@@ -219,7 +236,7 @@ export default function ProxyBuilderPage() {
 
               setOriginalSelectedImages((prev) => ({
                 ...prev,
-                [newCards[i].uuid]: base64
+                [newCards[i].uuid]: base64,
               }));
 
               const trimmed = await trimBleedEdge(base64);
@@ -227,7 +244,7 @@ export default function ProxyBuilderPage() {
 
               setSelectedImages((prev) => ({
                 ...prev,
-                [newCards[i].uuid]: withBleed
+                [newCards[i].uuid]: withBleed,
               }));
             }
             resolve();
@@ -237,7 +254,7 @@ export default function ProxyBuilderPage() {
       })
     );
 
-    event.target.value = '';
+    event.target.value = "";
     setIsLoading(false);
     setLoadingTask(null);
   };
@@ -329,11 +346,16 @@ export default function ProxyBuilderPage() {
     ctx.putImageData(imageData, 0, 0);
   }
 
-  const addBleedEdge = (src: string, bleedOverride?: number): Promise<string> => {
+  const addBleedEdge = (
+    src: string,
+    bleedOverride?: number
+  ): Promise<string> => {
     return new Promise((resolve) => {
       const targetCardWidth = 750;
       const targetCardHeight = 1050;
-      const bleed = Math.round(getBleedInPixels(bleedOverride ?? bleedEdgeWidth, unit));
+      const bleed = Math.round(
+        getBleedInPixels(bleedOverride ?? bleedEdgeWidth, unit)
+      );
       const finalWidth = targetCardWidth + bleed * 2;
       const finalHeight = targetCardHeight + bleed * 2;
       const blackThreshold = 30; // max RGB value to still consider "black"
@@ -375,9 +397,17 @@ export default function ProxyBuilderPage() {
         const cornerSize = 30;
         const sampleInset = 10;
 
-        const averageColor = (x: number, y: number, w: number, h: number): string => {
+        const averageColor = (
+          x: number,
+          y: number,
+          w: number,
+          h: number
+        ): string => {
           const data = tempCtx.getImageData(x, y, w, h).data;
-          let r = 0, g = 0, b = 0, count = 0;
+          let r = 0,
+            g = 0,
+            b = 0,
+            count = 0;
 
           for (let i = 0; i < data.length; i += 4) {
             const alpha = data[i + 3];
@@ -397,8 +427,12 @@ export default function ProxyBuilderPage() {
           return `rgb(${r}, ${g}, ${b})`;
         };
 
-        const fillIfLight = (r: number, g: number, b: number, a: number): boolean =>
-          a === 0 || (r > 200 && g > 200 && b > 200);
+        const fillIfLight = (
+          r: number,
+          g: number,
+          b: number,
+          a: number
+        ): boolean => a === 0 || (r > 200 && g > 200 && b > 200);
 
         const cornerCoords = [
           { x: 0, y: 0 },
@@ -408,7 +442,12 @@ export default function ProxyBuilderPage() {
         ];
 
         cornerCoords.forEach(({ x, y }) => {
-          const imageData = tempCtx.getImageData(x, y, cornerSize, cornerSize).data;
+          const imageData = tempCtx.getImageData(
+            x,
+            y,
+            cornerSize,
+            cornerSize
+          ).data;
           let shouldFill = false;
 
           for (let i = 0; i < imageData.length; i += 4) {
@@ -425,7 +464,9 @@ export default function ProxyBuilderPage() {
           if (shouldFill) {
             const avgColor = averageColor(
               x < temp.width / 2 ? sampleInset : temp.width - sampleInset - 10,
-              y < temp.height / 2 ? sampleInset : temp.height - sampleInset - 10,
+              y < temp.height / 2
+                ? sampleInset
+                : temp.height - sampleInset - 10,
               10,
               10
             );
@@ -435,7 +476,12 @@ export default function ProxyBuilderPage() {
           }
         });
 
-        blackenAllNearBlackPixels(tempCtx, targetCardWidth, targetCardHeight, blackThreshold);
+        blackenAllNearBlackPixels(
+          tempCtx,
+          targetCardWidth,
+          targetCardHeight,
+          blackThreshold
+        );
 
         const edgeData = tempCtx.getImageData(0, 0, 1, targetCardHeight).data;
         let blackCount = 0;
@@ -449,7 +495,8 @@ export default function ProxyBuilderPage() {
           }
         }
 
-        const isMostlyBlack = blackCount / targetCardHeight > blackToleranceRatio;
+        const isMostlyBlack =
+          blackCount / targetCardHeight > blackToleranceRatio;
 
         const scaledImg = new Image();
         scaledImg.onload = () => {
@@ -458,57 +505,206 @@ export default function ProxyBuilderPage() {
           if (isMostlyBlack) {
             const slice = 8;
             // Edges
-            ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight); // L
-            ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, targetCardHeight, targetCardWidth + bleed, bleed, bleed, targetCardHeight); // R
-            ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed); // T
-            ctx.drawImage(scaledImg, 0, targetCardHeight - slice, targetCardWidth, slice, bleed, targetCardHeight + bleed, targetCardWidth, bleed); // B
+            ctx.drawImage(
+              scaledImg,
+              0,
+              0,
+              slice,
+              targetCardHeight,
+              0,
+              bleed,
+              bleed,
+              targetCardHeight
+            ); // L
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              0,
+              slice,
+              targetCardHeight,
+              targetCardWidth + bleed,
+              bleed,
+              bleed,
+              targetCardHeight
+            ); // R
+            ctx.drawImage(
+              scaledImg,
+              0,
+              0,
+              targetCardWidth,
+              slice,
+              bleed,
+              0,
+              targetCardWidth,
+              bleed
+            ); // T
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - slice,
+              targetCardWidth,
+              slice,
+              bleed,
+              targetCardHeight + bleed,
+              targetCardWidth,
+              bleed
+            ); // B
 
             // Corners
             ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed); // TL
-            ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, slice, targetCardWidth + bleed, 0, bleed, bleed); // TR
-            ctx.drawImage(scaledImg, 0, targetCardHeight - slice, slice, slice, 0, targetCardHeight + bleed, bleed, bleed); // BL
-            ctx.drawImage(scaledImg, targetCardWidth - slice, targetCardHeight - slice, slice, slice, targetCardWidth + bleed, targetCardHeight + bleed, bleed, bleed); // BR
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              0,
+              slice,
+              slice,
+              targetCardWidth + bleed,
+              0,
+              bleed,
+              bleed
+            ); // TR
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - slice,
+              slice,
+              slice,
+              0,
+              targetCardHeight + bleed,
+              bleed,
+              bleed
+            ); // BL
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              targetCardHeight - slice,
+              slice,
+              slice,
+              targetCardWidth + bleed,
+              targetCardHeight + bleed,
+              bleed,
+              bleed
+            ); // BR
           } else {
             ctx.save();
             ctx.scale(-1, 1);
-            ctx.drawImage(scaledImg, 0, 0, bleed, targetCardHeight, -bleed, bleed, bleed, targetCardHeight);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              0,
+              bleed,
+              targetCardHeight,
+              -bleed,
+              bleed,
+              bleed,
+              targetCardHeight
+            );
             ctx.restore();
 
             ctx.save();
             ctx.scale(-1, 1);
-            ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, targetCardHeight, -(finalWidth), bleed, bleed, targetCardHeight);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              0,
+              bleed,
+              targetCardHeight,
+              -finalWidth,
+              bleed,
+              bleed,
+              targetCardHeight
+            );
             ctx.restore();
 
             ctx.save();
             ctx.scale(1, -1);
-            ctx.drawImage(scaledImg, 0, 0, targetCardWidth, bleed, bleed, -bleed, targetCardWidth, bleed);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              0,
+              targetCardWidth,
+              bleed,
+              bleed,
+              -bleed,
+              targetCardWidth,
+              bleed
+            );
             ctx.restore();
-
 
             ctx.save();
             ctx.scale(1, -1);
-            ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, targetCardWidth, bleed, bleed, -(finalHeight), targetCardWidth, bleed);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - bleed,
+              targetCardWidth,
+              bleed,
+              bleed,
+              -finalHeight,
+              targetCardWidth,
+              bleed
+            );
             ctx.restore();
 
             // Corners
             ctx.save();
             ctx.scale(-1, -1);
-            ctx.drawImage(scaledImg, 0, 0, bleed, bleed, -bleed, -bleed, bleed, bleed);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              0,
+              bleed,
+              bleed,
+              -bleed,
+              -bleed,
+              bleed,
+              bleed
+            );
             ctx.restore();
 
             ctx.save();
             ctx.scale(-1, -1);
-            ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, bleed, -(finalWidth), -bleed, bleed, bleed);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              0,
+              bleed,
+              bleed,
+              -finalWidth,
+              -bleed,
+              bleed,
+              bleed
+            );
             ctx.restore();
 
             ctx.save();
             ctx.scale(-1, -1);
-            ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, bleed, bleed, -bleed, -(finalHeight), bleed, bleed);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - bleed,
+              bleed,
+              bleed,
+              -bleed,
+              -finalHeight,
+              bleed,
+              bleed
+            );
             ctx.restore();
 
             ctx.save();
             ctx.scale(-1, -1);
-            ctx.drawImage(scaledImg, targetCardWidth - bleed, targetCardHeight - bleed, bleed, bleed, -(finalWidth), -(finalHeight), bleed, bleed);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              targetCardHeight - bleed,
+              bleed,
+              bleed,
+              -finalWidth,
+              -finalHeight,
+              bleed,
+              bleed
+            );
             ctx.restore();
           }
 
@@ -531,85 +727,70 @@ export default function ProxyBuilderPage() {
   }
 
   const handleSubmit = async () => {
-  setLoadingTask("Fetching cards");
-  setIsLoading(true);
+    setLoadingTask("Fetching cards");
+    setIsLoading(true);
 
-  // 1) Parse deck text into infos (preserving quantities)
-  const infos = parseDeckToInfos(deckText);
+    const infos = parseDeckToInfos(deckText);
 
-  // 2) Unique by (name|set|number) for the fetch
-  const uniqueMap = new Map<string, CardInfo>();
-  for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
-  const uniqueInfos = Array.from(uniqueMap.values());
+    const uniqueMap = new Map<string, CardInfo>();
+    for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
+    const uniqueInfos = Array.from(uniqueMap.values());
 
-  // For backward-compat servers that still expect only names
-  const uniqueNames = Array.from(
-    new Set(uniqueInfos.map((ci) => ci.name))
-  );
+    const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
 
-  await axios.delete(`${API_BASE}/api/cards/images`);
+    await axios.delete(`${API_BASE}/api/cards/images`);
 
-  // 3) Prefer new shape { cardQueries }, but also include { cardNames }
-  const response = await axios.post<CardOption[]>(
-    `${API_BASE}/api/cards/images`,
-    {
-      // New: lets server lock onto exact art when set/number present
-      cardQueries: uniqueInfos, // [{ name, set?, number? }, ...]
-      // Old: servers can ignore cardQueries and just use this for now
-      cardNames: uniqueNames,
-      cardArt: "art",
+    const response = await axios.post<CardOption[]>(
+      `${API_BASE}/api/cards/images`,
+      {
+        cardQueries: uniqueInfos,
+        cardNames: uniqueNames,
+        cardArt: "art",
+      }
+    );
+
+    const optionByKey: Record<string, CardOption> = {};
+    for (const opt of response.data) {
+      const k = `${opt.name.toLowerCase()}|${(opt as any).set ?? ""}|${(opt as any).number ?? ""}`;
+      optionByKey[k] = opt;
+      const nameOnlyKey = `${opt.name.toLowerCase()}||`;
+      if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
     }
-  );
 
-  // 4) Build a lookup from response
-  // If your server echoes set/number back on CardOption, use that for keying.
-  // Fallback to name-only if not present.
-  const optionByKey: Record<string, CardOption> = {};
-  for (const opt of response.data) {
-    const k =
-      `${opt.name.toLowerCase()}|${(opt as any).set ?? ""}|${(opt as any).number ?? ""}`;
-    optionByKey[k] = opt;
-    // Also store by name-only as a fallback:
-    const nameOnlyKey = `${opt.name.toLowerCase()}||`;
-    if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
-  }
+    const expandedCards: CardOption[] = infos.map((ci) => {
+      const k = cardKey(ci);
+      const fallbackK = `${ci.name.toLowerCase()}||`;
+      const card = optionByKey[k] ?? optionByKey[fallbackK];
+      return {
+        ...card,
+        uuid: crypto.randomUUID(),
+      };
+    });
 
-  // 5) Expand back out to match quantities in original order
-  const expandedCards: CardOption[] = infos.map((ci) => {
-    const k = cardKey(ci);
-    const fallbackK = `${ci.name.toLowerCase()}||`;
-    const card = optionByKey[k] ?? optionByKey[fallbackK];
-    return {
-      ...card,
-      uuid: crypto.randomUUID(),
-    };
-  });
+    setCards((prev) => [...prev, ...expandedCards]);
 
-  setCards((prev) => [...prev, ...expandedCards]);
-
-  // 6) Originals + processing (unchanged)
-  const newOriginals: Record<string, string> = {};
-  for (const card of expandedCards) {
-    if (card?.imageUrls?.length > 0) {
-      newOriginals[card.uuid] = card.imageUrls[0];
+    const newOriginals: Record<string, string> = {};
+    for (const card of expandedCards) {
+      if (card?.imageUrls?.length > 0) {
+        newOriginals[card.uuid] = card.imageUrls[0];
+      }
     }
-  }
-  setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
+    setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
 
-  setLoadingTask("Processing Images");
+    setLoadingTask("Processing Images");
 
-  const processed: Record<string, string> = {};
-  for (const [uuid, url] of Object.entries(newOriginals)) {
-    const proxiedUrl = getLocalBleedImageUrl(url);
-    const bleedImage = await addBleedEdge(proxiedUrl);
-    processed[uuid] = bleedImage;
-  }
+    const processed: Record<string, string> = {};
+    for (const [uuid, url] of Object.entries(newOriginals)) {
+      const proxiedUrl = getLocalBleedImageUrl(url);
+      const bleedImage = await addBleedEdge(proxiedUrl);
+      processed[uuid] = bleedImage;
+    }
 
-  setSelectedImages((prev) => ({ ...prev, ...processed }));
-  setIsLoading(false);
-  setLoadingTask(null);
-  setDeckText("");
-};
+    setSelectedImages((prev) => ({ ...prev, ...processed }));
+    setIsLoading(false);
+    setLoadingTask(null);
+    setDeckText("");
+  };
 
   const handleClear = async () => {
     setLoadingTask("Clearing Images");
@@ -632,7 +813,7 @@ export default function ProxyBuilderPage() {
       );
 
       const urls = res.data?.[0]?.imageUrls ?? [];
-      setModalCard(prev => (prev ? { ...prev, imageUrls: urls } : prev));
+      setModalCard((prev) => (prev ? { ...prev, imageUrls: urls } : prev));
     } finally {
       setIsGettingMore(false);
     }
@@ -641,7 +822,9 @@ export default function ProxyBuilderPage() {
   function pngToNormal(pngUrl: string) {
     try {
       const u = new URL(pngUrl);
-      u.pathname = u.pathname.replace("/png/", "/normal/").replace(/\.png$/i, ".jpg");
+      u.pathname = u.pathname
+        .replace("/png/", "/normal/")
+        .replace(/\.png$/i, ".jpg");
       return u.toString();
     } catch {
       return pngUrl; // fallback if anything looks odd
@@ -691,13 +874,16 @@ export default function ProxyBuilderPage() {
     }
   };
 
-
   return (
     <>
       <h1 className="sr-only">Proxxied — MTG Proxy Builder and Print</h1>
       {isLoading && loadingTask && <LoadingOverlay task={loadingTask} />}
       <div className="flex flex-row h-screen justify-between overflow-hidden">
-        <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} size="4xl">
+        <Modal
+          show={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          size="4xl"
+        >
           <ModalHeader>Select Artwork</ModalHeader>
           <ModalBody>
             <div className="mb-4">
@@ -725,7 +911,9 @@ export default function ProxyBuilderPage() {
                   if (!newCard.imageUrls?.length) return;
 
                   const newUuid = crypto.randomUUID();
-                  const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
+                  const proxiedUrl = getLocalBleedImageUrl(
+                    newCard.imageUrls[0]
+                  );
                   const processed = await addBleedEdge(proxiedUrl);
 
                   setCards((prev) => {
@@ -746,13 +934,18 @@ export default function ProxyBuilderPage() {
                     isUserUpload: false,
                   });
 
-                  setSelectedImages((prev) => ({ ...prev, [newUuid]: processed }));
-                  setOriginalSelectedImages((prev) => ({ ...prev, [newUuid]: newCard.imageUrls[0] }));
+                  setSelectedImages((prev) => ({
+                    ...prev,
+                    [newUuid]: processed,
+                  }));
+                  setOriginalSelectedImages((prev) => ({
+                    ...prev,
+                    [newUuid]: newCard.imageUrls[0],
+                  }));
 
                   setSearchQuery("");
                 }}
               />
-
             </div>
             {modalCard && (
               <>
@@ -764,9 +957,14 @@ export default function ProxyBuilderPage() {
                         key={i}
                         src={thumbUrl}
                         loading="lazy"
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = pngUrl; }} // fallback
-                        className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl ? "border-green-500" : "border-transparent"
-                          }`}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = pngUrl;
+                        }} // fallback
+                        className={`w-full cursor-pointer border-4 ${
+                          originalSelectedImages[modalCard.uuid] === pngUrl
+                            ? "border-green-500"
+                            : "border-transparent"
+                        }`}
                         onClick={async () => {
                           const proxiedUrl = getLocalBleedImageUrl(pngUrl);
                           const processed = await addBleedEdge(proxiedUrl);
@@ -800,9 +998,7 @@ export default function ProxyBuilderPage() {
         </Modal>
 
         <div className="w-1/5 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
-          <img
-            src={fullLogo}
-            alt="Proxxied Logo" />
+          <img src={fullLogo} alt="Proxxied Logo" />
 
           <div className="space-y-2">
             <Label className="block text-gray-700 dark:text-gray-300">
@@ -819,7 +1015,8 @@ export default function ProxyBuilderPage() {
             </Label>
             <label
               htmlFor="custom-file-upload"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500" >
+              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+            >
               Choose Files
             </label>
 
@@ -852,11 +1049,15 @@ For specific art include set / CN
 eg. Strionic Resonator (lcc)
 or Repurposing Bay (dft) 380`}
             value={deckText}
-            onChange={(e) => setDeckText(e.target.value)} />
+            onChange={(e) => setDeckText(e.target.value)}
+          />
           <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
             Fetch Cards
           </Button>
-          <Button className="bg-red-700 hover:bg-red-700 w-full" onClick={handleClear}>
+          <Button
+            className="bg-red-700 hover:bg-red-700 w-full"
+            onClick={handleClear}
+          >
             Clear Cards
           </Button>
           <Label className="block text-gray-700 dark:text-gray-300">
@@ -871,7 +1072,10 @@ or Repurposing Bay (dft) 380`}
           <Label className="block text-gray-700 dark:text-gray-300">
             To duplicate or delete a card - right click it
           </Label>
-          <Button className="bg-purple-700 w-full mt-[2rem]" onClick={addCardBackPage}>
+          <Button
+            className="bg-purple-700 w-full mt-[2rem]"
+            onClick={addCardBackPage}
+          >
             Add Card Backs
           </Button>
         </div>
@@ -886,7 +1090,8 @@ or Repurposing Bay (dft) 380`}
                 <img
                   src={fullLogo}
                   alt="Proxxied Logo"
-                  className="h-36 mt-[1rem]" />
+                  className="h-36 mt-[1rem]"
+                />
               </div>
               <Label className="text-xl text-gray-600 justify-center">
                 Enter a decklist to the left or Upload Files to get started
@@ -902,13 +1107,17 @@ or Repurposing Bay (dft) 380`}
                   left: contextMenu.x,
                   padding: "0.25rem",
                 }}
-                onMouseLeave={() => setContextMenu({ ...contextMenu, visible: false })} >
+                onMouseLeave={() =>
+                  setContextMenu({ ...contextMenu, visible: false })
+                }
+              >
                 <Button
                   className="bg-gray-400 hover:bg-gray-500 w-full"
                   onClick={() => {
                     duplicateCard(contextMenu.cardIndex!);
                     setContextMenu({ ...contextMenu, visible: false });
-                  }} >
+                  }}
+                >
                   Duplicate
                 </Button>
                 <Button
@@ -916,7 +1125,8 @@ or Repurposing Bay (dft) 380`}
                   onClick={() => {
                     deleteCard(contextMenu.cardIndex!);
                     setContextMenu({ ...contextMenu, visible: false });
-                  }} >
+                  }}
+                >
                   Delete
                 </Button>
               </div>
@@ -937,24 +1147,33 @@ or Repurposing Bay (dft) 380`}
                     reorderImageMap(cards, oldIndex, newIndex, selectedImages)
                   );
                   setOriginalSelectedImages(
-                    reorderImageMap(cards, oldIndex, newIndex, originalSelectedImages)
+                    reorderImageMap(
+                      cards,
+                      oldIndex,
+                      newIndex,
+                      originalSelectedImages
+                    )
                   );
                 }
-              }} >
-              <SortableContext items={cards.map((card) => card.uuid)} strategy={rectSortingStrategy}>
-                {chunkCards(cards, 9).map((page, pageIndex) => (
+              }}
+            >
+              <SortableContext
+                items={cards.map((card) => card.uuid)}
+                strategy={rectSortingStrategy}
+              >
+                {chunkCards(cards, pageCapacity).map((page, pageIndex) => (
                   <div
                     key={pageIndex}
                     className="proxy-page relative bg-white dark:bg-gray-700"
                     style={{
                       zoom: zoom,
-                      width: '8.5in',
-                      height: '11in',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      breakAfter: 'page',
+                      width: `${pageWidthIn}in`,
+                      height: `${pageHeightIn}in`,
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      breakAfter: "page",
                       flexShrink: 0,
                       padding: 0,
                       margin: 0,
@@ -962,9 +1181,9 @@ or Repurposing Bay (dft) 380`}
                   >
                     <div
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: `repeat(3, ${totalCardWidth}mm)`,
-                        gridTemplateRows: `repeat(3, ${totalCardHeight}mm)`,
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${cols}, ${totalCardWidth}mm)`,
+                        gridTemplateRows: `repeat(${rows}, ${totalCardHeight}mm)`,
                         width: `${gridWidthMm}mm`,
                         height: `${gridHeightMm}mm`,
                         gap: 0,
@@ -975,8 +1194,8 @@ or Repurposing Bay (dft) 380`}
                         const img = selectedImages[card.uuid];
                         const noImages =
                           !img &&
-                          !(originalSelectedImages[card.uuid]) &&
-                          (!(card.imageUrls && card.imageUrls.length));
+                          !originalSelectedImages[card.uuid] &&
+                          !(card.imageUrls && card.imageUrls.length);
 
                         if (noImages) {
                           return (
@@ -1003,8 +1222,12 @@ or Repurposing Bay (dft) 380`}
                               title={`"${card.name}" not found`}
                             >
                               <div>
-                                <div className="font-semibold text-red-700">"{card.name}"</div>
-                                <div className="text-xs text-gray-600">not found</div>
+                                <div className="font-semibold text-red-700">
+                                  "{card.name}"
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  not found
+                                </div>
                               </div>
                             </div>
                           );
@@ -1029,14 +1252,13 @@ or Repurposing Bay (dft) 380`}
                           />
                         );
                       })}
-
                     </div>
                     {bleedEdge && (
                       <EdgeCutLines
-                        pageWidthIn={8.5}
-                        pageHeightIn={11}
-                        cols={3}
-                        rows={3}
+                        pageWidthIn={pageWidthIn}
+                        pageHeightIn={pageHeightIn}
+                        cols={cols}
+                        rows={rows}
                         totalCardWidthMm={totalCardWidth}
                         totalCardHeightMm={totalCardHeight}
                         baseCardWidthMm={baseCardWidthMm}
@@ -1045,7 +1267,6 @@ or Repurposing Bay (dft) 380`}
                         guideWidthPx={guideWidth}
                       />
                     )}
-
                   </div>
                 ))}
               </SortableContext>
@@ -1054,9 +1275,91 @@ or Repurposing Bay (dft) 380`}
         </div>
 
         <div className="w-1/4 min-w-[18rem] max-w-[26rem] p-4 bg-gray-100 dark:bg-gray-700 h-full flex flex-col overflow-y-auto">
-          <Label className="text-lg font-semibold dark:text-gray-300">Settings</Label>
+          <Label className="text-lg font-semibold dark:text-gray-300">
+            Settings
+          </Label>
 
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Page Width (in)</Label>
+                <TextInput
+                  className="w-full"
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  value={pageWidthIn}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v > 0) setPageWidthIn(v);
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Page Height (in)</Label>
+                <TextInput
+                  className="w-full"
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  value={pageHeightIn}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v > 0) setPageHeightIn(v);
+                  }}
+                />
+              </div>
+            </div>
+            <Button
+              className="bg-gray-300 text-gray-900 w-full"
+              onClick={() => {
+                setPageWidthIn((w) => {
+                  const h = pageHeightIn;
+                  setPageHeightIn(w);
+                  return h;
+                });
+              }}
+            >
+              Swap Orientation
+            </Button>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Columns</Label>
+                <TextInput
+                  className="w-full"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={cols}
+                  onChange={(e) => {
+                    const v = Math.max(
+                      1,
+                      Math.min(10, parseInt(e.target.value || "1", 10))
+                    );
+                    if (!Number.isNaN(v)) setCols(v);
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Rows</Label>
+                <TextInput
+                  className="w-full"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={rows}
+                  onChange={(e) => {
+                    const v = Math.max(
+                      1,
+                      Math.min(10, parseInt(e.target.value || "1", 10))
+                    );
+                    if (!Number.isNaN(v)) setRows(v);
+                  }}
+                />
+              </div>
+            </div>
+
             <div>
               <Label>Bleed Edge ({unit})</Label>
               <TextInput
@@ -1111,15 +1414,29 @@ or Repurposing Bay (dft) 380`}
             <div>
               <Label>Zoom</Label>
               <div className="flex items-center gap-2 justify-between w-full">
-                <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0"
-                  onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>-</Button>
+                <Button
+                  size="xs"
+                  className="bg-gray-300 text-gray-900 w-full focus:ring-0"
+                  onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}
+                >
+                  -
+                </Button>
                 <Label className="w-full text-center">{zoom.toFixed(1)}x</Label>
-                <Button size="xs" className="bg-gray-300 text-gray-900 w-full focus:ring-0"
-                  onClick={() => setZoom((z) => z + 0.1)}>+</Button>
+                <Button
+                  size="xs"
+                  className="bg-gray-300 text-gray-900 w-full focus:ring-0"
+                  onClick={() => setZoom((z) => z + 0.1)}
+                >
+                  +
+                </Button>
               </div>
             </div>
 
-            <Button className="bg-green-700 w-full" color="success" onClick={handleExport}>
+            <Button
+              className="bg-green-700 w-full"
+              color="success"
+              onClick={handleExport}
+            >
               Export to PDF
             </Button>
           </div>
@@ -1130,7 +1447,8 @@ or Repurposing Bay (dft) 380`}
               href="https://github.com/kclipsto/proxies-at-home"
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-md underline text-center text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400" >
+              className="block text-md underline text-center text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
+            >
               Code by Kaiser Clipston (Github)
             </a>
           </div>

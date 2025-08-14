@@ -11,7 +11,6 @@ function getLocalBleedImageUrl(originalUrl: string): string {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
 }
 
-// Prefer PNG assets when given a Scryfall JPG
 function preferPng(url: string) {
   try {
     const u = new URL(url);
@@ -63,12 +62,7 @@ function blackenAllNearBlackPixels(
   width: number,
   height: number,
   threshold: number,
-  borderThickness = {
-    top: 192,
-    bottom: 800,
-    left: 96,
-    right: 96,
-  }
+  borderThickness = { top: 192, bottom: 800, left: 96, right: 96 }
 ) {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
@@ -137,7 +131,7 @@ function drawEdgeStubs(
   const rightStubW = startX + bleedPx;
 
   ctx.save();
-  ctx.fillStyle = "#000000"; //Black outside guides (fixed for now)
+  ctx.fillStyle = "#000000"; // Black outside guides (fixed)
 
   // Vertical stubs
   for (const x of xCuts) {
@@ -534,6 +528,8 @@ export async function exportProxyPagesToPdf(opts: {
   pageWidthInches: number;
   pageHeightInches: number;
   pdfPageColor?: string;
+  cols: number;
+  rows: number;
 }) {
   const {
     cards,
@@ -545,27 +541,36 @@ export async function exportProxyPagesToPdf(opts: {
     pageWidthInches,
     pageHeightInches,
     pdfPageColor = "#FFFFFF",
+    cols,
+    rows,
   } = opts;
 
+  // Canvas size (pixels at DPI) — used for high‑res page render
   const pageW = IN(pageWidthInches);
   const pageH = IN(pageHeightInches);
+
+  // Card + bleed in pixels (at DPI)
   const contentW = MM_TO_PX(63.5);
   const contentH = MM_TO_PX(88.9);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardW = contentW + 2 * bleedPx;
   const cardH = contentH + 2 * bleedPx;
-  const cols = 3,
-    rows = 3,
-    perPage = cols * rows;
-  const gridW = cols * cardW,
-    gridH = rows * cardH;
+
+  // Grid + centering
+  const perPage = Math.max(1, cols * rows);
+  const gridW = cols * cardW;
+  const gridH = rows * cardH;
   const startX = Math.round((pageW - gridW) / 2);
   const startY = Math.round((pageH - gridH) / 2);
 
+  // Chunk into pages of size cols*rows
   const pages: CardOption[][] = [];
-  for (let i = 0; i < cards.length; i += perPage)
+  for (let i = 0; i < cards.length; i += perPage) {
     pages.push(cards.slice(i, i + perPage));
+  }
+  if (pages.length === 0) pages.push([]); // allow exporting an empty grid page
 
+  // Create PDF (mm units; custom format)
   const pdf = new jsPDF({
     orientation: pageW >= pageH ? "landscape" : "portrait",
     unit: "mm",
@@ -575,6 +580,8 @@ export async function exportProxyPagesToPdf(opts: {
 
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
     const pageCards = pages[pageIndex];
+
+    // Draw one high‑res page on a canvas, then embed as an image
     const canvas = document.createElement("canvas");
     canvas.width = pageW;
     canvas.height = pageH;
@@ -591,10 +598,10 @@ export async function exportProxyPagesToPdf(opts: {
 
       // Resolve full resolution image source
       let src = originalSelectedImages[card.uuid] ?? card.imageUrls?.[0] ?? "";
-
       if (!card.isUserUpload) {
         src = getLocalBleedImageUrl(preferPng(src));
       }
+
       const cardCanvas = await buildCardWithBleed(
         src,
         bleedPx,

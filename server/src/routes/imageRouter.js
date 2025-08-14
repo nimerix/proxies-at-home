@@ -3,9 +3,11 @@ const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const multer = require("multer");
-const { getScryfallPngImagesForCard,
+const {
+  getScryfallPngImagesForCard,
   getImagesForCardInfo,
-  getScryfallPngImagesForCardPrints } = require("../utils/getCardImagesPaged");
+  getScryfallPngImagesForCardPrints,
+} = require("../utils/getCardImagesPaged");
 const crypto = require("crypto");
 
 // Make a stable cache filename from the FULL raw URL (path + query)
@@ -38,11 +40,17 @@ if (!fs.existsSync(uploadDir)) {
 const upload = multer({ dest: uploadDir });
 
 imageRouter.post("/", async (req, res) => {
-  const cardQueries = Array.isArray(req.body.cardQueries) ? req.body.cardQueries : null;
-  const cardNames = Array.isArray(req.body.cardNames) ? req.body.cardNames : null;
-  const unique = (req.body.cardArt || "art");
+  const cardQueries = Array.isArray(req.body.cardQueries)
+    ? req.body.cardQueries
+    : null;
+  const cardNames = Array.isArray(req.body.cardNames)
+    ? req.body.cardNames
+    : null;
+  const unique = req.body.cardArt || "art";
   if (!cardQueries && !cardNames) {
-    return res.status(400).json({ error: "Provide cardQueries (preferred) or cardNames." });
+    return res
+      .status(400)
+      .json({ error: "Provide cardQueries (preferred) or cardNames." });
   }
 
   const infos = cardQueries
@@ -59,10 +67,11 @@ imageRouter.post("/", async (req, res) => {
     return res.json(results);
   } catch (err) {
     console.error("Fetch error:", err?.message);
-    return res.status(500).json({ error: "Failed to fetch images from Scryfall." });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch images from Scryfall." });
   }
 });
-
 
 imageRouter.get("/proxy", async (req, res) => {
   const url = req.query.url;
@@ -71,7 +80,11 @@ imageRouter.get("/proxy", async (req, res) => {
   }
 
   const originalUrl = (() => {
-    try { return decodeURIComponent(url); } catch { return url; }
+    try {
+      return decodeURIComponent(url);
+    } catch {
+      return url;
+    }
   })();
 
   try {
@@ -82,13 +95,14 @@ imageRouter.get("/proxy", async (req, res) => {
       return res.sendFile(localPath);
     }
 
-    const response = await axios.get(originalUrl, { responseType: "arraybuffer" });
+    const response = await axios.get(originalUrl, {
+      responseType: "arraybuffer",
+    });
     fs.writeFileSync(localPath, response.data);
 
-    const contentType =
-      response.headers["content-type"]?.startsWith?.("image/")
-        ? response.headers["content-type"]
-        : "image/png";
+    const contentType = response.headers["content-type"]?.startsWith?.("image/")
+      ? response.headers["content-type"]
+      : "image/png";
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
@@ -103,7 +117,7 @@ imageRouter.get("/proxy", async (req, res) => {
     return res.status(502).json({
       error: "Failed to download image",
       status,
-      from: originalUrl
+      from: originalUrl,
     });
   }
 });
