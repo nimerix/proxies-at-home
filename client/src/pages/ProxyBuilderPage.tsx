@@ -35,12 +35,17 @@ import {
   parseDeckToInfos,
   type CardInfo,
 } from "../helpers/CardInfoHelper";
+import { buildDecklist, downloadDecklist } from "../helpers/DecklistHelper";
 
 export interface CardOption {
   uuid: string;
   name: string;
   imageUrls: string[];
   isUserUpload: boolean;
+  hasBakedBleed?: boolean;
+  set?: string;
+  number?: string;
+  lang?: string;
 }
 
 export default function ProxyBuilderPage() {
@@ -179,84 +184,185 @@ export default function ProxyBuilderPage() {
   const reprocessSelectedImages = async (newBleedWidth: number) => {
     const updated: Record<string, string> = {};
 
-    for (let i = 0; i < cards.length; i++) {
-      const card = cards[i];
+    for (const card of cards) {
       const uuid = card.uuid;
 
       if (card.isUserUpload) {
-        const originalBase64 = originalSelectedImages[uuid];
-        if (originalBase64) {
-          const trimmed = await trimBleedEdge(originalBase64);
-          const bleedImage = await addBleedEdge(trimmed, newBleedWidth);
-          updated[uuid] = bleedImage;
-        } else if (selectedImages[uuid]) {
-          const bleedImage = await addBleedEdge(
+        const original = originalSelectedImages[uuid];
+        if (!original && selectedImages[uuid]) {
+          updated[uuid] = await addBleedEdge(
             selectedImages[uuid],
             newBleedWidth
           );
-          updated[uuid] = bleedImage;
+          continue;
+        }
+        if (original) {
+          const base = card.hasBakedBleed
+            ? await trimBleedEdge(original) // <— only trim MPC-fill uploads
+            : original; // <— standard uploads: no trim
+          updated[uuid] = await addBleedEdge(base, newBleedWidth);
         }
       } else if (originalSelectedImages[uuid]) {
         const proxiedUrl = getLocalBleedImageUrl(originalSelectedImages[uuid]);
-        const bleedImage = await addBleedEdge(proxiedUrl, newBleedWidth);
-        updated[uuid] = bleedImage;
+        updated[uuid] = await addBleedEdge(proxiedUrl, newBleedWidth);
       }
     }
 
     setSelectedImages(updated);
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    setLoadingTask("Uploading Images");
-    setIsLoading(true);
+  async function processToWithBleed(
+    srcBase64: string,
+    opts: { hasBakedBleed: boolean }
+  ): Promise<{ originalBase64: string; withBleedBase64: string }> {
+    // If the image already includes extra border/bleed (MPC Fill), trim first.
+    const trimmed = opts.hasBakedBleed
+      ? await trimBleedEdge(srcBase64)
+      : srcBase64;
 
-    const files = event.target.files;
-    if (!files) return;
+    // Then add your consistent bleed
+    const withBleedBase64 = await addBleedEdge(trimmed, bleedEdgeWidth);
 
+    return { originalBase64: srcBase64, withBleedBase64 };
+  }
+
+  function inferCardNameFromFilename(filename: string): string {
+    // strip extension
+    const noExt = filename.replace(/\.[a-z0-9]+$/i, "");
+    // keep everything before first "("
+    const beforeParen = noExt.split("(")[0];
+    // tidy separators/whitespace
+    const cleaned = beforeParen
+      .replace(/[_\-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleaned;
+  }
+
+  async function addUploadedFiles(
+    files: FileList,
+    opts: { hasBakedBleed: boolean }
+  ) {
     const fileArray = Array.from(files);
-    const currentIndex = cards.length;
+    const startIndex = cards.length;
 
-    const newCards: CardOption[] = fileArray.map((_, i) => ({
-      name: `Custom Art ${currentIndex + i + 1}`,
+    // Pre-create shells to keep order stable
+    // in addUploadedFiles(...)
+    const newCards: CardOption[] = fileArray.map((file, i) => ({
+      name:
+        inferCardNameFromFilename(file.name) ||
+        `Custom Art ${startIndex + i + 1}`,
       imageUrls: [],
       uuid: crypto.randomUUID(),
       isUserUpload: true,
+      hasBakedBleed: opts.hasBakedBleed, // <— set it here
     }));
 
     setCards((prev) => [...prev, ...newCards]);
 
-    // Process all uploads
+    const originalsUpdate: Record<string, string> = {};
+    const processedUpdate: Record<string, string> = {};
+
+    // Read + process all uploads
     await Promise.all(
-      fileArray.map((file, i) => {
-        return new Promise<void>((resolve) => {
+      fileArray.map(async (file, i) => {
+        const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onloadend = async () => {
-            if (reader.result) {
-              const base64 = reader.result as string;
-
-              setOriginalSelectedImages((prev) => ({
-                ...prev,
-                [newCards[i].uuid]: base64,
-              }));
-
-              const trimmed = await trimBleedEdge(base64);
-              const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth);
-
-              setSelectedImages((prev) => ({
-                ...prev,
-                [newCards[i].uuid]: withBleed,
-              }));
-            }
-            resolve();
-          };
+          reader.onloadend = () => resolve(reader.result as string);
           reader.readAsDataURL(file);
         });
+
+        const { originalBase64, withBleedBase64 } = await processToWithBleed(
+          base64,
+          opts
+        );
+
+        const id = newCards[i].uuid;
+        originalsUpdate[id] = originalBase64;
+        processedUpdate[id] = withBleedBase64;
       })
     );
 
-    event.target.value = "";
-    setIsLoading(false);
-    setLoadingTask(null);
+    setOriginalSelectedImages((prev) => ({ ...prev, ...originalsUpdate }));
+    setSelectedImages((prev) => ({ ...prev, ...processedUpdate }));
+  }
+
+  const handleUploadMpcFill = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    setLoadingTask("Uploading Images");
+    setIsLoading(true);
+    try {
+      const files = e.target.files;
+      if (files && files.length) {
+        await addUploadedFiles(files, { hasBakedBleed: true });
+      }
+    } finally {
+      if (e.target) e.target.value = "";
+      setIsLoading(false);
+      setLoadingTask(null);
+    }
+  };
+
+  const handleUploadStandard = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    console.log("trying");
+    setLoadingTask("Uploading Images");
+    setIsLoading(true);
+    try {
+      const files = e.target.files;
+      if (!files || !files.length) return;
+
+      const fileArray = Array.from(files);
+      const startIndex = cards.length;
+
+      const newCards: CardOption[] = fileArray.map((_, i) => ({
+        name: `Custom Art ${startIndex + i + 1}`,
+        imageUrls: [],
+        uuid: crypto.randomUUID(),
+        isUserUpload: true,
+        hasBakedBleed: false,
+      }));
+
+      console.log(newCards);
+
+      setCards((prev) => [...prev, ...newCards]);
+
+      // 1) Read each file to base64
+      const base64s = await Promise.all(
+        fileArray.map(
+          (file) =>
+            new Promise<string>((resolve) => {
+              const r = new FileReader();
+              r.onloadend = () => resolve(r.result as string);
+              r.readAsDataURL(file);
+            })
+        )
+      );
+
+      console.log(base64s);
+      const newOriginals: Record<string, string> = {};
+      const processed: Record<string, string> = {};
+
+      newCards.forEach((c, i) => {
+        newOriginals[c.uuid] = base64s[i]; // original = base64
+      });
+
+      for (const [uuid, b64] of Object.entries(newOriginals)) {
+        console.log(b64);
+        const bleedImage = await addBleedEdge(b64);
+        console.log(bleedImage);
+        processed[uuid] = bleedImage;
+      }
+
+      setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
+      setSelectedImages((prev) => ({ ...prev, ...processed }));
+    } finally {
+      if (e.target) e.target.value = "";
+      setIsLoading(false);
+      setLoadingTask(null);
+    }
   };
 
   function chunkCards<T>(cards: T[], size: number): T[][] {
@@ -792,6 +898,17 @@ export default function ProxyBuilderPage() {
     setDeckText("");
   };
 
+  const handleCopyDecklist = async () => {
+    const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
+    await navigator.clipboard.writeText(text);
+  };
+
+  const handleDownloadDecklist = () => {
+    const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
+    const date = new Date().toISOString().slice(0, 10);
+    downloadDecklist(`decklist_${date}.txt`, text);
+  };
+
   const handleClear = async () => {
     setLoadingTask("Clearing Images");
     setIsLoading(true);
@@ -1001,31 +1118,53 @@ export default function ProxyBuilderPage() {
           <img src={fullLogo} alt="Proxxied Logo" />
 
           <div className="space-y-2">
+            {/* MPC Fill */}
             <Label className="block text-gray-700 dark:text-gray-300">
-              Upload Images (
+              Upload MPC Images (
               <a
                 href="https://mpcfill.com"
                 target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-blue-600 dark:hover:text-blue-400"
+                rel="noreferrer"
+                className="underline"
               >
                 MPC Autofill
               </a>
               )
             </Label>
+
             <label
-              htmlFor="custom-file-upload"
+              htmlFor="upload-mpc"
               className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
             >
               Choose Files
             </label>
-
             <input
-              id="custom-file-upload"
+              id="upload-mpc"
               type="file"
               accept="image/*"
               multiple
-              onChange={handleUpload}
+              onChange={handleUploadMpcFill}
+              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+              className="hidden"
+            />
+
+            {/* Standard */}
+            <Label className="block text-gray-700 dark:text-gray-300">
+              Upload Other Images (mtgcardsmith, custom designs, etc.)
+            </Label>
+            <label
+              htmlFor="upload-standard"
+              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+            >
+              Choose Files
+            </label>
+            <input
+              id="upload-standard"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleUploadStandard}
+              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
               className="hidden"
             />
           </div>
@@ -1438,6 +1577,15 @@ or Repurposing Bay (dft) 380`}
               onClick={handleExport}
             >
               Export to PDF
+            </Button>
+            <Button className="bg-blue-700 w-full" onClick={handleCopyDecklist}>
+              Copy Decklist
+            </Button>
+            <Button
+              className="bg-blue-500 w-full mt-2"
+              onClick={handleDownloadDecklist}
+            >
+              Download Decklist (.txt)
             </Button>
           </div>
 

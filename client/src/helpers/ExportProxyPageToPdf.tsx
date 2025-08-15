@@ -151,16 +151,17 @@ function drawEdgeStubs(
 async function buildCardWithBleed(
   src: string,
   bleedPx: number,
-  isUserUpload: boolean
+  opts: { isUserUpload: boolean; hasBakedBleed?: boolean }
 ): Promise<HTMLCanvasElement> {
   const contentW = MM_TO_PX(63.5);
   const contentH = MM_TO_PX(88.9);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
-  const baseImg = isUserUpload
-    ? await trimExistingBleedIfAny(src)
-    : await loadImage(src);
+  const baseImg =
+    opts.isUserUpload && opts.hasBakedBleed
+      ? await trimExistingBleedIfAny(src)
+      : await loadImage(src);
 
   const aspect = baseImg.width / baseImg.height;
   const targetAspect = contentW / contentH;
@@ -602,11 +603,10 @@ export async function exportProxyPagesToPdf(opts: {
         src = getLocalBleedImageUrl(preferPng(src));
       }
 
-      const cardCanvas = await buildCardWithBleed(
-        src,
-        bleedPx,
-        !!card.isUserUpload
-      );
+      const cardCanvas = await buildCardWithBleed(src, bleedPx, {
+        isUserUpload: !!card.isUserUpload,
+        hasBakedBleed: !!card.hasBakedBleed,
+      });
       ctx.drawImage(cardCanvas, x, y);
 
       if (bleedEdge) {
