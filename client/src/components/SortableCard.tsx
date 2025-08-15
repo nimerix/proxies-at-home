@@ -1,6 +1,6 @@
 import { CSS } from "@dnd-kit/utilities";
 import { useSortable } from "@dnd-kit/sortable";
-import type { CardOption } from "../pages/ProxyBuilderPage";
+import type { CardOption } from "../types/Card";
 
 type SortableCardProps = {
   card: CardOption;
@@ -59,7 +59,6 @@ export default function SortableCard({
     >
       <img
         src={imageSrc}
-        alt={card.name}
         className="cursor-pointer block w-full h-full p-0 m-0"
         style={{ display: "block", lineHeight: 0 }}
         onContextMenu={(e) => {

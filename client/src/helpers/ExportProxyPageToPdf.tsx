@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import type { CardOption } from "../pages/ProxyBuilderPage";
+import type { CardOption } from "../types/Card";
 import { API_BASE } from "../constants";
 
 const DPI = 600;
@@ -21,7 +21,7 @@ function preferPng(url: string) {
       u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
       return u.toString();
     }
-  } catch {}
+  } catch { }
   return url;
 }
 
@@ -131,7 +131,7 @@ function drawEdgeStubs(
   const rightStubW = startX + bleedPx;
 
   ctx.save();
-  ctx.fillStyle = "#000000"; // Black outside guides (fixed)
+  ctx.fillStyle = "#000000"; // Black outside guides
 
   // Vertical stubs
   for (const x of xCuts) {

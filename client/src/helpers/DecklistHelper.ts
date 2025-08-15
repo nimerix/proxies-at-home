@@ -1,4 +1,4 @@
-import type { CardOption } from "../pages/ProxyBuilderPage";
+import type { CardOption } from "../types/Card";
 
 export function groupCardsForDecklist(cards: CardOption[]) {
   type Key = string;
@@ -58,8 +58,7 @@ export function formatDecklistLine(
       if (entry.set) return `${prefix} ${entry.name} (${entry.set})`;
       return `${prefix} ${entry.name}`;
 
-    case "scryfallish": 
-    {
+    case "scryfallish": {
       const parts = [`${prefix} ${JSON.stringify(entry.name)}`];
       if (entry.set) parts.push(`set:${entry.set}`);
       if (entry.number) parts.push(`number=${entry.number}`);

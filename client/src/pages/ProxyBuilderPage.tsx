@@ -36,17 +36,12 @@ import {
   type CardInfo,
 } from "../helpers/CardInfoHelper";
 import { buildDecklist, downloadDecklist } from "../helpers/DecklistHelper";
-
-export interface CardOption {
-  uuid: string;
-  name: string;
-  imageUrls: string[];
-  isUserUpload: boolean;
-  hasBakedBleed?: boolean;
-  set?: string;
-  number?: string;
-  lang?: string;
-}
+import { ExportImagesZip } from "../helpers/ExportImagesZip";
+import type { CardOption } from "../types/Card";
+import { addBleedEdge, getBleedInPixels, getLocalBleedImageUrl, pngToNormal, trimBleedEdge, urlToDataUrl } from "../helpers/ImageHelper";
+import { getMpcImageUrl, inferCardNameFromFilename, parseMpcText, tryParseMpcSchemaXml } from "../helpers/Mpc";
+import CardCellLazy from "../components/CardCellLazy";
+import { useImageProcessing } from "../hooks/useImageProcessing";
 
 export default function ProxyBuilderPage() {
   const [deckText, setDeckText] = useState("");
@@ -98,6 +93,15 @@ export default function ProxyBuilderPage() {
   const gridWidthMm = totalCardWidth * cols;
   const gridHeightMm = totalCardHeight * rows;
   const pageCapacity = cols * rows;
+  const { loadingMap, ensureProcessed, reprocessSelectedImages } =
+    useImageProcessing({
+      unit,                       // "mm" | "in"
+      bleedEdgeWidth,             // number
+      selectedImages,
+      setSelectedImages,
+      originalSelectedImages,
+      setOriginalSelectedImages,
+    });
   const reorderImageMap = (
     cards: CardOption[],
     oldIndex: number,
@@ -181,36 +185,6 @@ export default function ProxyBuilderPage() {
     setLoadingTask(null);
   };
 
-  const reprocessSelectedImages = async (newBleedWidth: number) => {
-    const updated: Record<string, string> = {};
-
-    for (const card of cards) {
-      const uuid = card.uuid;
-
-      if (card.isUserUpload) {
-        const original = originalSelectedImages[uuid];
-        if (!original && selectedImages[uuid]) {
-          updated[uuid] = await addBleedEdge(
-            selectedImages[uuid],
-            newBleedWidth
-          );
-          continue;
-        }
-        if (original) {
-          const base = card.hasBakedBleed
-            ? await trimBleedEdge(original) // <— only trim MPC-fill uploads
-            : original; // <— standard uploads: no trim
-          updated[uuid] = await addBleedEdge(base, newBleedWidth);
-        }
-      } else if (originalSelectedImages[uuid]) {
-        const proxiedUrl = getLocalBleedImageUrl(originalSelectedImages[uuid]);
-        updated[uuid] = await addBleedEdge(proxiedUrl, newBleedWidth);
-      }
-    }
-
-    setSelectedImages(updated);
-  };
-
   async function processToWithBleed(
     srcBase64: string,
     opts: { hasBakedBleed: boolean }
@@ -226,19 +200,6 @@ export default function ProxyBuilderPage() {
     return { originalBase64: srcBase64, withBleedBase64 };
   }
 
-  function inferCardNameFromFilename(filename: string): string {
-    // strip extension
-    const noExt = filename.replace(/\.[a-z0-9]+$/i, "");
-    // keep everything before first "("
-    const beforeParen = noExt.split("(")[0];
-    // tidy separators/whitespace
-    const cleaned = beforeParen
-      .replace(/[_\-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return cleaned;
-  }
-
   async function addUploadedFiles(
     files: FileList,
     opts: { hasBakedBleed: boolean }
@@ -246,8 +207,6 @@ export default function ProxyBuilderPage() {
     const fileArray = Array.from(files);
     const startIndex = cards.length;
 
-    // Pre-create shells to keep order stable
-    // in addUploadedFiles(...)
     const newCards: CardOption[] = fileArray.map((file, i) => ({
       name:
         inferCardNameFromFilename(file.name) ||
@@ -255,7 +214,7 @@ export default function ProxyBuilderPage() {
       imageUrls: [],
       uuid: crypto.randomUUID(),
       isUserUpload: true,
-      hasBakedBleed: opts.hasBakedBleed, // <— set it here
+      hasBakedBleed: opts.hasBakedBleed
     }));
 
     setCards((prev) => [...prev, ...newCards]);
@@ -263,7 +222,6 @@ export default function ProxyBuilderPage() {
     const originalsUpdate: Record<string, string> = {};
     const processedUpdate: Record<string, string> = {};
 
-    // Read + process all uploads
     await Promise.all(
       fileArray.map(async (file, i) => {
         const base64 = await new Promise<string>((resolve) => {
@@ -329,7 +287,6 @@ export default function ProxyBuilderPage() {
 
       setCards((prev) => [...prev, ...newCards]);
 
-      // 1) Read each file to base64
       const base64s = await Promise.all(
         fileArray.map(
           (file) =>
@@ -346,7 +303,7 @@ export default function ProxyBuilderPage() {
       const processed: Record<string, string> = {};
 
       newCards.forEach((c, i) => {
-        newOriginals[c.uuid] = base64s[i]; // original = base64
+        newOriginals[c.uuid] = base64s[i]; 
       });
 
       for (const [uuid, b64] of Object.entries(newOriginals)) {
@@ -373,468 +330,58 @@ export default function ProxyBuilderPage() {
     return chunks;
   }
 
-  function getLocalBleedImageUrl(originalUrl: string): string {
-    return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
-  }
-
-  function trimBleedEdge(dataUrl: string): Promise<string> {
+  async function readText(file: File): Promise<string> {
     return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const bleedTrim = 72;
-        const canvas = document.createElement("canvas");
-        const width = img.width - bleedTrim * 2;
-        const height = img.height - bleedTrim * 2;
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(
-            img,
-            bleedTrim,
-            bleedTrim,
-            width,
-            height,
-            0,
-            0,
-            width,
-            height
-          );
-          resolve(canvas.toDataURL("image/png"));
-        } else {
-          resolve(dataUrl);
-        }
-      };
-      img.src = dataUrl;
+      const r = new FileReader();
+      r.onloadend = () => resolve(String(r.result || ""));
+      r.readAsText(file);
     });
   }
 
-  function blackenAllNearBlackPixels(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    threshold: number,
-    borderThickness = {
-      top: 96,
-      bottom: 400,
-      left: 48,
-      right: 48,
-    }
-  ) {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
+  const handleImportMpcXml = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const file = e.target.files?.[0];
+      if (!file) return;
 
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const inBorder =
-          y < borderThickness.top ||
-          y >= height - borderThickness.bottom ||
-          x < borderThickness.left ||
-          x >= width - borderThickness.right;
+      const raw = await readText(file);
+      const schemaItems = tryParseMpcSchemaXml(raw);
+      const items = (schemaItems && schemaItems.length) ? schemaItems : parseMpcText(raw);
 
-        if (!inBorder) continue;
+      const newCards: CardOption[] = [];
+      const newOriginals: Record<string, string> = {};
 
-        const index = (y * width + x) * 4;
-        const r = data[index];
-        const g = data[index + 1];
-        const b = data[index + 2];
+      for (const it of items) {
+        for (let i = 0; i < (it.qty || 1); i++) {
+          const uuid = crypto.randomUUID();
+          const name = it.name || (it.filename ? inferCardNameFromFilename(it.filename) : 'Custom Art');
 
-        if (r < threshold && g < threshold && b < threshold) {
-          data[index] = 0;
-          data[index + 1] = 0;
-          data[index + 2] = 0;
+          newCards.push({
+            uuid,
+            name,
+            imageUrls: [],
+            isUserUpload: true,
+            hasBakedBleed: true,
+          });
+
+          const mpcUrl = getMpcImageUrl(it.frontId);
+          if (mpcUrl) {
+            newOriginals[uuid] = mpcUrl;
+          }
         }
       }
+
+      setCards(prev => [...prev, ...newCards]);
+      if (Object.keys(newOriginals).length) {
+        setOriginalSelectedImages(prev => ({ ...prev, ...newOriginals }));
+      }
+    } finally {
+      if (e.target) e.target.value = "";
     }
-
-    ctx.putImageData(imageData, 0, 0);
-  }
-
-  const addBleedEdge = (
-    src: string,
-    bleedOverride?: number
-  ): Promise<string> => {
-    return new Promise((resolve) => {
-      const targetCardWidth = 750;
-      const targetCardHeight = 1050;
-      const bleed = Math.round(
-        getBleedInPixels(bleedOverride ?? bleedEdgeWidth, unit)
-      );
-      const finalWidth = targetCardWidth + bleed * 2;
-      const finalHeight = targetCardHeight + bleed * 2;
-      const blackThreshold = 30; // max RGB value to still consider "black"
-      const blackToleranceRatio = 0.7; // how much of the edge must be black to switch modes
-
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d")!;
-      canvas.width = finalWidth;
-      canvas.height = finalHeight;
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-
-      img.onload = () => {
-        const aspectRatio = img.width / img.height;
-        const targetAspect = targetCardWidth / targetCardHeight;
-
-        let drawWidth = targetCardWidth;
-        let drawHeight = targetCardHeight;
-        let offsetX = 0;
-        let offsetY = 0;
-
-        if (aspectRatio > targetAspect) {
-          drawHeight = targetCardHeight;
-          drawWidth = img.width * (targetCardHeight / img.height);
-          offsetX = (drawWidth - targetCardWidth) / 2;
-        } else {
-          drawWidth = targetCardWidth;
-          drawHeight = img.height * (targetCardWidth / img.width);
-          offsetY = (drawHeight - targetCardHeight) / 2;
-        }
-
-        const temp = document.createElement("canvas");
-        temp.width = targetCardWidth;
-        temp.height = targetCardHeight;
-        const tempCtx = temp.getContext("2d")!;
-        tempCtx.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
-
-        const cornerSize = 30;
-        const sampleInset = 10;
-
-        const averageColor = (
-          x: number,
-          y: number,
-          w: number,
-          h: number
-        ): string => {
-          const data = tempCtx.getImageData(x, y, w, h).data;
-          let r = 0,
-            g = 0,
-            b = 0,
-            count = 0;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const alpha = data[i + 3];
-            if (alpha === 0) continue;
-            r += data[i];
-            g += data[i + 1];
-            b += data[i + 2];
-            count++;
-          }
-
-          if (count === 0) return "#000";
-
-          r = Math.round(r / count);
-          g = Math.round(g / count);
-          b = Math.round(b / count);
-
-          return `rgb(${r}, ${g}, ${b})`;
-        };
-
-        const fillIfLight = (
-          r: number,
-          g: number,
-          b: number,
-          a: number
-        ): boolean => a === 0 || (r > 200 && g > 200 && b > 200);
-
-        const cornerCoords = [
-          { x: 0, y: 0 },
-          { x: temp.width - cornerSize, y: 0 },
-          { x: 0, y: temp.height - cornerSize },
-          { x: temp.width - cornerSize, y: temp.height - cornerSize },
-        ];
-
-        cornerCoords.forEach(({ x, y }) => {
-          const imageData = tempCtx.getImageData(
-            x,
-            y,
-            cornerSize,
-            cornerSize
-          ).data;
-          let shouldFill = false;
-
-          for (let i = 0; i < imageData.length; i += 4) {
-            const r = imageData[i];
-            const g = imageData[i + 1];
-            const b = imageData[i + 2];
-            const a = imageData[i + 3];
-            if (fillIfLight(r, g, b, a)) {
-              shouldFill = true;
-              break;
-            }
-          }
-
-          if (shouldFill) {
-            const avgColor = averageColor(
-              x < temp.width / 2 ? sampleInset : temp.width - sampleInset - 10,
-              y < temp.height / 2
-                ? sampleInset
-                : temp.height - sampleInset - 10,
-              10,
-              10
-            );
-
-            tempCtx.fillStyle = avgColor;
-            tempCtx.fillRect(x, y, cornerSize, cornerSize);
-          }
-        });
-
-        blackenAllNearBlackPixels(
-          tempCtx,
-          targetCardWidth,
-          targetCardHeight,
-          blackThreshold
-        );
-
-        const edgeData = tempCtx.getImageData(0, 0, 1, targetCardHeight).data;
-        let blackCount = 0;
-
-        for (let i = 0; i < targetCardHeight; i++) {
-          const r = edgeData[i * 4];
-          const g = edgeData[i * 4 + 1];
-          const b = edgeData[i * 4 + 2];
-          if (r < blackThreshold && g < blackThreshold && b < blackThreshold) {
-            blackCount++;
-          }
-        }
-
-        const isMostlyBlack =
-          blackCount / targetCardHeight > blackToleranceRatio;
-
-        const scaledImg = new Image();
-        scaledImg.onload = () => {
-          ctx.drawImage(scaledImg, bleed, bleed);
-
-          if (isMostlyBlack) {
-            const slice = 8;
-            // Edges
-            ctx.drawImage(
-              scaledImg,
-              0,
-              0,
-              slice,
-              targetCardHeight,
-              0,
-              bleed,
-              bleed,
-              targetCardHeight
-            ); // L
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - slice,
-              0,
-              slice,
-              targetCardHeight,
-              targetCardWidth + bleed,
-              bleed,
-              bleed,
-              targetCardHeight
-            ); // R
-            ctx.drawImage(
-              scaledImg,
-              0,
-              0,
-              targetCardWidth,
-              slice,
-              bleed,
-              0,
-              targetCardWidth,
-              bleed
-            ); // T
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - slice,
-              targetCardWidth,
-              slice,
-              bleed,
-              targetCardHeight + bleed,
-              targetCardWidth,
-              bleed
-            ); // B
-
-            // Corners
-            ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed); // TL
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - slice,
-              0,
-              slice,
-              slice,
-              targetCardWidth + bleed,
-              0,
-              bleed,
-              bleed
-            ); // TR
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - slice,
-              slice,
-              slice,
-              0,
-              targetCardHeight + bleed,
-              bleed,
-              bleed
-            ); // BL
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - slice,
-              targetCardHeight - slice,
-              slice,
-              slice,
-              targetCardWidth + bleed,
-              targetCardHeight + bleed,
-              bleed,
-              bleed
-            ); // BR
-          } else {
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.drawImage(
-              scaledImg,
-              0,
-              0,
-              bleed,
-              targetCardHeight,
-              -bleed,
-              bleed,
-              bleed,
-              targetCardHeight
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - bleed,
-              0,
-              bleed,
-              targetCardHeight,
-              -finalWidth,
-              bleed,
-              bleed,
-              targetCardHeight
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(1, -1);
-            ctx.drawImage(
-              scaledImg,
-              0,
-              0,
-              targetCardWidth,
-              bleed,
-              bleed,
-              -bleed,
-              targetCardWidth,
-              bleed
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(1, -1);
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - bleed,
-              targetCardWidth,
-              bleed,
-              bleed,
-              -finalHeight,
-              targetCardWidth,
-              bleed
-            );
-            ctx.restore();
-
-            // Corners
-            ctx.save();
-            ctx.scale(-1, -1);
-            ctx.drawImage(
-              scaledImg,
-              0,
-              0,
-              bleed,
-              bleed,
-              -bleed,
-              -bleed,
-              bleed,
-              bleed
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(-1, -1);
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - bleed,
-              0,
-              bleed,
-              bleed,
-              -finalWidth,
-              -bleed,
-              bleed,
-              bleed
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(-1, -1);
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - bleed,
-              bleed,
-              bleed,
-              -bleed,
-              -finalHeight,
-              bleed,
-              bleed
-            );
-            ctx.restore();
-
-            ctx.save();
-            ctx.scale(-1, -1);
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - bleed,
-              targetCardHeight - bleed,
-              bleed,
-              bleed,
-              -finalWidth,
-              -finalHeight,
-              bleed,
-              bleed
-            );
-            ctx.restore();
-          }
-
-          resolve(canvas.toDataURL("image/png"));
-        };
-
-        scaledImg.src = temp.toDataURL("image/png");
-      };
-
-      img.src = src;
-    });
   };
 
-  function getBleedInPixels(bleedEdgeWidth: number, unit: string): number {
-    if (unit === "mm") {
-      return (bleedEdgeWidth / 25.4) * 300;
-    } else {
-      return bleedEdgeWidth * 300;
-    }
-  }
 
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
-    setIsLoading(true);
 
     const infos = parseDeckToInfos(deckText);
 
@@ -934,28 +481,6 @@ export default function ProxyBuilderPage() {
     } finally {
       setIsGettingMore(false);
     }
-  }
-
-  function pngToNormal(pngUrl: string) {
-    try {
-      const u = new URL(pngUrl);
-      u.pathname = u.pathname
-        .replace("/png/", "/normal/")
-        .replace(/\.png$/i, ".jpg");
-      return u.toString();
-    } catch {
-      return pngUrl; // fallback if anything looks odd
-    }
-  }
-
-  async function urlToDataUrl(url: string): Promise<string> {
-    const resp = await fetch(url);
-    const blob = await resp.blob();
-    return await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
   }
 
   const addCardBackPage = async () => {
@@ -1077,11 +602,10 @@ export default function ProxyBuilderPage() {
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).src = pngUrl;
                         }} // fallback
-                        className={`w-full cursor-pointer border-4 ${
-                          originalSelectedImages[modalCard.uuid] === pngUrl
-                            ? "border-green-500"
-                            : "border-transparent"
-                        }`}
+                        className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl
+                          ? "border-green-500"
+                          : "border-transparent"
+                          }`}
                         onClick={async () => {
                           const proxiedUrl = getLocalBleedImageUrl(pngUrl);
                           const processed = await addBleedEdge(proxiedUrl);
@@ -1144,6 +668,24 @@ export default function ProxyBuilderPage() {
               accept="image/*"
               multiple
               onChange={handleUploadMpcFill}
+              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+              className="hidden"
+            />
+
+            <Label className="block text-gray-700 dark:text-gray-300">
+              Import MPC Text (XML)
+            </Label>
+            <label
+              htmlFor="import-mpc-xml"
+              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+            >
+              Choose File
+            </label>
+            <input
+              id="import-mpc-xml"
+              type="file"
+              accept=".xml,.txt,.csv,.log,text/xml,text/plain"
+              onChange={handleImportMpcXml}
               onClick={(e) => ((e.target as HTMLInputElement).value = "")}
               className="hidden"
             />
@@ -1372,23 +914,32 @@ or Repurposing Bay (dft) 380`}
                           );
                         }
                         return (
-                          <SortableCard
+                          <CardCellLazy
                             key={globalIndex}
                             card={card}
-                            index={index}
-                            globalIndex={globalIndex}
-                            imageSrc={img}
-                            totalCardWidth={totalCardWidth}
-                            totalCardHeight={totalCardHeight}
-                            bleedEdge={bleedEdge}
-                            guideOffset={guideOffset}
-                            guideWidth={guideWidth}
-                            guideColor={guideColor}
-                            setContextMenu={setContextMenu}
-                            setModalCard={setModalCard}
-                            setModalIndex={setModalIndex}
-                            setIsModalOpen={setIsModalOpen}
-                          />
+                            state={loadingMap[card.uuid] ?? 'idle'}
+                            hasImage={!!selectedImages[card.uuid]}
+                            ensureProcessed={ensureProcessed}
+                          >
+                            <SortableCard
+                              key={globalIndex}
+                              card={card}
+                              index={index}
+                              globalIndex={globalIndex}
+                              imageSrc={img}
+                              totalCardWidth={totalCardWidth}
+                              totalCardHeight={totalCardHeight}
+                              bleedEdge={bleedEdge}
+                              guideOffset={guideOffset}
+                              guideWidth={guideWidth}
+                              guideColor={guideColor}
+                              setContextMenu={setContextMenu}
+                              setModalCard={setModalCard}
+                              setModalIndex={setModalIndex}
+                              setIsModalOpen={setIsModalOpen}
+                            />
+                          </CardCellLazy>
+
                         );
                       })}
                     </div>
@@ -1510,7 +1061,7 @@ or Repurposing Bay (dft) 380`}
                   const val = parseInt(e.target.value);
                   if (!isNaN(val)) {
                     setBleedEdgeWidth(val);
-                    reprocessSelectedImages(val);
+                    reprocessSelectedImages(cards, val);
                   }
                 }}
               />
@@ -1577,6 +1128,18 @@ or Repurposing Bay (dft) 380`}
               onClick={handleExport}
             >
               Export to PDF
+            </Button>
+            <Button
+              className="bg-indigo-700 w-full"
+              onClick={() =>
+                ExportImagesZip({
+                  cards,
+                  originalSelectedImages,
+                  fileBaseName: "card_images",
+                })
+              }
+            >
+              Export Card Images (.zip)
             </Button>
             <Button className="bg-blue-700 w-full" onClick={handleCopyDecklist}>
               Copy Decklist

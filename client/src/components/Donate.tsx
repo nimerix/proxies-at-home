@@ -52,7 +52,7 @@ export default function Donate({ username = "Kaiser-Clipston-1" }) {
         onClick={handleDonate}
         className="bg-blue-700 w-full mt-[1rem]"
       >
-        Venmo $
+        Donate $
         {custom && Number(custom) > 0 ? Math.floor(Number(custom)) : preset}
       </Button>
     </div>

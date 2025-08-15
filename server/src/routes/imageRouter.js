@@ -151,4 +151,42 @@ imageRouter.post("/upload", upload.array("images"), (req, res) => {
   });
 });
 
+imageRouter.get("/front", async (req, res) => {
+  const id = String(req.query.id || "").trim();
+  if (!id) return res.status(400).send("Missing id");
+
+  // Try a couple of GDrive URL shapes; only accept image/* responses
+  const candidates = [
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`,
+    `https://drive.google.com/uc?export=view&id=${encodeURIComponent(id)}`,
+    `https://drive.google.com/open?id=${encodeURIComponent(id)}`,
+  ];
+
+  for (const url of candidates) {
+    try {
+      const r = await axios.get(url, {
+        responseType: "stream",
+        maxRedirects: 5,
+        headers: { "User-Agent": "Mozilla/5.0" },
+        validateStatus: () => true,
+      });
+
+      const ct = (r.headers["content-type"] || "").toLowerCase();
+      // Only pipe if GDrive actually gave us an image
+      if (!ct.startsWith("image/")) {
+        // Not an image (likely HTML interstitial); try next candidate
+        continue;
+      }
+
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      return r.data.pipe(res);
+    } catch (_) {
+      // try next candidate
+    }
+  }
+
+  return res.status(502).send("Could not fetch Google Drive image");
+});
+
 module.exports = { imageRouter };
