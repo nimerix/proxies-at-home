@@ -38,8 +38,20 @@ import {
 import { buildDecklist, downloadDecklist } from "../helpers/DecklistHelper";
 import { ExportImagesZip } from "../helpers/ExportImagesZip";
 import type { CardOption } from "../types/Card";
-import { addBleedEdge, getBleedInPixels, getLocalBleedImageUrl, pngToNormal, trimBleedEdge, urlToDataUrl } from "../helpers/ImageHelper";
-import { getMpcImageUrl, inferCardNameFromFilename, parseMpcText, tryParseMpcSchemaXml } from "../helpers/Mpc";
+import {
+  addBleedEdge,
+  getBleedInPixels,
+  getLocalBleedImageUrl,
+  pngToNormal,
+  trimBleedEdge,
+  urlToDataUrl,
+} from "../helpers/ImageHelper";
+import {
+  getMpcImageUrl,
+  inferCardNameFromFilename,
+  parseMpcText,
+  tryParseMpcSchemaXml,
+} from "../helpers/Mpc";
 import CardCellLazy from "../components/CardCellLazy";
 import { useImageProcessing } from "../hooks/useImageProcessing";
 
@@ -95,8 +107,8 @@ export default function ProxyBuilderPage() {
   const pageCapacity = cols * rows;
   const { loadingMap, ensureProcessed, reprocessSelectedImages } =
     useImageProcessing({
-      unit,                       // "mm" | "in"
-      bleedEdgeWidth,             // number
+      unit, 
+      bleedEdgeWidth,
       selectedImages,
       setSelectedImages,
       originalSelectedImages,
@@ -189,12 +201,10 @@ export default function ProxyBuilderPage() {
     srcBase64: string,
     opts: { hasBakedBleed: boolean }
   ): Promise<{ originalBase64: string; withBleedBase64: string }> {
-    // If the image already includes extra border/bleed (MPC Fill), trim first.
     const trimmed = opts.hasBakedBleed
       ? await trimBleedEdge(srcBase64)
       : srcBase64;
 
-    // Then add your consistent bleed
     const withBleedBase64 = await addBleedEdge(trimmed, bleedEdgeWidth);
 
     return { originalBase64: srcBase64, withBleedBase64 };
@@ -214,7 +224,7 @@ export default function ProxyBuilderPage() {
       imageUrls: [],
       uuid: crypto.randomUUID(),
       isUserUpload: true,
-      hasBakedBleed: opts.hasBakedBleed
+      hasBakedBleed: opts.hasBakedBleed,
     }));
 
     setCards((prev) => [...prev, ...newCards]);
@@ -303,7 +313,7 @@ export default function ProxyBuilderPage() {
       const processed: Record<string, string> = {};
 
       newCards.forEach((c, i) => {
-        newOriginals[c.uuid] = base64s[i]; 
+        newOriginals[c.uuid] = base64s[i];
       });
 
       for (const [uuid, b64] of Object.entries(newOriginals)) {
@@ -345,7 +355,8 @@ export default function ProxyBuilderPage() {
 
       const raw = await readText(file);
       const schemaItems = tryParseMpcSchemaXml(raw);
-      const items = (schemaItems && schemaItems.length) ? schemaItems : parseMpcText(raw);
+      const items =
+        schemaItems && schemaItems.length ? schemaItems : parseMpcText(raw);
 
       const newCards: CardOption[] = [];
       const newOriginals: Record<string, string> = {};
@@ -353,7 +364,11 @@ export default function ProxyBuilderPage() {
       for (const it of items) {
         for (let i = 0; i < (it.qty || 1); i++) {
           const uuid = crypto.randomUUID();
-          const name = it.name || (it.filename ? inferCardNameFromFilename(it.filename) : 'Custom Art');
+          const name =
+            it.name ||
+            (it.filename
+              ? inferCardNameFromFilename(it.filename)
+              : "Custom Art");
 
           newCards.push({
             uuid,
@@ -370,15 +385,14 @@ export default function ProxyBuilderPage() {
         }
       }
 
-      setCards(prev => [...prev, ...newCards]);
+      setCards((prev) => [...prev, ...newCards]);
       if (Object.keys(newOriginals).length) {
-        setOriginalSelectedImages(prev => ({ ...prev, ...newOriginals }));
+        setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
       }
     } finally {
       if (e.target) e.target.value = "";
     }
   };
-
 
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
@@ -549,7 +563,7 @@ export default function ProxyBuilderPage() {
 
                   if (!res.data.length) return;
 
-                  const newCard = res.data[0]; // shape: { name, imageUrls }
+                  const newCard = res.data[0];
                   if (!newCard.imageUrls?.length) return;
 
                   const newUuid = crypto.randomUUID();
@@ -602,10 +616,11 @@ export default function ProxyBuilderPage() {
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).src = pngUrl;
                         }} // fallback
-                        className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl
-                          ? "border-green-500"
-                          : "border-transparent"
-                          }`}
+                        className={`w-full cursor-pointer border-4 ${
+                          originalSelectedImages[modalCard.uuid] === pngUrl
+                            ? "border-green-500"
+                            : "border-transparent"
+                        }`}
                         onClick={async () => {
                           const proxiedUrl = getLocalBleedImageUrl(pngUrl);
                           const processed = await addBleedEdge(proxiedUrl);
@@ -638,127 +653,130 @@ export default function ProxyBuilderPage() {
           </ModalBody>
         </Modal>
 
-        <div className="w-1/5 p-4 space-y-4 dark:bg-gray-700 bg-gray-100 overflow-hidden">
+        <div className="w-1/5 dark:bg-gray-700 bg-gray-100 flex flex-col">
           <img src={fullLogo} alt="Proxxied Logo" />
+          <div className=" flex-1 min-h-0 overflow-y-auto space-y-4 px-4 pb-4">
+            <div className="space-y-2">
+              <Label className="block text-gray-700 dark:text-gray-300">
+                Upload MPC Images (
+                <a
+                  href="https://mpcfill.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  MPC Autofill
+                </a>
+                )
+              </Label>
 
-          <div className="space-y-2">
-            {/* MPC Fill */}
-            <Label className="block text-gray-700 dark:text-gray-300">
-              Upload MPC Images (
-              <a
-                href="https://mpcfill.com"
-                target="_blank"
-                rel="noreferrer"
-                className="underline"
+              <label
+                htmlFor="upload-mpc"
+                className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
               >
-                MPC Autofill
+                Choose Files
+              </label>
+              <input
+                id="upload-mpc"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleUploadMpcFill}
+                onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+                className="hidden"
+              />
+
+              <Label className="block text-gray-700 dark:text-gray-300">
+                Import MPC Text (XML)
+              </Label>
+              <label
+                htmlFor="import-mpc-xml"
+                className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+              >
+                Choose File
+              </label>
+              <input
+                id="import-mpc-xml"
+                type="file"
+                accept=".xml,.txt,.csv,.log,text/xml,text/plain"
+                onChange={handleImportMpcXml}
+                onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+                className="hidden"
+              />
+
+              {/* Standard */}
+              <Label className="block text-gray-700 dark:text-gray-300">
+                Upload Other Images (mtgcardsmith, custom designs, etc.)
+              </Label>
+              <label
+                htmlFor="upload-standard"
+                className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+              >
+                Choose Files
+              </label>
+              <input
+                id="upload-standard"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleUploadStandard}
+                onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+                className="hidden"
+              />
+            </div>
+            <Label className="block text-gray-700 dark:text-gray-300">
+              Add Cards (
+              <a
+                href="https://scryfall.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Scryfall
               </a>
               )
             </Label>
 
-            <label
-              htmlFor="upload-mpc"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose Files
-            </label>
-            <input
-              id="upload-mpc"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleUploadMpcFill}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-
-            <Label className="block text-gray-700 dark:text-gray-300">
-              Import MPC Text (XML)
-            </Label>
-            <label
-              htmlFor="import-mpc-xml"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose File
-            </label>
-            <input
-              id="import-mpc-xml"
-              type="file"
-              accept=".xml,.txt,.csv,.log,text/xml,text/plain"
-              onChange={handleImportMpcXml}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-
-            {/* Standard */}
-            <Label className="block text-gray-700 dark:text-gray-300">
-              Upload Other Images (mtgcardsmith, custom designs, etc.)
-            </Label>
-            <label
-              htmlFor="upload-standard"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose Files
-            </label>
-            <input
-              id="upload-standard"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleUploadStandard}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-          </div>
-          <Label className="block text-gray-700 dark:text-gray-300">
-            Add Cards (
-            <a
-              href="https://scryfall.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-blue-600 dark:hover:text-blue-400"
-            >
-              Scryfall
-            </a>
-            )
-          </Label>
-          <Textarea
-            className="h-64"
-            placeholder={`1x Sol Ring
+            <div className="space-y-4">
+              <Textarea
+                className="h-64"
+                placeholder={`1x Sol Ring
 2x Counterspell
 For specific art include set / CN
 eg. Strionic Resonator (lcc)
 or Repurposing Bay (dft) 380`}
-            value={deckText}
-            onChange={(e) => setDeckText(e.target.value)}
-          />
-          <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
-            Fetch Cards
-          </Button>
-          <Button
-            className="bg-red-700 hover:bg-red-700 w-full"
-            onClick={handleClear}
-          >
-            Clear Cards
-          </Button>
-          <Label className="block text-gray-700 dark:text-gray-300">
-            Tips:
-          </Label>
-          <Label className="block text-gray-700 dark:text-gray-300">
-            To change a card art - click it
-          </Label>
-          <Label className="block text-gray-700 dark:text-gray-300">
-            To move a card - drag from the box at the top right
-          </Label>
-          <Label className="block text-gray-700 dark:text-gray-300">
-            To duplicate or delete a card - right click it
-          </Label>
-          <Button
-            className="bg-purple-700 w-full mt-[2rem]"
-            onClick={addCardBackPage}
-          >
-            Add Card Backs
-          </Button>
+                value={deckText}
+                onChange={(e) => setDeckText(e.target.value)}
+              />
+              <Button className="bg-blue-800 w-full" onClick={handleSubmit}>
+                Fetch Cards
+              </Button>
+              <Button
+                className="bg-red-700 hover:bg-red-700 w-full"
+                onClick={handleClear}
+              >
+                Clear Cards
+              </Button>
+              <Label className="block text-gray-700 dark:text-gray-300">
+                Tips:
+              </Label>
+              <Label className="block text-gray-700 dark:text-gray-300">
+                To change a card art - click it
+              </Label>
+              <Label className="block text-gray-700 dark:text-gray-300">
+                To move a card - drag from the box at the top right
+              </Label>
+              <Label className="block text-gray-700 dark:text-gray-300">
+                To duplicate or delete a card - right click it
+              </Label>
+              <Button
+                className="bg-purple-700 w-full mt-[2rem]"
+                onClick={addCardBackPage}
+              >
+                Add Card Backs
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center dark:bg-gray-800 ">
@@ -917,7 +935,7 @@ or Repurposing Bay (dft) 380`}
                           <CardCellLazy
                             key={globalIndex}
                             card={card}
-                            state={loadingMap[card.uuid] ?? 'idle'}
+                            state={loadingMap[card.uuid] ?? "idle"}
                             hasImage={!!selectedImages[card.uuid]}
                             ensureProcessed={ensureProcessed}
                           >
@@ -939,7 +957,6 @@ or Repurposing Bay (dft) 380`}
                               setIsModalOpen={setIsModalOpen}
                             />
                           </CardCellLazy>
-
                         );
                       })}
                     </div>
@@ -968,7 +985,6 @@ or Repurposing Bay (dft) 380`}
           <Label className="text-lg font-semibold dark:text-gray-300">
             Settings
           </Label>
-
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>

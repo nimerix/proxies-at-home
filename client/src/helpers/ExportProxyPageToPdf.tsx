@@ -2,7 +2,7 @@ import jsPDF from "jspdf";
 import type { CardOption } from "../types/Card";
 import { API_BASE } from "../constants";
 
-const DPI = 600; 
+const DPI = 600;
 
 const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
@@ -15,7 +15,10 @@ function getLocalBleedImageUrl(originalUrl: string): string {
 function preferPng(url: string) {
   try {
     const u = new URL(url);
-    if (u.hostname.endsWith("scryfall.io") && u.pathname.match(/\.(jpg|jpeg)$/i)) {
+    if (
+      u.hostname.endsWith("scryfall.io") &&
+      u.pathname.match(/\.(jpg|jpeg)$/i)
+    ) {
       u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
       return u.toString();
     }
@@ -31,10 +34,10 @@ function bucketDpiFromHeight(h: number): 300 | 600 | 800 | 1200 {
 }
 function calibratedBleedTrimPxForHeight(h: number): number {
   const dpi = bucketDpiFromHeight(h);
-  if (dpi === 300) return 72;   
-  if (dpi === 600) return 78;   
-  if (dpi === 800) return 104;  
-  return 156;                   
+  if (dpi === 300) return 72;
+  if (dpi === 600) return 78;
+  if (dpi === 800) return 104;
+  return 156;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -206,15 +209,26 @@ async function buildCardWithBleed(
   const fillIfLight = (r: number, g: number, b: number, a: number) =>
     a === 0 || (r > 200 && g > 200 && b > 200);
 
-  const averageColor = (sx: number, sy: number, w: number, h: number): string => {
+  const averageColor = (
+    sx: number,
+    sy: number,
+    w: number,
+    h: number
+  ): string => {
     const clampedX = Math.max(0, Math.min(contentW - w, sx));
     const clampedY = Math.max(0, Math.min(contentH - h, sy));
     const data = bctx.getImageData(clampedX, clampedY, w, h).data;
-    let r = 0, g = 0, b = 0, count = 0;
+    let r = 0,
+      g = 0,
+      b = 0,
+      count = 0;
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
       if (a === 0) continue;
-      r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      count++;
     }
     if (count === 0) return "rgb(0,0,0)";
     r = Math.round(r / count);
@@ -233,8 +247,14 @@ async function buildCardWithBleed(
     const data = bctx.getImageData(x, y, cornerSize, cornerSize).data;
     let shouldFill = false;
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-      if (fillIfLight(r, g, b, a)) { shouldFill = true; break; }
+      const r = data[i],
+        g = data[i + 1],
+        b = data[i + 2],
+        a = data[i + 3];
+      if (fillIfLight(r, g, b, a)) {
+        shouldFill = true;
+        break;
+      }
     }
     if (shouldFill) {
       const sx = x < contentW / 2 ? sampleInset : contentW - sampleInset - 10;
@@ -245,7 +265,14 @@ async function buildCardWithBleed(
   });
 
   // Scale blackening borders by OUTPUT DPI
-  blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold, undefined, DPI);
+  blackenAllNearBlackPixels(
+    bctx,
+    contentW,
+    contentH,
+    blackThreshold,
+    undefined,
+    DPI
+  );
 
   const out = document.createElement("canvas");
   out.width = finalW;
@@ -259,8 +286,11 @@ async function buildCardWithBleed(
       let blackCount = 0;
       for (let i = 0; i < contentH; i++) {
         const idx = i * 4;
-        const r = edge[idx], g = edge[idx + 1], b = edge[idx + 2];
-        if (r < blackThreshold && g < blackThreshold && b < blackThreshold) blackCount++;
+        const r = edge[idx],
+          g = edge[idx + 1],
+          b = edge[idx + 2];
+        if (r < blackThreshold && g < blackThreshold && b < blackThreshold)
+          blackCount++;
       }
       return blackCount / contentH > 0.7;
     })();
@@ -268,38 +298,184 @@ async function buildCardWithBleed(
     if (mostlyBlack) {
       const slice = Math.min(8, Math.floor(contentW / 100));
       ctx.drawImage(base, 0, 0, slice, contentH, 0, bleedPx, bleedPx, contentH);
-      ctx.drawImage(base, contentW - slice, 0, slice, contentH, contentW + bleedPx, bleedPx, bleedPx, contentH);
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        0,
+        slice,
+        contentH,
+        contentW + bleedPx,
+        bleedPx,
+        bleedPx,
+        contentH
+      );
       ctx.drawImage(base, 0, 0, contentW, slice, bleedPx, 0, contentW, bleedPx);
-      ctx.drawImage(base, 0, contentH - slice, contentW, slice, bleedPx, contentH + bleedPx, contentW, bleedPx);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - slice,
+        contentW,
+        slice,
+        bleedPx,
+        contentH + bleedPx,
+        contentW,
+        bleedPx
+      );
 
       ctx.drawImage(base, 0, 0, slice, slice, 0, 0, bleedPx, bleedPx);
-      ctx.drawImage(base, contentW - slice, 0, slice, slice, contentW + bleedPx, 0, bleedPx, bleedPx);
-      ctx.drawImage(base, 0, contentH - slice, slice, slice, 0, contentH + bleedPx, bleedPx, bleedPx);
-      ctx.drawImage(base, contentW - slice, contentH - slice, slice, slice, contentW + bleedPx, contentH + bleedPx, bleedPx, bleedPx);
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        0,
+        slice,
+        slice,
+        contentW + bleedPx,
+        0,
+        bleedPx,
+        bleedPx
+      );
+      ctx.drawImage(
+        base,
+        0,
+        contentH - slice,
+        slice,
+        slice,
+        0,
+        contentH + bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.drawImage(
+        base,
+        contentW - slice,
+        contentH - slice,
+        slice,
+        slice,
+        contentW + bleedPx,
+        contentH + bleedPx,
+        bleedPx,
+        bleedPx
+      );
     } else {
-      ctx.save(); ctx.scale(-1, 1);
-      ctx.drawImage(base, 0, 0, bleedPx, contentH, -bleedPx, bleedPx, bleedPx, contentH); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        bleedPx,
+        contentH,
+        -bleedPx,
+        bleedPx,
+        bleedPx,
+        contentH
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, 1);
-      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, contentH, -(contentW + 2 * bleedPx), bleedPx, bleedPx, contentH); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        0,
+        bleedPx,
+        contentH,
+        -(contentW + 2 * bleedPx),
+        bleedPx,
+        bleedPx,
+        contentH
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(1, -1);
-      ctx.drawImage(base, 0, 0, contentW, bleedPx, bleedPx, -bleedPx, contentW, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        contentW,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        contentW,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(1, -1);
-      ctx.drawImage(base, 0, contentH - bleedPx, contentW, bleedPx, bleedPx, -(contentH + 2 * bleedPx), contentW, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - bleedPx,
+        contentW,
+        bleedPx,
+        bleedPx,
+        -(contentH + 2 * bleedPx),
+        contentW,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, 0, 0, bleedPx, bleedPx, -bleedPx, -bleedPx, bleedPx, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        0,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        -bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -bleedPx, bleedPx, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        0,
+        bleedPx,
+        bleedPx,
+        -(contentW + 2 * bleedPx),
+        -bleedPx,
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, 0, contentH - bleedPx, bleedPx, bleedPx, -bleedPx, -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        0,
+        contentH - bleedPx,
+        bleedPx,
+        bleedPx,
+        -bleedPx,
+        -(contentH + 2 * bleedPx),
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
 
-      ctx.save(); ctx.scale(-1, -1);
-      ctx.drawImage(base, contentW - bleedPx, contentH - bleedPx, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
+      ctx.save();
+      ctx.scale(-1, -1);
+      ctx.drawImage(
+        base,
+        contentW - bleedPx,
+        contentH - bleedPx,
+        bleedPx,
+        bleedPx,
+        -(contentW + 2 * bleedPx),
+        -(contentH + 2 * bleedPx),
+        bleedPx,
+        bleedPx
+      );
+      ctx.restore();
     }
   }
 
@@ -337,13 +513,33 @@ function drawCornerGuides(
   ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
   // TR
   ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
+  ctx.fillRect(
+    gx + contentW - guideLenPx + guideWidthPx,
+    gy,
+    guideLenPx,
+    guideWidthPx
+  );
   // BL
-  ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
+  ctx.fillRect(
+    gx,
+    gy + contentH - guideLenPx + guideWidthPx,
+    guideWidthPx,
+    guideLenPx
+  );
   ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
   // BR
-  ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
+  ctx.fillRect(
+    gx + contentW,
+    gy + contentH - guideLenPx + guideWidthPx,
+    guideWidthPx,
+    guideLenPx
+  );
+  ctx.fillRect(
+    gx + contentW - guideLenPx + guideWidthPx,
+    gy + contentH,
+    guideLenPx,
+    guideWidthPx
+  );
 
   ctx.restore();
 }
@@ -435,7 +631,16 @@ export async function exportProxyPagesToPdf(opts: {
 
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
-        drawCornerGuides(ctx, x, y, contentW, contentH, bleedPx, guideColor, scaledGuideWidth);
+        drawCornerGuides(
+          ctx,
+          x,
+          y,
+          contentW,
+          contentH,
+          bleedPx,
+          guideColor,
+          scaledGuideWidth
+        );
         drawEdgeStubs(
           ctx,
           pageW,
@@ -456,7 +661,14 @@ export async function exportProxyPagesToPdf(opts: {
 
     const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "JPEG", 0, 0, pageWidthInches * 25.4, pageHeightInches * 25.4);
+    pdf.addImage(
+      pageImg,
+      "JPEG",
+      0,
+      0,
+      pageWidthInches * 25.4,
+      pageHeightInches * 25.4
+    );
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
