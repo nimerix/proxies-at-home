@@ -396,7 +396,8 @@ export default function ProxyBuilderPage() {
 
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
-
+    setIsLoading(true);
+    
     const infos = parseDeckToInfos(deckText);
 
     const uniqueMap = new Map<string, CardInfo>();
@@ -434,6 +435,9 @@ export default function ProxyBuilderPage() {
       };
     });
 
+    setIsLoading(false);
+    setLoadingTask(null);
+
     setCards((prev) => [...prev, ...expandedCards]);
 
     const newOriginals: Record<string, string> = {};
@@ -443,8 +447,6 @@ export default function ProxyBuilderPage() {
       }
     }
     setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
-
-    setLoadingTask("Processing Images");
 
     const processed: Record<string, string> = {};
     for (const [uuid, url] of Object.entries(newOriginals)) {
