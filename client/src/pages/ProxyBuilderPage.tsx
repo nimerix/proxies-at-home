@@ -98,8 +98,8 @@ export default function ProxyBuilderPage() {
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
   const pageRef = useRef<HTMLDivElement>(null);
-  const baseCardWidthMm = 63.5;
-  const baseCardHeightMm = 88.9;
+  const baseCardWidthMm = 63;
+  const baseCardHeightMm = 88;
   const totalCardWidth = baseCardWidthMm + bleedEdgeWidth * 2;
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
   const gridWidthMm = totalCardWidth * cols;

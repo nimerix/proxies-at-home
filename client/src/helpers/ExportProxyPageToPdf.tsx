@@ -577,8 +577,8 @@ export async function exportProxyPagesToPdf(opts: {
   const pageH = IN(pageHeightInches);
 
   // Card + bleed in pixels (at DPI)
-  const contentW = MM_TO_PX(63.5);
-  const contentH = MM_TO_PX(88.9);
+  const contentW = MM_TO_PX(63);
+  const contentH = MM_TO_PX(88);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardW = contentW + 2 * bleedPx;
   const cardH = contentH + 2 * bleedPx;
