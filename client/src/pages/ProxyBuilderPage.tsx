@@ -107,7 +107,7 @@ export default function ProxyBuilderPage() {
   const pageCapacity = cols * rows;
   const { loadingMap, ensureProcessed, reprocessSelectedImages } =
     useImageProcessing({
-      unit,
+      unit, 
       bleedEdgeWidth,
       selectedImages,
       setSelectedImages,
@@ -349,27 +349,26 @@ export default function ProxyBuilderPage() {
   }
 
   const handleImportMpcXml = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    setLoadingTask("Uploading Images");
-    setIsLoading(true);
     try {
       const file = e.target.files?.[0];
       if (!file) return;
 
       const raw = await readText(file);
       const schemaItems = tryParseMpcSchemaXml(raw);
-      const items = schemaItems && schemaItems.length ? schemaItems : parseMpcText(raw);
+      const items =
+        schemaItems && schemaItems.length ? schemaItems : parseMpcText(raw);
 
-      const startIndex = cards.length;
       const newCards: CardOption[] = [];
-      const frontUrlByUuid: Record<string, string> = {};
+      const newOriginals: Record<string, string> = {};
 
       for (const it of items) {
-        const qty = it.qty || 1;
-        for (let i = 0; i < qty; i++) {
+        for (let i = 0; i < (it.qty || 1); i++) {
           const uuid = crypto.randomUUID();
           const name =
             it.name ||
-            (it.filename ? inferCardNameFromFilename(it.filename) : `Custom Art ${startIndex + newCards.length + 1}`);
+            (it.filename
+              ? inferCardNameFromFilename(it.filename)
+              : "Custom Art");
 
           newCards.push({
             uuid,
@@ -381,61 +380,24 @@ export default function ProxyBuilderPage() {
 
           const mpcUrl = getMpcImageUrl(it.frontId);
           if (mpcUrl) {
-            frontUrlByUuid[uuid] = mpcUrl;
+            newOriginals[uuid] = mpcUrl;
           }
         }
       }
 
       setCards((prev) => [...prev, ...newCards]);
-
-      const originalsUpdate: Record<string, string> = {};
-      const processedUpdate: Record<string, string> = {};
-
-      const uuids = Object.keys(frontUrlByUuid);
-      const CONCURRENCY = 4;
-      let idx = 0;
-
-      async function worker() {
-        while (idx < uuids.length) {
-          const myIndex = idx++;
-          const uuid = uuids[myIndex];
-          const remoteUrl = frontUrlByUuid[uuid];
-          try {
-            const proxied = getLocalBleedImageUrl(remoteUrl);
-
-            const base64 = await urlToDataUrl(proxied);
-
-            const { originalBase64, withBleedBase64 } = await processToWithBleed(base64, {
-              hasBakedBleed: true,
-            });
-
-            originalsUpdate[uuid] = originalBase64;
-            processedUpdate[uuid] = withBleedBase64;
-          } catch (err) {
-            console.error("Failed to cache/process MPC image:", remoteUrl, err);
-          }
-        }
-      }
-
-      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-
-      if (Object.keys(originalsUpdate).length) {
-        setOriginalSelectedImages((prev) => ({ ...prev, ...originalsUpdate }));
-      }
-      if (Object.keys(processedUpdate).length) {
-        setSelectedImages((prev) => ({ ...prev, ...processedUpdate }));
+      if (Object.keys(newOriginals).length) {
+        setOriginalSelectedImages((prev) => ({ ...prev, ...newOriginals }));
       }
     } finally {
       if (e.target) e.target.value = "";
-      setIsLoading(false);
-      setLoadingTask(null);
     }
   };
 
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
     setIsLoading(true);
-
+    
     const infos = parseDeckToInfos(deckText);
 
     const uniqueMap = new Map<string, CardInfo>();
@@ -656,10 +618,11 @@ export default function ProxyBuilderPage() {
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).src = pngUrl;
                         }} // fallback
-                        className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl
+                        className={`w-full cursor-pointer border-4 ${
+                          originalSelectedImages[modalCard.uuid] === pngUrl
                             ? "border-green-500"
                             : "border-transparent"
-                          }`}
+                        }`}
                         onClick={async () => {
                           const proxiedUrl = getLocalBleedImageUrl(pngUrl);
                           const processed = await addBleedEdge(proxiedUrl);
