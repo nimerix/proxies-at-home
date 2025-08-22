@@ -54,6 +54,7 @@ import {
 } from "../helpers/Mpc";
 import CardCellLazy from "../components/CardCellLazy";
 import { useImageProcessing } from "../hooks/useImageProcessing";
+import { DEFAULT_PREFS, loadPrefs, savePrefs } from "../state/layoutPrefs";
 
 export default function ProxyBuilderPage() {
   const [deckText, setDeckText] = useState("");
@@ -107,7 +108,7 @@ export default function ProxyBuilderPage() {
   const pageCapacity = cols * rows;
   const { loadingMap, ensureProcessed, reprocessSelectedImages } =
     useImageProcessing({
-      unit, 
+      unit,
       bleedEdgeWidth,
       selectedImages,
       setSelectedImages,
@@ -132,6 +133,47 @@ export default function ProxyBuilderPage() {
 
     return newMap;
   };
+
+  useEffect(() => {
+    const prefs = loadPrefs();
+
+    if (typeof prefs.pageWidthIn === "number") setPageWidthIn(prefs.pageWidthIn);
+    if (typeof prefs.pageHeightIn === "number") setPageHeightIn(prefs.pageHeightIn);
+    if (typeof prefs.cols === "number") setCols(prefs.cols);
+    if (typeof prefs.rows === "number") setRows(prefs.rows);
+    if (typeof prefs.bleedEdgeWidth === "number") {
+      setBleedEdgeWidth(prefs.bleedEdgeWidth);
+      try { reprocessSelectedImages(cards, prefs.bleedEdgeWidth); } catch { }
+    }
+    if (typeof prefs.bleedEdge === "boolean") setBleedEdge(prefs.bleedEdge);
+    if (typeof prefs.guideColor === "string") setGuideColor(prefs.guideColor);
+    if (typeof prefs.guideWidth === "number") setGuideWidth(prefs.guideWidth);
+    if (typeof prefs.zoom === "number") setZoom(prefs.zoom);
+  }, []);
+
+  useEffect(() => {
+    savePrefs({
+      pageWidthIn,
+      pageHeightIn,
+      cols,
+      rows,
+      bleedEdgeWidth,
+      bleedEdge,
+      guideColor,
+      guideWidth,
+      zoom,
+    });
+  }, [
+    pageWidthIn,
+    pageHeightIn,
+    cols,
+    rows,
+    bleedEdgeWidth,
+    bleedEdge,
+    guideColor,
+    guideWidth,
+    zoom,
+  ]);
 
   useEffect(() => {
     const handler = () =>
@@ -397,7 +439,7 @@ export default function ProxyBuilderPage() {
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
     setIsLoading(true);
-    
+
     const infos = parseDeckToInfos(deckText);
 
     const uniqueMap = new Map<string, CardInfo>();
@@ -618,11 +660,10 @@ export default function ProxyBuilderPage() {
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).src = pngUrl;
                         }} // fallback
-                        className={`w-full cursor-pointer border-4 ${
-                          originalSelectedImages[modalCard.uuid] === pngUrl
-                            ? "border-green-500"
-                            : "border-transparent"
-                        }`}
+                        className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl
+                          ? "border-green-500"
+                          : "border-transparent"
+                          }`}
                         onClick={async () => {
                           const proxiedUrl = getLocalBleedImageUrl(pngUrl);
                           const processed = await addBleedEdge(proxiedUrl);
@@ -1168,6 +1209,24 @@ or Repurposing Bay (dft) 380`}
             >
               Download Decklist (.txt)
             </Button>
+            <div className="w-full flex justify-center">
+              <span
+                className="text-gray-400 hover:underline cursor-pointer text-sm font-medium"
+                onClick={() => {
+                  setPageWidthIn(DEFAULT_PREFS.pageWidthIn);
+                  setPageHeightIn(DEFAULT_PREFS.pageHeightIn);
+                  setCols(DEFAULT_PREFS.cols);
+                  setRows(DEFAULT_PREFS.rows);
+                  setBleedEdgeWidth(DEFAULT_PREFS.bleedEdgeWidth);
+                  setBleedEdge(DEFAULT_PREFS.bleedEdge);
+                  setGuideColor(DEFAULT_PREFS.guideColor);
+                  setGuideWidth(DEFAULT_PREFS.guideWidth);
+                  setZoom(DEFAULT_PREFS.zoom);
+                }}
+              >
+                Reset Settings
+              </span>
+            </div>
           </div>
 
           <div className="mt-auto space-y-3 pt-4">
