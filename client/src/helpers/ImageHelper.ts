@@ -129,8 +129,8 @@ export function addBleedEdge(
   }
 ): Promise<string> {
   return new Promise((resolve) => {
-    const targetCardWidth = 750;
-    const targetCardHeight = 1050;
+    const targetCardWidth = 744;
+    const targetCardHeight = 1040;
     const bleed = Math.round(
       getBleedInPixels(
         bleedOverride ?? opts?.bleedEdgeWidth ?? 0,
