@@ -1,32 +1,31 @@
 import { useRef, useState } from "react";
-import type { CardOption } from "../types/Card";
 import {
   addBleedEdge,
   getLocalBleedImageUrl,
   trimBleedEdge,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
+import { useCardsStore } from "../store";
+import type { CardOption } from "../types/Card";
 
-export function useImageProcessing(params: {
+export function useImageProcessing({
+  unit,
+  bleedEdgeWidth,
+}: {
   unit: "mm" | "in";
   bleedEdgeWidth: number;
-  selectedImages: Record<string, string>;
-  setSelectedImages: React.Dispatch<
-    React.SetStateAction<Record<string, string>>
-  >;
-  originalSelectedImages: Record<string, string>;
-  setOriginalSelectedImages: React.Dispatch<
-    React.SetStateAction<Record<string, string>>
-  >;
 }) {
-  const {
-    unit,
-    bleedEdgeWidth,
-    selectedImages,
-    setSelectedImages,
-    originalSelectedImages,
-    setOriginalSelectedImages,
-  } = params;
+  const selectedImages = useCardsStore((state) => state.selectedImages);
+  const originalSelectedImages = useCardsStore(
+    (state) => state.originalSelectedImages
+  );
+  const setSelectedImages = useCardsStore((state) => state.setSelectedImages);
+  const appendSelectedImages = useCardsStore(
+    (state) => state.appendSelectedImages
+  );
+  const appendOriginalSelectedImages = useCardsStore(
+    (state) => state.appendOriginalSelectedImages
+  );
 
   const [loadingMap, setLoadingMap] = useState<
     Record<string, "idle" | "loading" | "error">
@@ -66,9 +65,9 @@ export function useImageProcessing(params: {
           unit,
           bleedEdgeWidth,
         });
-        setSelectedImages((prev) => ({ ...prev, [uuid]: withBleed }));
+        appendSelectedImages({ [uuid]: withBleed });
         if (!originalSelectedImages[uuid]) {
-          setOriginalSelectedImages((prev) => ({ ...prev, [uuid]: src }));
+          appendOriginalSelectedImages({ [uuid]: src });
         }
         setLoadingMap((m) => ({ ...m, [uuid]: "idle" }));
       } catch (e) {

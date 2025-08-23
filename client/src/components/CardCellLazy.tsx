@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
-import type { CardOption } from "../types/Card";
 import { useOnScreen } from "../hooks/useOnScreen";
+import type { CardOption } from "../types/Card";
 
 type Props = {
   card: CardOption;

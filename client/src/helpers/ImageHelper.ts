@@ -120,15 +120,17 @@ export function blackenAllNearBlackPixels(
   ctx.putImageData(imageData, 0, 0);
 }
 
-export function addBleedEdge(
+export async function addBleedEdge(
   src: string,
   bleedOverride?: number,
   opts?: {
     unit?: "mm" | "in";
     bleedEdgeWidth?: number;
   }
-): Promise<string> {
-  return new Promise((resolve) => {
+) {
+  console.log("Adding bleed edge:", bleedOverride, opts);
+
+  return new Promise<string>((resolve) => {
     const targetCardWidth = 744;
     const targetCardHeight = 1040;
     const bleed = Math.round(
