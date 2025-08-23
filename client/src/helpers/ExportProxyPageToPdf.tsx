@@ -168,8 +168,8 @@ async function buildCardWithBleed(
   bleedPx: number,
   opts: { isUserUpload: boolean; hasBakedBleed?: boolean }
 ): Promise<HTMLCanvasElement> {
-  const contentW = MM_TO_PX(63.5);
-  const contentH = MM_TO_PX(88.9);
+  const contentW = MM_TO_PX(63);
+  const contentH = MM_TO_PX(89);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
