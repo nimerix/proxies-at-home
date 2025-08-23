@@ -39,9 +39,6 @@ export function PageView() {
   const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
   const zoom = useSettingsStore((state) => state.zoom);
 
-  // const bleedEdge = useSettingsStore((state) => state.bleedEdge);
-  // const guideWidth = useSettingsStore((state) => state.guideWidth);
-
   const pageRef = useRef<HTMLDivElement>(null);
   const cards = useCardsStore((state) => state.cards);
   const selectedImages = useCardsStore((state) => state.selectedImages);
@@ -347,7 +344,7 @@ export function PageView() {
           </SortableContext>
         </DndContext>
       </div>
-
+      
       <ArtworkModal />
     </div>
   );

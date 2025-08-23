@@ -282,7 +282,7 @@ export function UploadSection() {
     }
     appendOriginalSelectedImages(newOriginals);
 
-    setLoadingTask("Processing Images");
+    setLoadingTask(null); //allows processing to lazy load
 
     const processed: Record<string, string> = {};
     for (const [uuid, url] of Object.entries(newOriginals)) {
