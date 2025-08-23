@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import { API_BASE } from "../constants";
 import type { CardOption } from "../types/Card";
+import { getPatchNearCorner } from "./ImageHelper";
 
 const DPI = 600;
 // eslint-disable-next-line react-refresh/only-export-components
@@ -203,70 +204,105 @@ async function buildCardWithBleed(
   bctx.imageSmoothingQuality = "high";
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
-  // Corner fill logic (preview parity)
-  const cornerSize = 60;
-  const sampleInset = 20;
+  const dpiFactor = DPI / 300;
+  const cornerSize = Math.round(30 * dpiFactor);
+  const sampleInset = Math.round(10 * dpiFactor);
+  const patchSize = Math.round(20 * dpiFactor);
+  const blurPx = Math.max(1, Math.round(1.5 * dpiFactor));
   const blackThreshold = 30;
 
   const fillIfLight = (r: number, g: number, b: number, a: number) =>
     a === 0 || (r > 200 && g > 200 && b > 200);
 
-  const averageColor = (
+  function drawFeatheredPatch(
+    dst: CanvasRenderingContext2D,
     sx: number,
     sy: number,
-    w: number,
-    h: number
-  ): string => {
-    const clampedX = Math.max(0, Math.min(contentW - w, sx));
-    const clampedY = Math.max(0, Math.min(contentH - h, sy));
-    const data = bctx.getImageData(clampedX, clampedY, w, h).data;
-    let r = 0,
-      g = 0,
-      b = 0,
-      count = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const a = data[i + 3];
-      if (a === 0) continue;
-      r += data[i];
-      g += data[i + 1];
-      b += data[i + 2];
-      count++;
-    }
-    if (count === 0) return "rgb(0,0,0)";
-    r = Math.round(r / count);
-    g = Math.round(g / count);
-    b = Math.round(b / count);
-    return `rgb(${r}, ${g}, ${b})`;
-  };
+    tx: number,
+    ty: number,
+    dw: number,
+    dh: number
+  ) {
+    // copy source region into an offscreen buffer
+    const buf = document.createElement("canvas");
+    buf.width = dw;
+    buf.height = dh;
+    const bctx = buf.getContext("2d")!;
+    bctx.imageSmoothingEnabled = true;
+    bctx.imageSmoothingQuality = "high";
+    bctx.drawImage(dst.canvas, sx, sy, dw, dh, 0, 0, dw, dh);
+
+    // draw once with blur to kill seams, once sharp on top with slight alpha
+    dst.save();
+    dst.imageSmoothingEnabled = true;
+    dst.imageSmoothingQuality = "high";
+
+    // soft base
+    dst.filter = `blur(${blurPx}px)`;
+    dst.globalAlpha = 0.85;
+    dst.drawImage(buf, tx, ty, dw, dh);
+
+    // sharp pass to keep detail
+    dst.filter = "none";
+    dst.globalAlpha = 0.9;
+    dst.drawImage(buf, tx, ty, dw, dh);
+
+    dst.globalAlpha = 1;
+    dst.restore();
+  }
 
   const corners = [
-    { x: 0, y: 0 },
-    { x: contentW - cornerSize, y: 0 },
-    { x: 0, y: contentH - cornerSize },
-    { x: contentW - cornerSize, y: contentH - cornerSize },
+    { x: 0, y: 0 }, // TL
+    { x: contentW - cornerSize, y: 0 }, // TR
+    { x: 0, y: contentH - cornerSize }, // BL
+    { x: contentW - cornerSize, y: contentH - cornerSize }, // BR
   ];
-  corners.forEach(({ x, y }) => {
-    const data = bctx.getImageData(x, y, cornerSize, cornerSize).data;
+
+  for (const { x, y } of corners) {
+    const block = bctx.getImageData(x, y, cornerSize, cornerSize).data;
     let shouldFill = false;
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i],
-        g = data[i + 1],
-        b = data[i + 2],
-        a = data[i + 3];
+    for (let i = 0; i < block.length; i += 4) {
+      const r = block[i],
+        g = block[i + 1],
+        b = block[i + 2],
+        a = block[i + 3];
       if (fillIfLight(r, g, b, a)) {
         shouldFill = true;
         break;
       }
     }
-    if (shouldFill) {
-      const sx = x < contentW / 2 ? sampleInset : contentW - sampleInset - 10;
-      const sy = y < contentH / 2 ? sampleInset : contentH - sampleInset - 10;
-      bctx.fillStyle = averageColor(sx, sy, 10, 10);
-      bctx.fillRect(x, y, cornerSize, cornerSize);
-    }
-  });
+    if (!shouldFill) continue;
 
-  // Scale blackening borders by OUTPUT DPI
+    const seedX =
+      x < contentW / 2 ? sampleInset : contentW - sampleInset - patchSize;
+    const seedY =
+      y < contentH / 2 ? sampleInset : contentH - sampleInset - patchSize;
+
+    const { sx, sy } = getPatchNearCorner(
+      seedX,
+      seedY,
+      contentW,
+      contentH,
+      patchSize,
+      bctx
+    );
+
+    for (let ty = y; ty < y + cornerSize; ty += patchSize) {
+      for (let tx = x; tx < x + cornerSize; tx += patchSize) {
+        const dw = Math.min(patchSize, x + cornerSize - tx);
+        const dh = Math.min(patchSize, y + cornerSize - ty);
+
+        // tiny jitter to avoid obvious tiling seams
+        const jx = sx + Math.floor((Math.random() - 0.5) * (patchSize * 0.25));
+        const jy = sy + Math.floor((Math.random() - 0.5) * (patchSize * 0.25));
+        const csx = Math.max(0, Math.min(contentW - dw, jx));
+        const csy = Math.max(0, Math.min(contentH - dh, jy));
+
+        drawFeatheredPatch(bctx, csx, csy, tx, ty, dw, dh);
+      }
+    }
+  }
+
   blackenAllNearBlackPixels(
     bctx,
     contentW,

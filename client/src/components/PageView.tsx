@@ -344,7 +344,7 @@ export function PageView() {
           </SortableContext>
         </DndContext>
       </div>
-      
+
       <ArtworkModal />
     </div>
   );
