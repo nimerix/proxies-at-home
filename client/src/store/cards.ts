@@ -1,13 +1,15 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type { CardOption } from "../types/Card";
 
 type Store = {
+  // persisted
   cards: CardOption[];
   setCards: (cards: CardOption[]) => void;
   appendCards: (newCards: CardOption[]) => void;
   updateCard: (pos: number, updatedCard: Partial<CardOption>) => void;
 
+  // volatile (NOT persisted)
   selectedImages: Record<string, string>;
   setSelectedImages: (images: Record<string, string>) => void;
   appendSelectedImages: (newImages: Record<string, string>) => void;
@@ -19,7 +21,7 @@ type Store = {
 
 export const useCardsStore = create<Store>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       cards: [],
       setCards: (cards) => set({ cards }),
       appendCards: (newCards) =>
@@ -50,11 +52,26 @@ export const useCardsStore = create<Store>()(
         })),
     }),
     {
-      name: "proxxied:selected-cards:v1",
+      name: "proxxied:cards:v2",
+      version: 2,
+
+      // Persist ONLY lightweight card metadata
       partialize: (state) => ({
         cards: state.cards,
-        originalSelectedImages: state.originalSelectedImages,
       }),
+
+      // (optional) explicitly choose storage; localStorage is fine since it's tiny now
+      storage: createJSONStorage(() => localStorage),
+
+      // migrate any older payloads by dropping image maps if they existed
+      migrate: (persistedState: any, version) => {
+        if (!persistedState) return persistedState;
+        if (version < 2) {
+          delete persistedState.selectedImages;
+          delete persistedState.originalSelectedImages;
+        }
+        return persistedState;
+      },
     }
   )
 );

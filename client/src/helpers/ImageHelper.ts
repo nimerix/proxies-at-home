@@ -40,7 +40,7 @@ export function trimBleedEdge(dataUrl: string): Promise<string> {
     img.onload = () => {
       let bleedTrim = 76;
       const canvas = document.createElement("canvas");
-      console.log(img.height);
+
       if (img.height >= 2220 && img.height < 2960) {
         bleedTrim = 78;
       }

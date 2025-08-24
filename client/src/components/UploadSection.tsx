@@ -148,8 +148,6 @@ export function UploadSection() {
         hasBakedBleed: false,
       }));
 
-      console.log(newCards);
-
       appendCards(newCards);
 
       const base64s = await Promise.all(
@@ -163,7 +161,6 @@ export function UploadSection() {
         )
       );
 
-      console.log(base64s);
       const newOriginals: Record<string, string> = {};
       const processed: Record<string, string> = {};
 
@@ -172,9 +169,7 @@ export function UploadSection() {
       });
 
       for (const [uuid, b64] of Object.entries(newOriginals)) {
-        console.log(b64);
         const bleedImage = await addBleedEdge(b64);
-        console.log(bleedImage);
         processed[uuid] = bleedImage;
       }
 
