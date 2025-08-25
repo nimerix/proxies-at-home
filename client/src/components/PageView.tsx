@@ -12,6 +12,7 @@ import {
   SortableContext,
 } from "@dnd-kit/sortable";
 import { Button, Label } from "flowbite-react";
+import { Copy, Trash } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import fullLogo from "../assets/fullLogo.png";
 import CardCellLazy from "../components/CardCellLazy";
@@ -32,8 +33,9 @@ const baseCardWidthMm = 63;
 const baseCardHeightMm = 88;
 
 export function PageView() {
-  const pageWidthIn = useSettingsStore((state) => state.pageWidthIn);
-  const pageHeightIn = useSettingsStore((state) => state.pageHeightIn);
+  const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
+  const pageWidth = useSettingsStore((state) => state.pageWidth);
+  const pageHeight = useSettingsStore((state) => state.pageHeight);
   const columns = useSettingsStore((state) => state.columns);
   const rows = useSettingsStore((state) => state.rows);
   const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
@@ -171,7 +173,7 @@ export function PageView() {
       <div ref={pageRef} className="flex flex-col gap-[1rem]">
         {contextMenu.visible && contextMenu.cardIndex !== null && (
           <div
-            className="absolute bg-white border border-gray-300 rounded shadow-md z-50 text-sm space-y-1"
+            className="absolute bg-white border rounded-xl border-gray-300 shadow-md z-50 text-sm flex flex-col gap-1"
             style={{
               top: contextMenu.y,
               left: contextMenu.x,
@@ -182,21 +184,24 @@ export function PageView() {
             }
           >
             <Button
-              className="bg-gray-400 hover:bg-gray-500 w-full"
+              size="xs"
               onClick={() => {
                 duplicateCard(contextMenu.cardIndex!);
                 setContextMenu({ ...contextMenu, visible: false });
               }}
             >
+              <Copy className="size-3 mr-1" />
               Duplicate
             </Button>
             <Button
-              className="bg-red-700 hover:bg-red-800 w-full"
+              size="xs"
+              color="red"
               onClick={() => {
                 deleteCard(contextMenu.cardIndex!);
                 setContextMenu({ ...contextMenu, visible: false });
               }}
             >
+              <Trash className="size-3 mr-1" />
               Delete
             </Button>
           </div>
@@ -235,11 +240,11 @@ export function PageView() {
             {chunkCards(cards, pageCapacity).map((page, pageIndex) => (
               <div
                 key={pageIndex}
-                className="proxy-page relative bg-white dark:bg-gray-700"
+                className="proxy-page relative bg-white"
                 style={{
                   zoom: zoom,
-                  width: `${pageWidthIn}in`,
-                  height: `${pageHeightIn}in`,
+                  width: `${pageWidth}${pageSizeUnit}`,
+                  height: `${pageHeight}${pageSizeUnit}`,
                   display: "flex",
                   flexDirection: "column",
                   justifyContent: "center",
@@ -329,10 +334,6 @@ export function PageView() {
                 </div>
 
                 <EdgeCutLines
-                  pageWidthIn={pageWidthIn}
-                  pageHeightIn={pageHeightIn}
-                  columns={columns}
-                  rows={rows}
                   totalCardWidthMm={totalCardWidth}
                   totalCardHeightMm={totalCardHeight}
                   baseCardWidthMm={baseCardWidthMm}
