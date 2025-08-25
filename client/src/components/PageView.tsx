@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   closestCenter,
   DndContext,
@@ -240,7 +239,7 @@ export function PageView() {
             {chunkCards(cards, pageCapacity).map((page, pageIndex) => (
               <div
                 key={pageIndex}
-                className="proxy-page relative bg-white"
+                className="proxy-page relative bg-white dark:bg-gray-700"
                 style={{
                   zoom: zoom,
                   width: `${pageWidth}${pageSizeUnit}`,
