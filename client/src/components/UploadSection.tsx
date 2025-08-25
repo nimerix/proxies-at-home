@@ -27,6 +27,7 @@ import {
   HR,
   List,
   ListItem,
+  Select,
   Textarea,
 } from "flowbite-react";
 import { ExternalLink } from "lucide-react";
@@ -480,8 +481,8 @@ or Repurposing Bay (dft) 380`}
             </div>
             <HelperText>Used for Scryfall lookups</HelperText>
 
-            <select
-              className="w-full rounded-md bg-gray-300 dark:bg-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+            <Select
+              className="w-full rounded-md bg-gray-300 dark:bg-gray-600 my-2 text-sm text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
               value={globalLanguage}
               onChange={(e) => setGlobalLanguage(e.target.value)}
             >
@@ -490,7 +491,7 @@ or Repurposing Bay (dft) 380`}
                   {o.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>

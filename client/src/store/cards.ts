@@ -5,8 +5,6 @@ import type { CardOption } from "../types/Card";
 type Store = {
   // ---------- persisted ----------
   cards: CardOption[];
-  xmlByUuid: Record<string, string>;
-  globalXml: string | null;
 
   globalLanguage: string;
   setGlobalLanguage: (lang: string) => void;
@@ -14,10 +12,6 @@ type Store = {
   setCards: (cards: CardOption[]) => void;
   appendCards: (newCards: CardOption[]) => void;
   updateCard: (pos: number, updatedCard: Partial<CardOption>) => void;
-
-  setXmlForCard: (uuid: string, xml: string) => void;
-  removeXmlForCard: (uuid: string) => void;
-  setGlobalXml: (xml: string | null) => void;
 
   // ---------- volatile (NOT persisted) ----------
   selectedImages: Record<string, string>;
@@ -49,8 +43,6 @@ export const useCardsStore = create<Store>()(
     (set, _) => ({
       // ---------- persisted ----------
       cards: [],
-      xmlByUuid: {},
-      globalXml: null,
 
       globalLanguage: "en",
       setGlobalLanguage: (lang) => set({ globalLanguage: lang }),
@@ -64,16 +56,6 @@ export const useCardsStore = create<Store>()(
             index === pos ? { ...card, ...updatedCard } : card
           ),
         })),
-
-      setXmlForCard: (uuid, xml) =>
-        set((state) => ({ xmlByUuid: { ...state.xmlByUuid, [uuid]: xml } })),
-      removeXmlForCard: (uuid) =>
-        set((state) => {
-          const next = { ...state.xmlByUuid };
-          delete next[uuid];
-          return { xmlByUuid: next };
-        }),
-      setGlobalXml: (xml) => set({ globalXml: xml }),
 
       // ---------- volatile ----------
       selectedImages: {},
@@ -131,8 +113,7 @@ export const useCardsStore = create<Store>()(
               originalSelectedImages,
               uploadedImages,
               uploadedOriginalImages,
-              uploadedFiles,
-              xmlByUuid,
+              uploadedFiles
             } = state;
 
             delete selectedImages[uuid];
@@ -141,18 +122,13 @@ export const useCardsStore = create<Store>()(
             delete uploadedOriginalImages[uuid];
             delete uploadedFiles[uuid];
 
-            // also remove persisted XML for that card
-            const nextXml = { ...xmlByUuid };
-            delete nextXml[uuid];
-
             return {
               cards,
               selectedImages: { ...selectedImages },
               originalSelectedImages: { ...originalSelectedImages },
               uploadedImages: { ...uploadedImages },
               uploadedOriginalImages: { ...uploadedOriginalImages },
-              uploadedFiles: { ...uploadedFiles },
-              xmlByUuid: nextXml,
+              uploadedFiles: { ...uploadedFiles }
             };
           }
           return { cards };
@@ -183,14 +159,11 @@ export const useCardsStore = create<Store>()(
         }),
     }),
     {
-      name: "proxxied:cards:v3", // bump to v3 to introduce persisted XML
+      name: "proxxied:cards:v3", 
       version: 3,
 
-      // Persist ONLY lightweight metadata + XML
       partialize: (state) => ({
         cards: state.cards,
-        xmlByUuid: state.xmlByUuid,
-        globalXml: state.globalXml,
       }),
 
       storage: createJSONStorage(() => localStorage),
@@ -198,16 +171,12 @@ export const useCardsStore = create<Store>()(
       migrate: (persistedState: any, version) => {
         if (!persistedState) return persistedState;
 
-        // v1/v2 -> v3: ensure XML containers exist, and drop any heavy blobs
         if (version < 3) {
           delete persistedState.selectedImages;
           delete persistedState.originalSelectedImages;
           delete persistedState.uploadedImages;
           delete persistedState.uploadedOriginalImages;
           delete persistedState.uploadedFiles;
-
-          if (!persistedState.xmlByUuid) persistedState.xmlByUuid = {};
-          if (!("globalXml" in persistedState)) persistedState.globalXml = null;
         }
         return persistedState;
       },
