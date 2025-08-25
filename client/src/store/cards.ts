@@ -8,6 +8,9 @@ type Store = {
   xmlByUuid: Record<string, string>;
   globalXml: string | null;
 
+  globalLanguage: string;
+  setGlobalLanguage: (lang: string) => void;
+
   setCards: (cards: CardOption[]) => void;
   appendCards: (newCards: CardOption[]) => void;
   updateCard: (pos: number, updatedCard: Partial<CardOption>) => void;
@@ -48,6 +51,9 @@ export const useCardsStore = create<Store>()(
       cards: [],
       xmlByUuid: {},
       globalXml: null,
+
+      globalLanguage: "en",
+      setGlobalLanguage: (lang) => set({ globalLanguage: lang }),
 
       setCards: (cards) => set({ cards }),
       appendCards: (newCards) =>

@@ -1,6 +1,6 @@
 import cardBack from "@/assets/cardBack.png";
 import fullLogo from "@/assets/fullLogo.png";
-import { API_BASE } from "@/constants";
+import { API_BASE, LANGUAGE_OPTIONS } from "@/constants";
 import {
   cardKey,
   parseDeckToInfos,
@@ -58,6 +58,9 @@ export function UploadSection() {
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
   );
+
+  const globalLanguage = useCardsStore((s) => s.globalLanguage ?? "en");
+  const setGlobalLanguage = useCardsStore((s) => s.setGlobalLanguage ?? (() => { }));
 
   async function processToWithBleed(
     srcBase64: string,
@@ -253,6 +256,7 @@ export function UploadSection() {
         cardQueries: uniqueInfos,
         cardNames: uniqueNames,
         cardArt: "art",
+        language: globalLanguage,
       }
     );
 
@@ -468,6 +472,25 @@ or Repurposing Bay (dft) 380`}
             <Button color="red" onClick={handleClear}>
               Clear Cards
             </Button>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <h6 className="font-medium dark:text-white">Language</h6>
+            </div>
+            <HelperText>Used for Scryfall lookups</HelperText>
+
+            <select
+              className="w-full rounded-md bg-gray-300 dark:bg-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
+              value={globalLanguage}
+              onChange={(e) => setGlobalLanguage(e.target.value)}
+            >
+              {LANGUAGE_OPTIONS.map((o) => (
+                <option key={o.code} value={o.code}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

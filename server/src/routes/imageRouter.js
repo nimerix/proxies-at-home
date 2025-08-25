@@ -3,12 +3,28 @@ const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
 const multer = require("multer");
+const crypto = require("crypto");
+
 const {
   getScryfallPngImagesForCard,
   getImagesForCardInfo,
   getScryfallPngImagesForCardPrints,
 } = require("../utils/getCardImagesPaged");
-const crypto = require("crypto");
+
+// -------------------- cache helpers --------------------
+
+const imageRouter = express.Router();
+
+const cacheDir = path.join(__dirname, "..", "cached-images");
+if (!fs.existsSync(cacheDir)) {
+  fs.mkdirSync(cacheDir);
+}
+
+const uploadDir = path.join(__dirname, "..", "uploaded-images");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir });
 
 // Make a stable cache filename from the FULL raw URL (path + query)
 function cachePathFromUrl(originalUrl) {
@@ -26,18 +42,7 @@ function cachePathFromUrl(originalUrl) {
   return path.join(cacheDir, `${hash}${ext}`);
 }
 
-const imageRouter = express.Router();
-
-const cacheDir = path.join(__dirname, "..", "cached-images");
-if (!fs.existsSync(cacheDir)) {
-  fs.mkdirSync(cacheDir);
-}
-
-const uploadDir = path.join(__dirname, "..", "uploaded-images");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-const upload = multer({ dest: uploadDir });
+// -------------------- API: fetch images for cards --------------------
 
 imageRouter.post("/", async (req, res) => {
   const cardQueries = Array.isArray(req.body.cardQueries)
@@ -46,7 +51,15 @@ imageRouter.post("/", async (req, res) => {
   const cardNames = Array.isArray(req.body.cardNames)
     ? req.body.cardNames
     : null;
+
   const unique = req.body.cardArt || "art";
+  // NEW: language & fallback (optional)
+  const language = (req.body.language || "en").toLowerCase(); // NEW
+  const fallbackToEnglish =
+    typeof req.body.fallbackToEnglish === "boolean"
+      ? req.body.fallbackToEnglish
+      : true; // NEW
+
   if (!cardQueries && !cardNames) {
     return res
       .status(400)
@@ -54,16 +67,34 @@ imageRouter.post("/", async (req, res) => {
   }
 
   const infos = cardQueries
-    ? cardQueries.map((q) => ({ name: q.name, set: q.set, number: q.number }))
-    : cardNames.map((name) => ({ name }));
+    ? cardQueries.map((q) => ({
+        name: q.name,
+        set: q.set,
+        number: q.number,
+        // allow per-card language override if provided
+        language: (q.language || language || "en").toLowerCase(), // NEW
+      }))
+    : cardNames.map((name) => ({ name, language })); // NEW
 
   try {
     const results = await Promise.all(
       infos.map(async (ci) => {
-        const imageUrls = await getImagesForCardInfo(ci, unique);
-        return { name: ci.name, set: ci.set, number: ci.number, imageUrls };
+        const imageUrls = await getImagesForCardInfo(
+          ci,
+          unique,
+          ci.language, // NEW
+          fallbackToEnglish // NEW
+        );
+        return {
+          name: ci.name,
+          set: ci.set,
+          number: ci.number,
+          imageUrls,
+          language: ci.language, // NEW: echo which lang was used
+        };
       })
     );
+
     return res.json(results);
   } catch (err) {
     console.error("Fetch error:", err?.message);
@@ -72,6 +103,8 @@ imageRouter.post("/", async (req, res) => {
       .json({ error: "Failed to fetch images from Scryfall." });
   }
 });
+
+// -------------------- proxy (cached) --------------------
 
 imageRouter.get("/proxy", async (req, res) => {
   const url = req.query.url;
@@ -122,6 +155,8 @@ imageRouter.get("/proxy", async (req, res) => {
   }
 });
 
+// -------------------- maintenance & uploads --------------------
+
 imageRouter.delete("/", (req, res) => {
   fs.readdir(cacheDir, (err, files) => {
     if (err) {
@@ -150,6 +185,8 @@ imageRouter.post("/upload", upload.array("images"), (req, res) => {
     })),
   });
 });
+
+// -------------------- Google Drive helper --------------------
 
 imageRouter.get("/front", async (req, res) => {
   const id = String(req.query.id || "").trim();

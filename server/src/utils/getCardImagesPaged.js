@@ -8,32 +8,56 @@ const AX = axios.create({
 });
 
 /**
- * Core: given a CardInfo { name, set?, number? }, return PNG urls.
- * If set && number => try exact printing; else set+name; else name-only.
+ * Core: given a CardInfo { name, set?, number?, language? }, return PNG urls.
+ * If set && number => try exact printing (that language); else set+name; else name-only.
  * `unique` can be "art" or "prints".
  */
-async function getImagesForCardInfo(cardInfo, unique = "art") {
+async function getImagesForCardInfo(
+  cardInfo,
+  unique = "art",
+  language = "en", // NEW
+  fallbackToEnglish = true // NEW
+) {
   const { name, set, number } = cardInfo || {};
+  const lang = (language || "en").toLowerCase();
 
-  // 1) Exact printing: set + collector number + name
+  // 1) Exact printing: set + collector number + name (language filter still applied)
   if (set && number) {
-    const q = `set:${set} number:${escapeColon(number)} name:"${name}" include:extras unique:prints`;
-    const urls = await fetchPngsByQuery(q);
+    // include language
+    const q = `set:${set} number:${escapeColon(
+      number
+    )} name:"${name}" include:extras unique:prints lang:${lang}`; // NEW
+    let urls = await fetchPngsByQuery(q);
+    if (!urls.length && fallbackToEnglish && lang !== "en") {
+      const qEn = `set:${set} number:${escapeColon(
+        number
+      )} name:"${name}" include:extras unique:prints lang:en`; // NEW
+      urls = await fetchPngsByQuery(qEn);
+    }
     if (urls.length) return urls;
-    // fallback if exact failed (mis-typed number or edge cases)
+    // fall through to next strategy if exact failed
   }
 
   // 2) Set + name (all printings in set for that name)
   if (set && !number) {
-    const q = `set:${set} name:"${name}" include:extras unique:${unique}`;
-    const urls = await fetchPngsByQuery(q);
+    const q = `set:${set} name:"${name}" include:extras unique:${unique} lang:${lang}`; // NEW
+    let urls = await fetchPngsByQuery(q);
+    if (!urls.length && fallbackToEnglish && lang !== "en") {
+      const qEn = `set:${set} name:"${name}" include:extras unique:${unique} lang:en`; // NEW
+      urls = await fetchPngsByQuery(qEn);
+    }
     if (urls.length) return urls;
     // fallback if empty
   }
 
-  // 3) Name-only exact match (your current behavior)
-  const q = `!"${name}" include:extras unique:${unique}`;
-  return fetchPngsByQuery(q);
+  // 3) Name-only exact match (prefer language)
+  const q = `!"${name}" include:extras unique:${unique} lang:${lang}`; // NEW
+  let urls = await fetchPngsByQuery(q);
+  if (!urls.length && fallbackToEnglish && lang !== "en") {
+    const qEn = `!"${name}" include:extras unique:${unique} lang:en`; // NEW
+    urls = await fetchPngsByQuery(qEn);
+  }
+  return urls;
 }
 
 /** Escape colon in collector numbers like "321a" (safe) */
@@ -73,15 +97,23 @@ async function fetchPngsByQuery(query) {
   return pngs;
 }
 
-module.exports = {
-  getImagesForCardInfo,
-  // Back-compat helpers if you still use name-only paths elsewhere:
-  getScryfallPngImagesForCard: async (cardName, unique = "art") => {
-    const q = `!"${cardName}" include:extras unique:${unique}`;
-    return fetchPngsByQuery(q);
-  },
-  getScryfallPngImagesForCardPrints: async (name) => {
-    const q = `!"${name}" include:extras unique:prints`;
-    return fetchPngsByQuery(q);
-  },
+module.exports.getImagesForCardInfo = getImagesForCardInfo;
+module.exports.getScryfallPngImagesForCard = async (cardName, unique = "art", language = "en", fallbackToEnglish = true) => {
+  // name-only helper with language support
+  const q = `!"${cardName}" include:extras unique:${unique} lang:${(language || "en").toLowerCase()}`;
+  let urls = await fetchPngsByQuery(q);
+  if (!urls.length && fallbackToEnglish && language !== "en") {
+    const qEn = `!"${cardName}" include:extras unique:${unique} lang:en`;
+    urls = await fetchPngsByQuery(qEn);
+  }
+  return urls;
+};
+module.exports.getScryfallPngImagesForCardPrints = async (name, language = "en", fallbackToEnglish = true) => {
+  const q = `!"${name}" include:extras unique:prints lang:${(language || "en").toLowerCase()}`;
+  let urls = await fetchPngsByQuery(q);
+  if (!urls.length && fallbackToEnglish && language !== "en") {
+    const qEn = `!"${name}" include:extras unique:prints lang:en`;
+    urls = await fetchPngsByQuery(qEn);
+  }
+  return urls;
 };
