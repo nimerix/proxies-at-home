@@ -11,10 +11,16 @@ type PresetOption = {
 };
 
 const layoutPresets: PresetOption[] = [
-  { name: "Letter", width: 8.5, height: 11, unit: "in" },
-  { name: "A4", width: 210, height: 297, unit: "mm" },
-  { name: "Tabloid", width: 11, height: 17, unit: "in" },
-  { name: "A3", width: 297, height: 420, unit: "mm" },
+  { name: "Letter",  width: 8.5,  height: 11,  unit: "in" },
+  { name: "Legal",   width: 14,   height: 8.5, unit: "in" },
+  { name: "Tabloid", width: 11,   height: 17,  unit: "in" },
+  { name: "SuperB",  width: 13,   height: 19,  unit: "in" },
+  { name: "ArchA",   width: 9,    height: 12,  unit: "in" },
+  { name: "ArchB",   width: 18,   height: 12,  unit: "in" },
+  { name: "A4",      width: 210,  height: 297, unit: "mm" },
+  { name: "A3",      width: 297,  height: 420, unit: "mm" },
+  { name: "A2",      width: 420,  height: 594, unit: "mm" },
+  { name: "A1",      width: 594,  height: 841, unit: "mm" },
 ];
 
 const getPresetLabel = (preset: PresetOption, orientation: PageOrientation) => {
