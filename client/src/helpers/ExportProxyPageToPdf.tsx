@@ -6,13 +6,32 @@ import { getPatchNearCorner } from "./ImageHelper";
 
 const PDF_PAGE_COLOR = "#FFFFFF";
 const DPI = 600;
-// eslint-disable-next-line react-refresh/only-export-components
 const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
 const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
 
 function getLocalBleedImageUrl(originalUrl: string) {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
+}
+
+const JSPDF_SUPPORTED = new Set([
+  "letter", "legal", "tabloid", "a4", "a3", "a2", "a1",
+]);
+
+function resolveJsPdfFormat(opts: {
+  preset: LayoutPreset;
+  unit: "mm" | "in";
+  width: number;   
+  height: number;  
+}): string | [number, number] {
+  const { preset, unit, width, height } = opts;
+
+  if (JSPDF_SUPPORTED.has(preset.toLowerCase())) {
+    return preset.toLowerCase();
+  }
+
+  const toMm = (n: number) => (unit === "in" ? n * 25.4 : n);
+  return [toMm(width), toMm(height)];
 }
 
 function preferPng(url: string) {
@@ -644,10 +663,17 @@ export async function exportProxyPagesToPdf({
   const pdfWidth = pageSizeUnit === "in" ? pageWidth * 25.4 : pageWidth;
   const pdfHeight = pageSizeUnit === "in" ? pageHeight * 25.4 : pageHeight;
 
+  const format = resolveJsPdfFormat({
+    preset: pageSizePreset,
+    unit: pageSizeUnit,
+    width: pageWidth,
+    height: pageHeight,
+  });
+
   const pdf = new jsPDF({
     orientation: pageOrientation,
     unit: "mm",
-    format: pageSizePreset,
+    format, // string or [wMm, hMm]
     compress: true,
   });
 
