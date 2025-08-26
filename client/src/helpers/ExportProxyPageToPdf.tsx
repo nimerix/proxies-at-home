@@ -591,8 +591,8 @@ export async function exportProxyPagesToPdf(opts: {
   bleedEdgeWidthMm: number;
   guideColor: string;
   guideWidthPx: number;
-  pageWidthInches: number;   // may actually be mm if > 50
-  pageHeightInches: number;  // may actually be mm if > 50
+  pageWidthInches: number;
+  pageHeightInches: number;
   columns: number;
   rows: number;
 }) {
@@ -609,17 +609,9 @@ export async function exportProxyPagesToPdf(opts: {
     rows,
   } = opts;
 
-  // bit of a bandage for now since A3/A4 exports are not working properly
-  const widthIn =
-    pageWidthInches > 50 ? pageWidthInches / 25.4 : pageWidthInches;
-  const heightIn =
-    pageHeightInches > 50 ? pageHeightInches / 25.4 : pageHeightInches;
-
-  const widthMm = widthIn * 25.4;
-  const heightMm = heightIn * 25.4;
-
-  const pageW = IN(widthIn);
-  const pageH = IN(heightIn);
+  // Canvas size (pixels at DPI) — used for high-res page render
+  const pageW = IN(pageWidthInches);
+  const pageH = IN(pageHeightInches);
 
   // Card + bleed in pixels (at DPI)
   const contentW = MM_TO_PX(63);
@@ -642,9 +634,9 @@ export async function exportProxyPagesToPdf(opts: {
   if (pages.length === 0) pages.push([]);
 
   const pdf = new jsPDF({
-    orientation: widthIn >= heightIn ? "landscape" : "portrait",
+    orientation: pageW >= pageH ? "landscape" : "portrait",
     unit: "mm",
-    format: [widthMm, heightMm],
+    format: [pageWidthInches * 25.4, pageHeightInches * 25.4],
     compress: true,
   });
 
@@ -706,7 +698,14 @@ export async function exportProxyPagesToPdf(opts: {
 
     const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "JPEG", 0, 0, widthMm, heightMm);
+    pdf.addImage(
+      pageImg,
+      "JPEG",
+      0,
+      0,
+      pageWidthInches * 25.4,
+      pageHeightInches * 25.4
+    );
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
