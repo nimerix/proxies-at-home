@@ -64,12 +64,23 @@ function calibratedBleedTrimPxForHeight(h: number) {
   return 156;
 }
 
-function loadImage(src: string) {
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  // If it’s an http(s) URL, fetch to a blob first to avoid tainting
+  if (/^https?:\/\//i.test(src)) {
+    const resp = await fetch(src, { mode: "cors", credentials: "omit" });
+    if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status}`);
+    const blob = await resp.blob();
+    src = URL.createObjectURL(blob);
+  }
+
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onload = () => {
+      resolve(img);
+      // You can revoke here if you want, but only *after* you’ve drawn it
+      // setTimeout(() => URL.revokeObjectURL(img.src), 0);
+    };
+    img.onerror = (e) => reject(e);
     img.src = src;
   });
 }
