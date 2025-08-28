@@ -149,23 +149,23 @@ export function getPatchNearCorner(
     const py = clamp(sy + dy, 0, h - patchSize);
     const data = tempCtx.getImageData(px, py, patchSize, patchSize).data;
 
-    // reject patches that are mostly transparent or very light (avoid "white voids")
+    // Prefer patches that are mostly opaque and not “all white”
     let opaqueCount = 0;
-    let darkishCount = 0;
+    let notTooWhiteCount = 0; // count pixels that are not near-white
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i],
-        g = data[i + 1],
-        b = data[i + 2],
-        a = data[i + 3];
-      if (a > 0) {
+      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+      if (a > 10) { // treat <=10 alpha as transparent-ish
         opaqueCount++;
-        if (r < 240 || g < 240 || b < 240) darkishCount++;
+        // consider anything <240 in at least one channel as “has color/texture”
+        if (r < 240 || g < 240 || b < 240) notTooWhiteCount++;
       }
     }
-    if (
-      opaqueCount > patchSize * patchSize * 0.3 &&
-      darkishCount > opaqueCount * 0.2
-    ) {
+
+    const total = patchSize * patchSize;
+    const opaqueRatio = opaqueCount / total;
+    const texturedRatio = opaqueCount ? notTooWhiteCount / opaqueCount : 0;
+
+    if (opaqueRatio >= 0.7 && texturedRatio >= 0.2) {
       return { sx: px, sy: py };
     }
   }
@@ -232,17 +232,28 @@ export async function addBleedEdge(
       const tempCtx = temp.getContext("2d", { willReadFrequently: true })!;
       tempCtx.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
-      const cornerSize = 30; // how big the corner fix area is
-      const sampleInset = 10; // how far in from the edge we sample
-      const patchSize = 20; // size of the tiny patch we upscale into the corner
+      const cornerSize = 30;      // how big the corner fix area is
+      const sampleInset = 10;     // how far in from the edge we sample
+      const patchSize = 20;       // size of the tiny patch we upscale into the corner
       const applySoftBlur = true; // set false if you don't want any blur on the upscaled patch
 
-      const fillIfLight = (
-        r: number,
-        g: number,
-        b: number,
-        a: number
-      ): boolean => a === 0 || (r > 200 && g > 200 && b > 200);
+      // --- NEW: transparency-only corner gate ---
+      const ALPHA_EMPTY = 10; // <=10 alpha counts as transparent-ish
+      function cornerNeedsFill(
+        ctx2: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        size: number
+      ) {
+        const data = ctx2.getImageData(x, y, size, size).data;
+        const total = size * size;
+        let empty = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] <= ALPHA_EMPTY) empty++;
+        }
+        return empty / total >= 0.05; // only if ≥5% transparent
+      }
+      // -----------------------------------------
 
       const cornerCoords = [
         { x: 0, y: 0 }, // TL
@@ -252,30 +263,13 @@ export async function addBleedEdge(
       ];
 
       cornerCoords.forEach(({ x, y }) => {
-        const block = tempCtx.getImageData(x, y, cornerSize, cornerSize).data;
-        let shouldFill = false;
-
-        for (let i = 0; i < block.length; i += 4) {
-          const r = block[i],
-            g = block[i + 1],
-            b = block[i + 2],
-            a = block[i + 3];
-          if (fillIfLight(r, g, b, a)) {
-            shouldFill = true;
-            break;
-          }
-        }
-
-        if (!shouldFill) return;
+        // Only fill if the corner region actually has transparency
+        if (!cornerNeedsFill(tempCtx, x, y, cornerSize)) return;
 
         const baseSx =
-          x < temp.width / 2
-            ? sampleInset
-            : temp.width - sampleInset - patchSize;
+          x < temp.width / 2 ? sampleInset : temp.width - sampleInset - patchSize;
         const baseSy =
-          y < temp.height / 2
-            ? sampleInset
-            : temp.height - sampleInset - patchSize;
+          y < temp.height / 2 ? sampleInset : temp.height - sampleInset - patchSize;
 
         const { sx, sy } = getPatchNearCorner(
           baseSx,
@@ -286,10 +280,12 @@ export async function addBleedEdge(
           tempCtx
         );
 
-        // blur the upscaled patch a touch so it blends nicer
+        // draw BEHIND existing pixels → won’t overwrite opaque white borders
         const prevFilter = tempCtx.filter;
         const prevSmoothing = tempCtx.imageSmoothingEnabled;
 
+        tempCtx.save();
+        tempCtx.globalCompositeOperation = "destination-over";
         tempCtx.filter = applySoftBlur ? "blur(0.6px)" : "none";
         tempCtx.imageSmoothingEnabled = true;
 
@@ -306,6 +302,7 @@ export async function addBleedEdge(
           cornerSize // dest rect
         );
 
+        tempCtx.restore();
         tempCtx.filter = prevFilter;
         tempCtx.imageSmoothingEnabled = prevSmoothing;
       });
@@ -338,207 +335,50 @@ export async function addBleedEdge(
         if (isMostlyBlack) {
           const slice = 8;
           // Edges
-          ctx.drawImage(
-            scaledImg,
-            0,
-            0,
-            slice,
-            targetCardHeight,
-            0,
-            bleed,
-            bleed,
-            targetCardHeight
-          ); // L
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - slice,
-            0,
-            slice,
-            targetCardHeight,
-            targetCardWidth + bleed,
-            bleed,
-            bleed,
-            targetCardHeight
-          ); // R
-          ctx.drawImage(
-            scaledImg,
-            0,
-            0,
-            targetCardWidth,
-            slice,
-            bleed,
-            0,
-            targetCardWidth,
-            bleed
-          ); // T
-          ctx.drawImage(
-            scaledImg,
-            0,
-            targetCardHeight - slice,
-            targetCardWidth,
-            slice,
-            bleed,
-            targetCardHeight + bleed,
-            targetCardWidth,
-            bleed
-          ); // B
+          ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight); // L
+          ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, targetCardHeight, targetCardWidth + bleed, bleed, bleed, targetCardHeight); // R
+          ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed); // T
+          ctx.drawImage(scaledImg, 0, targetCardHeight - slice, targetCardWidth, slice, bleed, targetCardHeight + bleed, targetCardWidth, bleed); // B
 
           // Corners
           ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed); // TL
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - slice,
-            0,
-            slice,
-            slice,
-            targetCardWidth + bleed,
-            0,
-            bleed,
-            bleed
-          ); // TR
-          ctx.drawImage(
-            scaledImg,
-            0,
-            targetCardHeight - slice,
-            slice,
-            slice,
-            0,
-            targetCardHeight + bleed,
-            bleed,
-            bleed
-          ); // BL
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - slice,
-            targetCardHeight - slice,
-            slice,
-            slice,
-            targetCardWidth + bleed,
-            targetCardHeight + bleed,
-            bleed,
-            bleed
-          ); // BR
+          ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, slice, targetCardWidth + bleed, 0, bleed, bleed); // TR
+          ctx.drawImage(scaledImg, 0, targetCardHeight - slice, slice, slice, 0, targetCardHeight + bleed, bleed, bleed); // BL
+          ctx.drawImage(scaledImg, targetCardWidth - slice, targetCardHeight - slice, slice, slice, targetCardWidth + bleed, targetCardHeight + bleed, bleed, bleed); // BR
         } else {
+          // mirrored bleed
           ctx.save();
           ctx.scale(-1, 1);
-          ctx.drawImage(
-            scaledImg,
-            0,
-            0,
-            bleed,
-            targetCardHeight,
-            -bleed,
-            bleed,
-            bleed,
-            targetCardHeight
-          );
+          ctx.drawImage(scaledImg, 0, 0, bleed, targetCardHeight, -bleed, bleed, bleed, targetCardHeight);
           ctx.restore();
 
           ctx.save();
           ctx.scale(-1, 1);
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - bleed,
-            0,
-            bleed,
-            targetCardHeight,
-            -finalWidth,
-            bleed,
-            bleed,
-            targetCardHeight
-          );
+          ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, targetCardHeight, -finalWidth, bleed, bleed, targetCardHeight);
           ctx.restore();
 
           ctx.save();
           ctx.scale(1, -1);
-          ctx.drawImage(
-            scaledImg,
-            0,
-            0,
-            targetCardWidth,
-            bleed,
-            bleed,
-            -bleed,
-            targetCardWidth,
-            bleed
-          );
+          ctx.drawImage(scaledImg, 0, 0, targetCardWidth, bleed, bleed, -bleed, targetCardWidth, bleed);
           ctx.restore();
 
           ctx.save();
           ctx.scale(1, -1);
-          ctx.drawImage(
-            scaledImg,
-            0,
-            targetCardHeight - bleed,
-            targetCardWidth,
-            bleed,
-            bleed,
-            -finalHeight,
-            targetCardWidth,
-            bleed
-          );
+          ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, targetCardWidth, bleed, bleed, -finalHeight, targetCardWidth, bleed);
           ctx.restore();
 
-          // Corners
-          ctx.save();
-          ctx.scale(-1, -1);
-          ctx.drawImage(
-            scaledImg,
-            0,
-            0,
-            bleed,
-            bleed,
-            -bleed,
-            -bleed,
-            bleed,
-            bleed
-          );
-          ctx.restore();
+          // mirrored corners
+          ctx.save(); ctx.scale(-1, -1);
+          ctx.drawImage(scaledImg, 0, 0, bleed, bleed, -bleed, -bleed, bleed, bleed); ctx.restore();
 
-          ctx.save();
-          ctx.scale(-1, -1);
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - bleed,
-            0,
-            bleed,
-            bleed,
-            -finalWidth,
-            -bleed,
-            bleed,
-            bleed
-          );
-          ctx.restore();
+          ctx.save(); ctx.scale(-1, -1);
+          ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, bleed, -finalWidth, -bleed, bleed, bleed); ctx.restore();
 
-          ctx.save();
-          ctx.scale(-1, -1);
-          ctx.drawImage(
-            scaledImg,
-            0,
-            targetCardHeight - bleed,
-            bleed,
-            bleed,
-            -bleed,
-            -finalHeight,
-            bleed,
-            bleed
-          );
-          ctx.restore();
+          ctx.save(); ctx.scale(-1, -1);
+          ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, bleed, bleed, -bleed, -finalHeight, bleed, bleed); ctx.restore();
 
-          ctx.save();
-          ctx.scale(-1, -1);
-          ctx.drawImage(
-            scaledImg,
-            targetCardWidth - bleed,
-            targetCardHeight - bleed,
-            bleed,
-            bleed,
-            -finalWidth,
-            -finalHeight,
-            bleed,
-            bleed
-          );
-          ctx.restore();
+          ctx.save(); ctx.scale(-1, -1);
+          ctx.drawImage(scaledImg, targetCardWidth - bleed, targetCardHeight - bleed, bleed, bleed, -finalWidth, -finalHeight, bleed, bleed); ctx.restore();
         }
 
         resolve(canvas.toDataURL("image/png"));

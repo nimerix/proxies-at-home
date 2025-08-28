@@ -5,6 +5,8 @@ import jsPDF from "jspdf";
 import { getPatchNearCorner } from "./ImageHelper";
 
 const PDF_PAGE_COLOR = "#FFFFFF";
+const NEAR_BLACK = 16;
+const NEAR_WHITE = 239;
 const DPI = 600;
 const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
@@ -18,11 +20,84 @@ const JSPDF_SUPPORTED = new Set([
   "letter", "legal", "tabloid", "a4", "a3", "a2", "a1",
 ]);
 
+const ALPHA_EMPTY = 10; // treat <=10 alpha as transparent-ish
+
+function cornerNeedsFill(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  cornerSize: number
+) {
+  const data = ctx.getImageData(x, y, cornerSize, cornerSize).data;
+  const total = cornerSize * cornerSize;
+  let empty = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] <= ALPHA_EMPTY) empty++;
+  }
+  // Require at least 5% transparent area to fill
+  return empty / total >= 0.05;
+}
+
+function detectFlatBorderColor(
+  ctx: CanvasRenderingContext2D,
+  contentW: number,
+  contentH: number,
+  cornerX: number,
+  cornerY: number,
+  sampleLen: number,   // how far inward to sample
+  strip: number        // strip thickness
+): "black" | "white" | null {
+  // which edges are we next to?
+  const leftEdge = cornerX === 0;
+  const topEdge = cornerY === 0;
+  const rightEdge = cornerX >= contentW - strip;
+  const bottomEdge = cornerY >= contentH - strip;
+
+  // build up to two sample rects: one along each adjacent edge
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+  if (leftEdge) {
+    rects.push({ x: 0, y: cornerY, w: strip, h: Math.min(sampleLen, contentH - cornerY) });
+  }
+  if (topEdge) {
+    rects.push({ x: cornerX, y: 0, w: Math.min(sampleLen, contentW - cornerX), h: strip });
+  }
+  if (rightEdge) {
+    rects.push({ x: contentW - strip, y: Math.max(0, cornerY - (sampleLen - strip)), w: strip, h: Math.min(sampleLen, contentH - (cornerY - (sampleLen - strip))) });
+  }
+  if (bottomEdge) {
+    rects.push({ x: Math.max(0, cornerX - (sampleLen - strip)), y: contentH - strip, w: Math.min(sampleLen, contentW - (cornerX - (sampleLen - strip))), h: strip });
+  }
+
+  if (!rects.length) return null;
+
+  let black = 0, white = 0, total = 0;
+
+  for (const r of rects) {
+    const { data, width, height } = ctx.getImageData(r.x, r.y, r.w, r.h);
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a <= ALPHA_EMPTY) continue; // ignore transparent
+      const R = data[i], G = data[i + 1], B = data[i + 2];
+      total++;
+      if (R <= NEAR_BLACK && G <= NEAR_BLACK && B <= NEAR_BLACK) black++;
+      else if (R >= NEAR_WHITE && G >= NEAR_WHITE && B >= NEAR_WHITE) white++;
+    }
+  }
+
+  if (total === 0) return null;
+
+  // require strong consensus to avoid false positives
+  if (black / total >= 0.9) return "black";
+  if (white / total >= 0.9) return "white";
+  return null;
+}
+
 function resolveJsPdfFormat(opts: {
   preset: LayoutPreset;
   unit: "mm" | "in";
-  width: number;   
-  height: number;  
+  width: number;
+  height: number;
 }): string | [number, number] {
   const { preset, unit, width, height } = opts;
 
@@ -75,11 +150,13 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
 
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
     img.onload = () => {
       resolve(img);
-      // You can revoke here if you want, but only *after* you’ve drawn it
-      // setTimeout(() => URL.revokeObjectURL(img.src), 0);
     };
+
     img.onerror = (e) => reject(e);
     img.src = src;
   });
@@ -199,13 +276,13 @@ async function buildCardWithBleed(
   opts: { isUserUpload: boolean; hasBakedBleed?: boolean }
 ) {
   const contentW = MM_TO_PX(63);
-  const contentH = MM_TO_PX(89);
+  const contentH = MM_TO_PX(88);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
   const baseImg =
     opts.isUserUpload && opts.hasBakedBleed
-      ? await trimExistingBleedIfAny(src) // uses calibrated buckets 72/78/104/156
+      ? await trimExistingBleedIfAny(src)
       : await loadImage(src);
 
   const aspect = baseImg.width / baseImg.height;
@@ -240,9 +317,6 @@ async function buildCardWithBleed(
   const blurPx = Math.max(1, Math.round(1.5 * dpiFactor));
   const blackThreshold = 30;
 
-  const fillIfLight = (r: number, g: number, b: number, a: number) =>
-    a === 0 || (r > 200 && g > 200 && b > 200);
-
   function drawFeatheredPatch(
     dst: CanvasRenderingContext2D,
     sx: number,
@@ -252,7 +326,6 @@ async function buildCardWithBleed(
     dw: number,
     dh: number
   ) {
-    // copy source region into an offscreen buffer
     const buf = document.createElement("canvas");
     buf.width = dw;
     buf.height = dh;
@@ -281,31 +354,37 @@ async function buildCardWithBleed(
   }
 
   const corners = [
-    { x: 0, y: 0 }, // TL
-    { x: contentW - cornerSize, y: 0 }, // TR
-    { x: 0, y: contentH - cornerSize }, // BL
-    { x: contentW - cornerSize, y: contentH - cornerSize }, // BR
+    { x: 0, y: 0 },
+    { x: contentW - cornerSize, y: 0 },
+    { x: 0, y: contentH - cornerSize },
+    { x: contentW - cornerSize, y: contentH - cornerSize },
   ];
 
   for (const { x, y } of corners) {
-    const block = bctx.getImageData(x, y, cornerSize, cornerSize).data;
-    let shouldFill = false;
-    for (let i = 0; i < block.length; i += 4) {
-      const r = block[i],
-        g = block[i + 1],
-        b = block[i + 2],
-        a = block[i + 3];
-      if (fillIfLight(r, g, b, a)) {
-        shouldFill = true;
-        break;
-      }
-    }
-    if (!shouldFill) continue;
+    if (!cornerNeedsFill(bctx, x, y, cornerSize)) continue;
 
-    const seedX =
-      x < contentW / 2 ? sampleInset : contentW - sampleInset - patchSize;
-    const seedY =
-      y < contentH / 2 ? sampleInset : contentH - sampleInset - patchSize;
+    // check if the border at this corner is strongly black or white
+    const flat = detectFlatBorderColor(
+      bctx,
+      contentW,
+      contentH,
+      x,
+      y,
+      Math.round(40 * dpiFactor),
+      Math.round(6 * dpiFactor)
+    );
+
+    if (flat) {
+      bctx.save();
+      bctx.globalCompositeOperation = "destination-over";
+      bctx.fillStyle = flat === "black" ? "#000000" : "#FFFFFF";
+      bctx.fillRect(x, y, cornerSize, cornerSize);
+      bctx.restore();
+      continue; // skip patch tiling when flat color wins
+    }
+
+    const seedX = x < contentW / 2 ? sampleInset : contentW - sampleInset - patchSize;
+    const seedY = y < contentH / 2 ? sampleInset : contentH - sampleInset - patchSize;
 
     const { sx, sy } = getPatchNearCorner(
       seedX,
@@ -316,12 +395,14 @@ async function buildCardWithBleed(
       bctx
     );
 
+    bctx.save();
+    bctx.globalCompositeOperation = "destination-over";
+
     for (let ty = y; ty < y + cornerSize; ty += patchSize) {
       for (let tx = x; tx < x + cornerSize; tx += patchSize) {
         const dw = Math.min(patchSize, x + cornerSize - tx);
         const dh = Math.min(patchSize, y + cornerSize - ty);
 
-        // tiny jitter to avoid obvious tiling seams
         const jx = sx + Math.floor((Math.random() - 0.5) * (patchSize * 0.25));
         const jy = sy + Math.floor((Math.random() - 0.5) * (patchSize * 0.25));
         const csx = Math.max(0, Math.min(contentW - dw, jx));
@@ -330,6 +411,8 @@ async function buildCardWithBleed(
         drawFeatheredPatch(bctx, csx, csy, tx, ty, dw, dh);
       }
     }
+
+    bctx.restore();
   }
 
   blackenAllNearBlackPixels(
@@ -557,7 +640,6 @@ function scaleGuideWidthForDPI(
   return Math.round((screenPx / screenPPI) * targetDPI);
 }
 
-// Draw the same 2mm corner L-guides rendered in preview
 function drawCornerGuides(
   ctx: CanvasRenderingContext2D,
   x: number,
