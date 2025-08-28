@@ -74,7 +74,7 @@ function detectFlatBorderColor(
   let black = 0, white = 0, total = 0;
 
   for (const r of rects) {
-    const { data, width, height } = ctx.getImageData(r.x, r.y, r.w, r.h);
+    const { data } = ctx.getImageData(r.x, r.y, r.w, r.h);
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
       if (a <= ALPHA_EMPTY) continue; // ignore transparent
