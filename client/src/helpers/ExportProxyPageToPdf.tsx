@@ -93,33 +93,6 @@ function detectFlatBorderColor(
   return null;
 }
 
-function presetToMm(preset: string): [number, number] {
-  switch (preset.toLowerCase()) {
-    case "letter":   return [215.9, 279.4]; // 8.5 × 11 in
-    case "legal":    return [215.9, 355.6]; // 8.5 × 14 in
-    case "tabloid":  return [279.4, 431.8]; // 11 × 17 in
-    case "a4":       return [210, 297];
-    case "a3":       return [297, 420];
-    case "a2":       return [420, 594];
-    case "a1":       return [594, 841];
-    default:         return [210, 297]; // sensible fallback
-  }
-}
-
-function resolvePageSizeMm(
-  preset: LayoutPreset,
-  unit: "mm" | "in",
-  width: number,
-  height: number
-): [number, number] {
-  if (JSPDF_SUPPORTED.has(preset.toLowerCase())) {
-    return presetToMm(preset); // portrait mm for known preset
-  }
-  // custom input → mm
-  const toMm = (n: number) => (unit === "in" ? n * 25.4 : n);
-  return [toMm(width), toMm(height)];
-}
-
 function resolveJsPdfFormat(opts: {
   preset: LayoutPreset;
   unit: "mm" | "in";
@@ -752,56 +725,50 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
+  // Canvas size (pixels at DPI) — used for high-res page render
+  const pageWidthPx =
+    pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
+  const pageHeightPx =
+    pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
+
+  // Card + bleed in pixels (at DPI)
   const contentWidthInPx = MM_TO_PX(63);
   const contentHeightInPx = MM_TO_PX(88);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
 
+  // Grid + centering
   const perPage = Math.max(1, columns * rows);
   const gridWidthPx = columns * cardWidthPx;
   const gridHeightPx = rows * cardHeightPx;
+  const startX = Math.round((pageWidthPx - gridWidthPx) / 2);
+  const startY = Math.round((pageHeightPx - gridHeightPx) / 2);
 
   const pages: CardOption[][] = [];
+
   for (let i = 0; i < cards.length; i += perPage) {
     pages.push(cards.slice(i, i + perPage));
   }
+
   if (pages.length === 0) pages.push([]);
 
-  const [baseWmm, baseHmm] = resolvePageSizeMm(
-    pageSizePreset,
-    pageSizeUnit,
-    pageWidth,
-    pageHeight
-  );
-  const [pageWmm, pageHmm] =
-    pageOrientation === "landscape" ? [baseHmm, baseWmm] : [baseWmm, baseHmm];
+    const format = resolveJsPdfFormat({
+    preset: pageSizePreset,
+    unit: pageSizeUnit,
+    width: pageWidth,
+    height: pageHeight,
+  });
 
-// Determine the orientation that matches the target mm
-const pdfOrientation: "portrait" | "landscape" =
-  pageWmm >= pageHmm ? "landscape" : "portrait";
+  const pdf = new jsPDF({
+    orientation: pageOrientation,
+    unit: "mm",
+    format, // string or [wMm, hMm]C
+    compress: true,
+  });
 
-// Create jsPDF with explicit size AND matching orientation
-const pdf = new jsPDF({
-  unit: "mm",
-  orientation: pdfOrientation,
-  format: [pageWmm, pageHmm], // keep the tuple to lock the size
-  compress: true,
-});
-
-// Query the REAL size jsPDF ended up with (some builds swap)
-const pdfWidthMm  = pdf.internal.pageSize.getWidth();
-const pdfHeightMm = pdf.internal.pageSize.getHeight();
-
-// Derive raster canvas size (px at DPI) from the jsPDF-reported mm
-let pageWidthPx  = IN(pdfWidthMm / 25.4);
-let pageHeightPx = IN(pdfHeightMm / 25.4);
-
-// Center after we know the final page px
-const deltaX = pageWidthPx - gridWidthPx;
-const deltaY = pageHeightPx - gridHeightPx;
-const startX = Math.max(0, Math.floor(deltaX / 2));
-const startY = Math.max(0, Math.floor(deltaY / 2));
+  const pdfWidth = pageSizeUnit === "in" ? pageWidth * 25.4 : pageWidth;
+  const pdfHeight = pageSizeUnit === "in" ? pageHeight * 25.4 : pageHeight;
 
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
     const pageCards = pages[pageIndex];
@@ -859,12 +826,9 @@ const startY = Math.max(0, Math.floor(deltaY / 2));
       }
     }
 
-   const pageImg = canvas.toDataURL("image/jpeg", 0.95);
-if (pageIndex > 0) {
-  // Force identical size & orientation on every page
-  pdf.addPage([pdfWidthMm, pdfHeightMm], pdfOrientation);
-}
-pdf.addImage(pageImg, "JPEG", 0, 0, pdfWidthMm, pdfHeightMm);
+    const pageImg = canvas.toDataURL("image/jpeg", 0.95);
+    if (pageIndex > 0) pdf.addPage();
+    pdf.addImage(pageImg, "JPEG", 0, 0, pdfWidth, pdfHeight);
   }
 
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
