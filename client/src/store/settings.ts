@@ -52,9 +52,9 @@ const layoutPresetsSizes: Record<
   Tabloid: { pageWidth: 11, pageHeight: 17, pageSizeUnit: "in" },
   A4: { pageWidth: 210, pageHeight: 297, pageSizeUnit: "mm" },
   A3: { pageWidth: 297, pageHeight: 420, pageSizeUnit: "mm" },
-  Legal: { pageWidth: 14, pageHeight: 8.5, pageSizeUnit: "in" },
+  Legal: { pageWidth: 8.5, pageHeight: 14, pageSizeUnit: "in" },
   ArchA: { pageWidth: 9, pageHeight: 12, pageSizeUnit: "in" },
-  ArchB: { pageWidth: 18, pageHeight: 12, pageSizeUnit: "in" },
+  ArchB: { pageWidth: 12, pageHeight: 18, pageSizeUnit: "in" },
   SuperB: { pageWidth: 13, pageHeight: 19, pageSizeUnit: "in" },
   A2: { pageWidth: 420, pageHeight: 594, pageSizeUnit: "mm" },
   A1: { pageWidth: 594, pageHeight: 841, pageSizeUnit: "mm" },
@@ -62,11 +62,21 @@ const layoutPresetsSizes: Record<
 
 export const useSettingsStore = create<Store>()(
   persist(
-    (set) => ({
+    (set, _) => ({
       ...defaultPageSettings,
 
       setPageSizePreset: (value) =>
-        set({ pageSizePreset: value, ...layoutPresetsSizes[value] }),
+        set(() => {
+          const { pageWidth, pageHeight, pageSizeUnit } = layoutPresetsSizes[value];
+          return {
+            pageSizePreset: value,
+            pageOrientation: "portrait", // always reset
+            pageWidth,
+            pageHeight,
+            pageSizeUnit,
+          };
+        }),
+
       swapPageOrientation: () =>
         set((state) => ({
           pageOrientation:
@@ -74,6 +84,7 @@ export const useSettingsStore = create<Store>()(
           pageWidth: state.pageHeight,
           pageHeight: state.pageWidth,
         })),
+
       setColumns: (columns) => set({ columns }),
       setRows: (rows) => set({ rows }),
       setBleedEdgeWidth: (value) => set({ bleedEdgeWidth: value }),
@@ -85,6 +96,25 @@ export const useSettingsStore = create<Store>()(
     }),
     {
       name: "proxxied:layout-settings:v1",
+      version: 2,
+
+      partialize: (state) => {
+        const { pageOrientation, pageWidth, pageHeight, pageSizeUnit, ...rest } = state;
+        return rest;
+      },
+
+      migrate: (persistedState, _version) => {
+        const { pageOrientation, pageWidth, pageHeight, pageSizeUnit, ...rest } =
+          (persistedState as any) ?? {};
+        return rest;
+      },
+
+      onRehydrateStorage: () => (state, error) => {
+        if (error) return;
+        const preset = state?.pageSizePreset ?? "Letter";
+        state?.setPageSizePreset?.(preset);
+      },
     }
   )
+
 );
