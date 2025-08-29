@@ -753,9 +753,6 @@ export async function exportProxyPagesToPdf({
 
   if (pages.length === 0) pages.push([]);
 
-  const pdfWidth = pageSizeUnit === "in" ? pageWidth * 25.4 : pageWidth;
-  const pdfHeight = pageSizeUnit === "in" ? pageHeight * 25.4 : pageHeight;
-
   const format = resolveJsPdfFormat({
     preset: pageSizePreset,
     unit: pageSizeUnit,
@@ -766,9 +763,12 @@ export async function exportProxyPagesToPdf({
   const pdf = new jsPDF({
     orientation: pageOrientation,
     unit: "mm",
-    format, // string or [wMm, hMm]
+    format, // string or [wMm, hMm]C
     compress: true,
   });
+
+  const pdfWidth = pageSizeUnit === "in" ? pageWidth * 25.4 : pageWidth;
+  const pdfHeight = pageSizeUnit === "in" ? pageHeight * 25.4 : pageHeight;
 
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
     const pageCards = pages[pageIndex];
