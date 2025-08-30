@@ -11,8 +11,6 @@ import {
 import { useState } from "react";
 import { API_BASE } from "../constants";
 import {
-  addBleedEdge,
-  getLocalBleedImageUrl,
   pngToNormal,
 } from "../helpers/ImageHelper";
 import { useArtworkModalStore } from "../store";
@@ -35,9 +33,6 @@ export function ArtworkModal() {
   const updateCard = useCardsStore((state) => state.updateCard);
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
-  );
-  const appendSelectedImages = useCardsStore(
-    (state) => state.appendSelectedImages
   );
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
