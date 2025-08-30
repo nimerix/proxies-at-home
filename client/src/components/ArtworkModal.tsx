@@ -1,6 +1,8 @@
 import axios from "axios";
 import {
   Button,
+  Checkbox,
+  Label,
   Modal,
   ModalBody,
   ModalHeader,
@@ -20,6 +22,7 @@ import type { CardOption } from "../types/Card";
 export function ArtworkModal() {
   const [isGettingMore, setIsGettingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [applyToAll, setApplyToAll] = useState(false);
 
   const isModalOpen = useArtworkModalStore((state) => state.open);
 
@@ -28,6 +31,7 @@ export function ArtworkModal() {
   const closeArtworkModal = useArtworkModalStore((state) => state.closeModal);
   const updateArtworkCard = useArtworkModalStore((state) => state.updateCard);
 
+  const cards = useCardsStore((state) => state.cards);
   const updateCard = useCardsStore((state) => state.updateCard);
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
@@ -37,6 +41,10 @@ export function ArtworkModal() {
   );
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
+  );
+  const clearSelectedImage = useCardsStore((state) => state.clearSelectedImage);
+  const clearManySelectedImages = useCardsStore(
+    (state) => state.clearManySelectedImages
   );
 
   async function getMoreCards() {
@@ -84,8 +92,6 @@ export function ArtworkModal() {
               if (!newCard.imageUrls?.length) return;
 
               const newUuid = crypto.randomUUID();
-              const proxiedUrl = getLocalBleedImageUrl(newCard.imageUrls[0]);
-              const processed = await addBleedEdge(proxiedUrl);
 
               updateCard(modalIndex, {
                 uuid: newUuid,
@@ -101,9 +107,6 @@ export function ArtworkModal() {
                 isUserUpload: false,
               });
 
-              appendSelectedImages({
-                [newUuid]: processed,
-              });
               appendOriginalSelectedImages({
                 [newUuid]: newCard.imageUrls[0],
               });
@@ -114,6 +117,16 @@ export function ArtworkModal() {
         </div>
         {modalCard && (
           <>
+            <div className="flex items-center gap-2 mb-4">
+              <Checkbox
+                id="apply-to-all"
+                checked={applyToAll}
+                onChange={(e) => setApplyToAll(e.target.checked)}
+              />
+              <Label htmlFor="apply-to-all">
+                Apply to all cards named "{modalCard?.name}"
+              </Label>
+            </div>
             <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
               {modalCard.imageUrls.map((pngUrl, i) => {
                 const thumbUrl = pngToNormal(pngUrl);
@@ -131,16 +144,30 @@ export function ArtworkModal() {
                         : "border-transparent"
                     }`}
                     onClick={async () => {
-                      const proxiedUrl = getLocalBleedImageUrl(pngUrl);
-                      const processed = await addBleedEdge(proxiedUrl);
+                      if (applyToAll) {
+                        const newOriginalSelectedImages: Record<
+                          string,
+                          string
+                        > = {};
+                        const uuidsToClear: string[] = [];
 
-                      appendSelectedImages({
-                        [modalCard.uuid]: processed,
-                      });
+                        cards.forEach((card) => {
+                          if (card.name === modalCard.name) {
+                            newOriginalSelectedImages[card.uuid] = pngUrl;
+                            uuidsToClear.push(card.uuid);
+                          }
+                        });
 
-                      appendOriginalSelectedImages({
-                        [modalCard.uuid]: pngUrl,
-                      });
+                        appendOriginalSelectedImages(
+                          newOriginalSelectedImages
+                        );
+                        clearManySelectedImages(uuidsToClear);
+                      } else {
+                        appendOriginalSelectedImages({
+                          [modalCard.uuid]: pngUrl,
+                        });
+                        clearSelectedImage(modalCard.uuid);
+                      }
 
                       closeArtworkModal();
                     }}
