@@ -74,6 +74,7 @@ export function PageSettingsControls() {
               min={1}
               max={10}
               value={columns}
+              onFocus={(e) => e.target.select()}
               onChange={(e) => {
                 const v = Math.max(
                   1,
@@ -91,6 +92,7 @@ export function PageSettingsControls() {
               min={1}
               max={10}
               value={rows}
+              onFocus={(e) => e.target.select()}
               onChange={(e) => {
                 const v = Math.max(
                   1,
@@ -109,6 +111,7 @@ export function PageSettingsControls() {
             type="number"
             value={bleedEdgeWidth}
             max={2}
+            onFocus={(e) => e.target.select()}
             onChange={(e) => {
               const val = parseInt(e.target.value);
               if (!isNaN(val)) {
@@ -148,6 +151,7 @@ export function PageSettingsControls() {
             step="0.1"
             min="0"
             disabled={!bleedEdge}
+            onFocus={(e) => e.target.select()}
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               if (!isNaN(val)) setGuideWidth(val);
