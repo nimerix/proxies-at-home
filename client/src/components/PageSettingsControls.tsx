@@ -2,6 +2,7 @@ import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
 import { Button, Checkbox, HR, Label, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useEffect, useRef } from "react";
 import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
@@ -34,6 +35,28 @@ export function PageSettingsControls() {
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
   });
+
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const debouncedReprocess = useCallback(
+    (cards: any[], newBleedWidth: number) => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+      debounceTimeoutRef.current = setTimeout(() => {
+        reprocessSelectedImages(cards, newBleedWidth);
+      }, 500); // 500ms delay
+    },
+    [reprocessSelectedImages]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="w-1/4 min-w-[18rem] max-w-[26rem] p-4 bg-gray-100 dark:bg-gray-700 h-full flex flex-col gap-4 overflow-y-auto">
@@ -90,7 +113,7 @@ export function PageSettingsControls() {
               const val = parseInt(e.target.value);
               if (!isNaN(val)) {
                 setBleedEdgeWidth(val);
-                reprocessSelectedImages(cards, val);
+                debouncedReprocess(cards, val);
               }
             }}
           />
