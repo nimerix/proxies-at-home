@@ -73,7 +73,10 @@ export function UploadSection() {
       : srcBase64;
 
     // Then add your consistent bleed
-    const withBleedBase64 = await addBleedEdge(trimmed, bleedEdgeWidth);
+    const withBleedBase64 = await addBleedEdge(trimmed, bleedEdgeWidth, {
+      unit: "mm",
+      bleedEdgeWidth,
+    });
 
     return { originalBase64: srcBase64, withBleedBase64 };
   }
@@ -161,31 +164,30 @@ export function UploadSection() {
 
       appendCards(newCards);
 
-      const base64s = await Promise.all(
-        fileArray.map(
-          (file) =>
-            new Promise<string>((resolve) => {
-              const r = new FileReader();
-              r.onloadend = () => resolve(r.result as string);
-              r.readAsDataURL(file);
-            })
-        )
+      const originalsUpdate: Record<string, string> = {};
+      const processedUpdate: Record<string, string> = {};
+
+      await Promise.all(
+        fileArray.map(async (file, i) => {
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+
+          const { originalBase64, withBleedBase64 } = await processToWithBleed(
+            base64,
+            { hasBakedBleed: false }
+          );
+
+          const id = newCards[i].uuid;
+          originalsUpdate[id] = originalBase64;
+          processedUpdate[id] = withBleedBase64;
+        })
       );
 
-      const newOriginals: Record<string, string> = {};
-      const processed: Record<string, string> = {};
-
-      newCards.forEach((c, i) => {
-        newOriginals[c.uuid] = base64s[i];
-      });
-
-      for (const [uuid, b64] of Object.entries(newOriginals)) {
-        const bleedImage = await addBleedEdge(b64);
-        processed[uuid] = bleedImage;
-      }
-
-      appendOriginalSelectedImages(newOriginals);
-      appendSelectedImages(processed);
+      appendOriginalSelectedImages(originalsUpdate);
+      appendSelectedImages(processedUpdate);
     } finally {
       if (e.target) e.target.value = "";
       setLoadingTask(null);
@@ -294,7 +296,10 @@ export function UploadSection() {
     const processed: Record<string, string> = {};
     for (const [uuid, url] of Object.entries(newOriginals)) {
       const proxiedUrl = getLocalBleedImageUrl(url);
-      const bleedImage = await addBleedEdge(proxiedUrl, bleedEdgeWidth);
+      const bleedImage = await addBleedEdge(proxiedUrl, bleedEdgeWidth, {
+        unit: "mm",
+        bleedEdgeWidth,
+      });
       processed[uuid] = bleedImage;
     }
 
@@ -320,7 +325,10 @@ export function UploadSection() {
     try {
       const base64 = await urlToDataUrl(cardBack);
       const trimmed = await trimBleedEdge(base64);
-      const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth);
+      const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth, {
+        unit: "mm",
+        bleedEdgeWidth,
+      });
 
       const newCards: CardOption[] = Array.from({ length: 9 }).map(() => ({
         uuid: crypto.randomUUID(),

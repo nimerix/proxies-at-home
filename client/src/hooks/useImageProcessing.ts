@@ -19,7 +19,6 @@ export function useImageProcessing({
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
-  const setSelectedImages = useCardsStore((state) => state.setSelectedImages);
   const appendSelectedImages = useCardsStore(
     (state) => state.appendSelectedImages
   );
@@ -87,36 +86,40 @@ export function useImageProcessing({
     newBleedWidth: number
   ) {
     const updated: Record<string, string> = {};
-    for (const card of cards) {
+    
+    const promises = cards.map(async (card) => {
       const uuid = card.uuid;
+      const original = originalSelectedImages[uuid];
+      
+      if (!original) return;
+      
       if (card.isUserUpload) {
-        const original = originalSelectedImages[uuid];
-        if (!original && selectedImages[uuid]) {
-          updated[uuid] = await addBleedEdge(
-            selectedImages[uuid],
-            newBleedWidth,
-            { unit, bleedEdgeWidth: newBleedWidth }
-          );
-          continue;
+        let base: string;
+        if (/^data:image\//i.test(original)) {
+          base = card.hasBakedBleed ? await trimBleedEdge(original) : original;
+        } else {
+          const dataUrl = await urlToDataUrl(original);
+          base = card.hasBakedBleed ? await trimBleedEdge(dataUrl) : dataUrl;
         }
-        if (original) {
-          const base = card.hasBakedBleed
-            ? await trimBleedEdge(original)
-            : original;
-          updated[uuid] = await addBleedEdge(base, newBleedWidth, {
-            unit,
-            bleedEdgeWidth: newBleedWidth,
-          });
-        }
-      } else if (originalSelectedImages[uuid]) {
-        const proxiedUrl = getLocalBleedImageUrl(originalSelectedImages[uuid]);
+        updated[uuid] = await addBleedEdge(base, newBleedWidth, {
+          unit,
+          bleedEdgeWidth: newBleedWidth,
+        });
+      } else {
+        // Scryfall Image -> proxy the URL and add bleed
+        const proxiedUrl = getLocalBleedImageUrl(original);
         updated[uuid] = await addBleedEdge(proxiedUrl, newBleedWidth, {
           unit,
           bleedEdgeWidth: newBleedWidth,
         });
       }
+    });
+
+    await Promise.allSettled(promises);
+    
+    if (Object.keys(updated).length > 0) {
+      appendSelectedImages(updated);
     }
-    setSelectedImages(updated);
   }
 
   return { loadingMap, ensureProcessed, reprocessSelectedImages };

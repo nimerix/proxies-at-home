@@ -35,46 +35,62 @@ export function pngToNormal(pngUrl: string) {
 }
 
 export function trimBleedEdge(dataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
+    const canvas = document.createElement("canvas");
+    
+    const timeoutId = setTimeout(() => {
+      reject(new Error("Image processing timeout"));
+    }, 10000);
+
     img.onload = () => {
-      let bleedTrim = 76;
-      const canvas = document.createElement("canvas");
+      try {
+        clearTimeout(timeoutId);
+        
+        let bleedTrim = 76;
+        if (img.height >= 2220 && img.height < 2960) {
+          bleedTrim = 78;
+        }
+        if (img.height >= 2960 && img.height < 4440) {
+          bleedTrim = 104;
+        }
+        if (img.height >= 4440) {
+          bleedTrim = 156;
+        }
 
-      if (img.height >= 2220 && img.height < 2960) {
-        bleedTrim = 78;
-      }
-      if (img.height >= 2960 && img.height < 4440) {
-        bleedTrim = 104;
-      }
-      if (img.height >= 4440) {
-        bleedTrim = 156;
-      }
+        const height = img.height - bleedTrim * 2;
+        const width = img.width - bleedTrim * 2;
 
-      const height = img.height - bleedTrim * 2;
-      const width = img.width - bleedTrim * 2;
+        canvas.width = width;
+        canvas.height = height;
 
-      canvas.width = width;
-      canvas.height = height;
-
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(
-          img,
-          bleedTrim,
-          bleedTrim,
-          width,
-          height,
-          0,
-          0,
-          width,
-          height
-        );
-        resolve(canvas.toDataURL("image/png"));
-      } else {
-        resolve(dataUrl);
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(
+            img,
+            bleedTrim,
+            bleedTrim,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height
+          );
+          resolve(canvas.toDataURL("image/png"));
+        } else {
+          resolve(dataUrl);
+        }
+      } catch (error) {
+        reject(error);
       }
     };
+
+    img.onerror = (error) => {
+      clearTimeout(timeoutId);
+      reject(new Error(`Failed to load image: ${error}`));
+    };
+
     img.src = dataUrl;
   });
 }
@@ -185,7 +201,7 @@ export async function addBleedEdge(
     bleedEdgeWidth?: number;
   }
 ) {
-  return new Promise<string>((resolve) => {
+  return new Promise<string>((resolve, reject) => {
     const targetCardWidth = 744;
     const targetCardHeight = 1040;
     const bleed = Math.round(
@@ -205,32 +221,40 @@ export async function addBleedEdge(
     canvas.height = finalHeight;
 
     const img = new Image();
+    const temp = document.createElement("canvas");
+    
+    const timeoutId = setTimeout(() => {
+      reject(new Error("Image processing timeout"));
+    }, 15000);
+
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
-      const aspectRatio = img.width / img.height;
-      const targetAspect = targetCardWidth / targetCardHeight;
+      try {
+        clearTimeout(timeoutId);
+        
+        const aspectRatio = img.width / img.height;
+        const targetAspect = targetCardWidth / targetCardHeight;
 
-      let drawWidth = targetCardWidth;
-      let drawHeight = targetCardHeight;
-      let offsetX = 0;
-      let offsetY = 0;
+        let drawWidth = targetCardWidth;
+        let drawHeight = targetCardHeight;
+        let offsetX = 0;
+        let offsetY = 0;
 
-      if (aspectRatio > targetAspect) {
-        drawHeight = targetCardHeight;
-        drawWidth = img.width * (targetCardHeight / img.height);
-        offsetX = (drawWidth - targetCardWidth) / 2;
-      } else {
-        drawWidth = targetCardWidth;
-        drawHeight = img.height * (targetCardWidth / img.width);
-        offsetY = (drawHeight - targetCardHeight) / 2;
-      }
+        if (aspectRatio > targetAspect) {
+          drawHeight = targetCardHeight;
+          drawWidth = img.width * (targetCardHeight / img.height);
+          offsetX = (drawWidth - targetCardWidth) / 2;
+        } else {
+          drawWidth = targetCardWidth;
+          drawHeight = img.height * (targetCardWidth / img.width);
+          offsetY = (drawHeight - targetCardHeight) / 2;
+        }
 
-      const temp = document.createElement("canvas");
-      temp.width = targetCardWidth;
-      temp.height = targetCardHeight;
-      const tempCtx = temp.getContext("2d", { willReadFrequently: true })!;
-      tempCtx.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
+        temp.width = targetCardWidth;
+        temp.height = targetCardHeight;
+        const ctx2d = temp.getContext("2d", { willReadFrequently: true })!;
+        ctx2d.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
       const cornerSize = 30;      // how big the corner fix area is
       const sampleInset = 10;     // how far in from the edge we sample
@@ -264,7 +288,7 @@ export async function addBleedEdge(
 
       cornerCoords.forEach(({ x, y }) => {
         // Only fill if the corner region actually has transparency
-        if (!cornerNeedsFill(tempCtx, x, y, cornerSize)) return;
+        if (!cornerNeedsFill(ctx2d, x, y, cornerSize)) return;
 
         const baseSx =
           x < temp.width / 2 ? sampleInset : temp.width - sampleInset - patchSize;
@@ -277,20 +301,20 @@ export async function addBleedEdge(
           temp.width,
           temp.height,
           patchSize,
-          tempCtx
+          ctx2d
         );
 
-        // draw BEHIND existing pixels → won’t overwrite opaque white borders
-        const prevFilter = tempCtx.filter;
-        const prevSmoothing = tempCtx.imageSmoothingEnabled;
+        // draw BEHIND existing pixels → won't overwrite opaque white borders
+        const prevFilter = ctx2d.filter;
+        const prevSmoothing = ctx2d.imageSmoothingEnabled;
 
-        tempCtx.save();
-        tempCtx.globalCompositeOperation = "destination-over";
-        tempCtx.filter = applySoftBlur ? "blur(0.6px)" : "none";
-        tempCtx.imageSmoothingEnabled = true;
+        ctx2d.save();
+        ctx2d.globalCompositeOperation = "destination-over";
+        ctx2d.filter = applySoftBlur ? "blur(0.6px)" : "none";
+        ctx2d.imageSmoothingEnabled = true;
 
         // upscale the tiny patch into the corner area
-        tempCtx.drawImage(
+        ctx2d.drawImage(
           temp,
           sx,
           sy,
@@ -302,19 +326,19 @@ export async function addBleedEdge(
           cornerSize // dest rect
         );
 
-        tempCtx.restore();
-        tempCtx.filter = prevFilter;
-        tempCtx.imageSmoothingEnabled = prevSmoothing;
+        ctx2d.restore();
+        ctx2d.filter = prevFilter;
+        ctx2d.imageSmoothingEnabled = prevSmoothing;
       });
 
       blackenAllNearBlackPixels(
-        tempCtx,
+        ctx2d,
         targetCardWidth,
         targetCardHeight,
         blackThreshold
       );
 
-      const edgeData = tempCtx.getImageData(0, 0, 1, targetCardHeight).data;
+      const edgeData = ctx2d.getImageData(0, 0, 1, targetCardHeight).data;
       let blackCount = 0;
 
       for (let i = 0; i < targetCardHeight; i++) {
@@ -381,10 +405,24 @@ export async function addBleedEdge(
           ctx.drawImage(scaledImg, targetCardWidth - bleed, targetCardHeight - bleed, bleed, bleed, -finalWidth, -finalHeight, bleed, bleed); ctx.restore();
         }
 
-        resolve(canvas.toDataURL("image/png"));
+        const result = canvas.toDataURL("image/png");
+        resolve(result);
+      };
+
+      scaledImg.onerror = (error) => {
+        reject(new Error(`Failed to load scaled image: ${error}`));
       };
 
       scaledImg.src = temp.toDataURL("image/png");
+      
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = (error) => {
+      clearTimeout(timeoutId);
+      reject(new Error(`Failed to load image: ${error}`));
     };
 
     img.src = src;
