@@ -133,6 +133,7 @@ export function PageSettingsControls() {
           <input
             type="color"
             value={guideColor}
+            disabled={!bleedEdge}
             onChange={(e) => setGuideColor(e.target.value)}
             className="w-full h-10 p-0 border rounded"
           />
@@ -146,6 +147,7 @@ export function PageSettingsControls() {
             value={guideWidth}
             step="0.1"
             min="0"
+            disabled={!bleedEdge}
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               if (!isNaN(val)) setGuideWidth(val);
