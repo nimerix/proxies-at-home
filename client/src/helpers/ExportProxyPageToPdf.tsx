@@ -7,10 +7,7 @@ import { getPatchNearCorner } from "./ImageHelper";
 const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
-const DPI = 600;
-const IN = (inches: number) => Math.round(inches * DPI);
-const MM_TO_IN = (mm: number) => mm / 25.4;
-const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
+const DPI = 600; // Default fallback DPI
 
 function getLocalBleedImageUrl(originalUrl: string) {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
@@ -126,9 +123,9 @@ function preferPng(url: string) {
 }
 
 function bucketDpiFromHeight(h: number) {
-  if (h >= 4440) return 1200;
-  if (h >= 2960) return 800;
-  if (h >= 2220) return 600;
+  if (h >= 3465) return 1200;
+  if (h >= 2425) return 800;
+  if (h >= 1559) return 600;
   return 300;
 }
 function calibratedBleedTrimPxForHeight(h: number) {
@@ -273,10 +270,14 @@ function drawEdgeStubs(
 async function buildCardWithBleed(
   src: string,
   bleedPx: number,
-  opts: { isUserUpload: boolean; hasBakedBleed?: boolean }
+  opts: { isUserUpload: boolean; hasBakedBleed?: boolean },
+  targetDPI: number = DPI,
+  contentWidthPx?: number,
+  contentHeightPx?: number
 ) {
-  const contentW = MM_TO_PX(63);
-  const contentH = MM_TO_PX(88);
+  // Use provided dimensions or calculate from standard card size
+  const contentW = contentWidthPx ?? Math.round((63 / 25.4) * targetDPI);
+  const contentH = contentHeightPx ?? Math.round((88 / 25.4) * targetDPI);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
@@ -310,7 +311,7 @@ async function buildCardWithBleed(
   bctx.imageSmoothingQuality = "high";
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
-  const dpiFactor = DPI / 300;
+  const dpiFactor = targetDPI / 300;
   const cornerSize = Math.round(30 * dpiFactor);
   const sampleInset = Math.round(10 * dpiFactor);
   const patchSize = Math.round(20 * dpiFactor);
@@ -421,7 +422,7 @@ async function buildCardWithBleed(
     contentH,
     blackThreshold,
     undefined,
-    DPI
+    targetDPI
   );
 
   const out = document.createElement("canvas");
@@ -632,6 +633,43 @@ async function buildCardWithBleed(
   return out;
 }
 
+async function determineOptimalDPI(
+  cards: CardOption[],
+  originalSelectedImages: Record<string, string>
+): Promise<number> {
+  const imageSources: string[] = [];
+  
+  for (const card of cards) {
+    let src = originalSelectedImages[card.uuid] ?? card.imageUrls?.[0] ?? "";
+    if (!card.isUserUpload) {
+      src = getLocalBleedImageUrl(preferPng(src));
+    }
+    if (src) {
+      imageSources.push(src);
+    }
+  }
+  
+  if (imageSources.length === 0) {
+    return 600; // Default fallback
+  }
+  
+  const dpiValues: number[] = [];
+  
+  for (const src of imageSources) {
+    try {
+      const img = await loadImage(src);
+      const dpi = bucketDpiFromHeight(img.height);
+      dpiValues.push(dpi);
+    } catch (error) {
+      console.warn(`Failed to load image for DPI analysis: ${src}`, error);
+      dpiValues.push(600); // Default fallback for failed images
+    }
+  }
+  
+  const optimalDPI = Math.min(...dpiValues);
+  return optimalDPI;
+}
+
 function scaleGuideWidthForDPI(
   screenPx: number,
   screenPPI = 96,
@@ -648,9 +686,10 @@ function drawCornerGuides(
   contentH: number,
   bleedPx: number,
   guideColor: string,
-  guideWidthPx: number
+  guideWidthPx: number,
+  targetDPI: number = DPI
 ) {
-  const guideLenPx = MM_TO_PX(2);
+  const guideLenPx = Math.round((2 / 25.4) * targetDPI);
   const gx = x + bleedPx;
   const gy = y + bleedPx;
 
@@ -729,16 +768,23 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
+  // Determine optimal DPI based on all card images
+  const optimalDPI = await determineOptimalDPI(cards, originalSelectedImages);
+  
+  // Helper functions using dynamic DPI
+  const IN_DPI = (inches: number) => Math.round(inches * optimalDPI);
+  const MM_TO_PX_DPI = (mm: number) => IN_DPI(mm / 25.4);
+
   // Canvas size (pixels at DPI) — used for high-res page render
   const pageWidthPx =
-    pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
+    pageSizeUnit === "in" ? IN_DPI(pageWidth) : MM_TO_PX_DPI(pageWidth);
   const pageHeightPx =
-    pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
+    pageSizeUnit === "in" ? IN_DPI(pageHeight) : MM_TO_PX_DPI(pageHeight);
 
   // Card + bleed in pixels (at DPI)
-  const contentWidthInPx = MM_TO_PX(63);
-  const contentHeightInPx = MM_TO_PX(88);
-  const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
+  const contentWidthInPx = MM_TO_PX_DPI(63);
+  const contentHeightInPx = MM_TO_PX_DPI(88);
+  const bleedPx = bleedEdge ? MM_TO_PX_DPI(bleedEdgeWidthMm) : 0;
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
 
@@ -746,8 +792,8 @@ export async function exportProxyPagesToPdf({
   const perPage = Math.max(1, columns * rows);
   const gridWidthPx = columns * cardWidthPx;
   const gridHeightPx = rows * cardHeightPx;
-  const offsetXPx = pageSizeUnit === "in" ? IN(offsetX) : MM_TO_PX(offsetX);
-  const offsetYPx = pageSizeUnit === "in" ? IN(offsetY) : MM_TO_PX(offsetY);
+  const offsetXPx = pageSizeUnit === "in" ? IN_DPI(offsetX) : MM_TO_PX_DPI(offsetX);
+  const offsetYPx = pageSizeUnit === "in" ? IN_DPI(offsetY) : MM_TO_PX_DPI(offsetY);
   const startX = Math.round((pageWidthPx - gridWidthPx) / 2) + offsetXPx;
   const startY = Math.round((pageHeightPx - gridHeightPx) / 2) + offsetYPx;
 
@@ -799,11 +845,11 @@ export async function exportProxyPagesToPdf({
       const cardCanvas = await buildCardWithBleed(src, bleedPx, {
         isUserUpload: !!card.isUserUpload,
         hasBakedBleed: !!card.hasBakedBleed,
-      });
+      }, optimalDPI, contentWidthInPx, contentHeightInPx);
       ctx.drawImage(cardCanvas, x, y);
 
       if (bleedEdge) {
-        const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
+        const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, optimalDPI);
         drawCornerGuides(
           ctx,
           x,
@@ -812,7 +858,8 @@ export async function exportProxyPagesToPdf({
           contentHeightInPx,
           bleedPx,
           guideColor,
-          scaledGuideWidth
+          scaledGuideWidth,
+          optimalDPI
         );
         drawEdgeStubs(
           ctx,
