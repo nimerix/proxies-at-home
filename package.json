@@ -5,7 +5,8 @@
   "main": "index.js",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\""
+    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
+    "postinstall": "concurrently \"npm --prefix ./client install\" \"npm --prefix ./server install\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
@@ -15,9 +16,5 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "axios-retry": "^4.5.0",
-    "bottleneck": "^2.19.5",
-    "node-fetch": "^3.3.2"
-  }
+  "dependencies": {}
 }
