@@ -1,14 +1,15 @@
 import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
+import type { CardOption } from "@/types/Card";
 import { Button, Checkbox, HR, Label, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
+import { calculateMaxBleed } from "@/helpers/LayoutHelper";
 
 const unit = "mm";
-const MAX_BLEED_MM = 2
 
 export function PageSettingsControls() {
   const cards = useCardsStore((state) => state.cards);
@@ -20,6 +21,9 @@ export function PageSettingsControls() {
   const guideColor = useSettingsStore((state) => state.guideColor);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const zoom = useSettingsStore((state) => state.zoom);
+  const pageWidth = useSettingsStore((state) => state.pageWidth);
+  const pageHeight = useSettingsStore((state) => state.pageHeight);
+  const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
 
   const setColumns = useSettingsStore((state) => state.setColumns);
   const setRows = useSettingsStore((state) => state.setRows);
@@ -32,6 +36,8 @@ export function PageSettingsControls() {
   const setZoom = useSettingsStore((state) => state.setZoom);
   const resetSettings = useSettingsStore((state) => state.resetSettings);
 
+  const maxBleedMm = calculateMaxBleed(pageWidth, pageHeight, pageSizeUnit, columns, rows);
+
   const { reprocessSelectedImages } = useImageProcessing({
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
@@ -40,7 +46,7 @@ export function PageSettingsControls() {
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const debouncedReprocess = useCallback(
-    (cards: any[], newBleedWidth: number) => {
+    (cards: CardOption[], newBleedWidth: number) => {
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
@@ -111,12 +117,13 @@ export function PageSettingsControls() {
             className="w-full"
             type="number"
             value={bleedEdgeWidth}
-            max={MAX_BLEED_MM}
+            max={maxBleedMm}
+            step="0.25"
             onFocus={(e) => e.target.select()}
             onChange={(e) => {
-              const parsed = parseInt(e.target.value);
+              const parsed = parseFloat(e.target.value);
               if (isNaN(parsed)) return;
-              const val = parsed > MAX_BLEED_MM ? MAX_BLEED_MM : parsed;
+              const val = parsed > maxBleedMm ? maxBleedMm : parsed;
               setBleedEdgeWidth(val);
               debouncedReprocess(cards, val);
             }}

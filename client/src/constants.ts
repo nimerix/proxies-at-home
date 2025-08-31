@@ -24,3 +24,8 @@ export const LANGUAGE_OPTIONS = [
     { code: "zhs", label: "简体中文" },
     { code: "zht", label: "繁體中文" },
   ];
+
+export const CARD_DIMENSIONS = {
+  width: 63,
+  height: 88
+};
