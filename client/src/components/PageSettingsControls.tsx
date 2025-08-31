@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef } from "react";
 import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
-import { calculateMaxBleed } from "@/helpers/LayoutHelper";
+import { calculateMaxBleed, calculateMaxGridSize } from "@/helpers/LayoutHelper";
 
 const unit = "mm";
 
@@ -37,6 +37,7 @@ export function PageSettingsControls() {
   const resetSettings = useSettingsStore((state) => state.resetSettings);
 
   const maxBleedMm = calculateMaxBleed(pageWidth, pageHeight, pageSizeUnit, columns, rows);
+  const { maxColumns, maxRows } = calculateMaxGridSize(pageWidth, pageHeight, pageSizeUnit);
 
   const { reprocessSelectedImages } = useImageProcessing({
     unit, // "mm" | "in"
@@ -56,6 +57,38 @@ export function PageSettingsControls() {
     },
     [reprocessSelectedImages]
   );
+
+  useEffect(() => {
+    let needsUpdate = false;
+    let newColumns = columns;
+    let newRows = rows;
+    let newBleed = bleedEdgeWidth;
+
+    if (columns > maxColumns) {
+      newColumns = maxColumns;
+      needsUpdate = true;
+    }
+    if (rows > maxRows) {
+      newRows = maxRows;
+      needsUpdate = true;
+    }
+
+    const adjustedMaxBleed = calculateMaxBleed(pageWidth, pageHeight, pageSizeUnit, newColumns, newRows);
+    
+    if (bleedEdgeWidth > adjustedMaxBleed) {
+      newBleed = adjustedMaxBleed;
+      needsUpdate = true;
+    }
+
+    if (needsUpdate) {
+      if (newColumns !== columns) setColumns(newColumns);
+      if (newRows !== rows) setRows(newRows);
+      if (newBleed !== bleedEdgeWidth) {
+        setBleedEdgeWidth(newBleed);
+        debouncedReprocess(cards, newBleed);
+      }
+    }
+  }, [pageWidth, pageHeight, pageSizeUnit, maxColumns, maxRows, columns, rows, bleedEdgeWidth, setColumns, setRows, setBleedEdgeWidth, cards, debouncedReprocess]);
 
   useEffect(() => {
     return () => {
@@ -79,13 +112,13 @@ export function PageSettingsControls() {
               className="w-full"
               type="number"
               min={1}
-              max={10}
+              max={maxColumns}
               value={columns}
               onFocus={(e) => e.target.select()}
               onChange={(e) => {
                 const v = Math.max(
                   1,
-                  Math.min(10, parseInt(e.target.value || "1", 10))
+                  Math.min(maxColumns, parseInt(e.target.value || "1", 10))
                 );
                 if (!Number.isNaN(v)) setColumns(v);
               }}
@@ -97,13 +130,13 @@ export function PageSettingsControls() {
               className="w-full"
               type="number"
               min={1}
-              max={10}
+              max={maxRows}
               value={rows}
               onFocus={(e) => e.target.select()}
               onChange={(e) => {
                 const v = Math.max(
                   1,
-                  Math.min(10, parseInt(e.target.value || "1", 10))
+                  Math.min(maxRows, parseInt(e.target.value || "1", 10))
                 );
                 if (!Number.isNaN(v)) setRows(v);
               }}
