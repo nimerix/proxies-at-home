@@ -708,6 +708,8 @@ export async function exportProxyPagesToPdf({
   pageHeight,
   columns,
   rows,
+  offsetX,
+  offsetY,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -722,6 +724,8 @@ export async function exportProxyPagesToPdf({
   pageHeight: number;
   columns: number;
   rows: number;
+  offsetX: number;
+  offsetY: number;
 }) {
   if (!cards.length) return;
 
@@ -738,12 +742,14 @@ export async function exportProxyPagesToPdf({
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
 
-  // Grid + centering
+  // Grid + centering + offsets
   const perPage = Math.max(1, columns * rows);
   const gridWidthPx = columns * cardWidthPx;
   const gridHeightPx = rows * cardHeightPx;
-  const startX = Math.round((pageWidthPx - gridWidthPx) / 2);
-  const startY = Math.round((pageHeightPx - gridHeightPx) / 2);
+  const offsetXPx = pageSizeUnit === "in" ? IN(offsetX) : MM_TO_PX(offsetX);
+  const offsetYPx = pageSizeUnit === "in" ? IN(offsetY) : MM_TO_PX(offsetY);
+  const startX = Math.round((pageWidthPx - gridWidthPx) / 2) + offsetXPx;
+  const startY = Math.round((pageHeightPx - gridHeightPx) / 2) + offsetYPx;
 
   const pages: CardOption[][] = [];
 

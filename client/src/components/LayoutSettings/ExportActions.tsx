@@ -23,6 +23,8 @@ export function ExportActions() {
   const bleedEdge = useSettingsStore((state) => state.bleedEdge);
   const guideColor = useSettingsStore((state) => state.guideColor);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
+  const offsetX = useSettingsStore((state) => state.offsetX);
+  const offsetY = useSettingsStore((state) => state.offsetY);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -51,6 +53,8 @@ export function ExportActions() {
       pageHeight,
       columns,
       rows,
+      offsetX,
+      offsetY,
     });
 
     setLoadingTask(null);

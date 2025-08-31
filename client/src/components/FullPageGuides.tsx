@@ -7,6 +7,8 @@ type Props = {
   baseCardWidthMm: number;
   baseCardHeightMm: number;
   bleedEdgeWidthMm: number;
+  offsetX: number;
+  offsetY: number;
 };
 
 const EdgeCutLines = ({
@@ -15,6 +17,8 @@ const EdgeCutLines = ({
   baseCardWidthMm,
   baseCardHeightMm,
   bleedEdgeWidthMm,
+  offsetX,
+  offsetY,
 }: Props) => {
   const bleedEdge = useSettingsStore((state) => state.bleedEdge);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
@@ -32,8 +36,8 @@ const EdgeCutLines = ({
   const gridWidthMm = columns * totalCardWidthMm;
   const gridHeightMm = rows * totalCardHeightMm;
 
-  const startXmm = (pageWidthMm - gridWidthMm) / 2;
-  const startYmm = (pageHeightMm - gridHeightMm) / 2;
+  const startXmm = (pageWidthMm - gridWidthMm) / 2 + offsetX;
+  const startYmm = (pageHeightMm - gridHeightMm) / 2 + offsetY;
 
   const cutInX = bleedEdgeWidthMm;
   const cutOutX = bleedEdgeWidthMm + baseCardWidthMm;

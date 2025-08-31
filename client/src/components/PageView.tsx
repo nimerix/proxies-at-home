@@ -38,6 +38,8 @@ export function PageView() {
   const columns = useSettingsStore((state) => state.columns);
   const rows = useSettingsStore((state) => state.rows);
   const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
+  const offsetX = useSettingsStore((state) => state.offsetX);
+  const offsetY = useSettingsStore((state) => state.offsetY);
   const zoom = useSettingsStore((state) => state.zoom);
 
   const pageRef = useRef<HTMLDivElement>(null);
@@ -244,10 +246,7 @@ export function PageView() {
                   zoom: zoom,
                   width: `${pageWidth}${pageSizeUnit}`,
                   height: `${pageHeight}${pageSizeUnit}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  alignItems: "center",
+                  position: "relative",
                   breakAfter: "page",
                   flexShrink: 0,
                   padding: 0,
@@ -262,6 +261,9 @@ export function PageView() {
                     width: `${gridWidthMm}mm`,
                     height: `${gridHeightMm}mm`,
                     gap: 0,
+                    position: "absolute",
+                    left: `calc(50% - ${gridWidthMm/2}mm + ${offsetX}mm)`,
+                    top: `calc(50% - ${gridHeightMm/2}mm + ${offsetY}mm)`,
                   }}
                 >
                   {page.map((card, index) => {
@@ -338,6 +340,8 @@ export function PageView() {
                   baseCardWidthMm={baseCardWidthMm}
                   baseCardHeightMm={baseCardHeightMm}
                   bleedEdgeWidthMm={bleedEdgeWidth}
+                  offsetX={offsetX}
+                  offsetY={offsetY}
                 />
               </div>
             ))}

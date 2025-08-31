@@ -20,6 +20,8 @@ export function PageSettingsControls() {
   const bleedEdge = useSettingsStore((state) => state.bleedEdge);
   const guideColor = useSettingsStore((state) => state.guideColor);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
+  const offsetX = useSettingsStore((state) => state.offsetX);
+  const offsetY = useSettingsStore((state) => state.offsetY);
   const zoom = useSettingsStore((state) => state.zoom);
   const pageWidth = useSettingsStore((state) => state.pageWidth);
   const pageHeight = useSettingsStore((state) => state.pageHeight);
@@ -33,6 +35,8 @@ export function PageSettingsControls() {
   const setBleedEdge = useSettingsStore((state) => state.setBleedEdge);
   const setGuideColor = useSettingsStore((state) => state.setGuideColor);
   const setGuideWidth = useSettingsStore((state) => state.setGuideWidth);
+  const setOffsetX = useSettingsStore((state) => state.setOffsetX);
+  const setOffsetY = useSettingsStore((state) => state.setOffsetY);
   const setZoom = useSettingsStore((state) => state.setZoom);
   const resetSettings = useSettingsStore((state) => state.resetSettings);
 
@@ -139,6 +143,37 @@ export function PageSettingsControls() {
                   Math.min(maxRows, parseInt(e.target.value || "1", 10))
                 );
                 if (!Number.isNaN(v)) setRows(v);
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Offset X ({unit})</Label>
+            <TextInput
+              className="w-full"
+              type="number"
+              value={offsetX}
+              step="0.1"
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) setOffsetX(val);
+              }}
+            />
+          </div>
+          <div>
+            <Label>Offset Y ({unit})</Label>
+            <TextInput
+              className="w-full"
+              type="number"
+              value={offsetY}
+              step="0.1"
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) setOffsetY(val);
               }}
             />
           </div>

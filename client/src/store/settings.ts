@@ -24,6 +24,10 @@ type Store = {
   setGuideColor: (value: string) => void;
   guideWidth: number;
   setGuideWidth: (value: number) => void;
+  offsetX: number;
+  setOffsetX: (value: number) => void;
+  offsetY: number;
+  setOffsetY: (value: number) => void;
   zoom: number;
   setZoom: (value: number) => void;
   resetSettings: () => void;
@@ -41,6 +45,8 @@ const defaultPageSettings = {
   bleedEdge: true,
   guideColor: "#39FF14",
   guideWidth: 0.5,
+  offsetX: 0,
+  offsetY: 0,
   zoom: 1,
 } as Store;
 
@@ -91,6 +97,8 @@ export const useSettingsStore = create<Store>()(
       setBleedEdge: (value) => set({ bleedEdge: value }),
       setGuideColor: (value) => set({ guideColor: value }),
       setGuideWidth: (value) => set({ guideWidth: value }),
+      setOffsetX: (value) => set({ offsetX: value }),
+      setOffsetY: (value) => set({ offsetY: value }),
       setZoom: (value) => set({ zoom: value }),
       resetSettings: () => set({ ...defaultPageSettings }),
     }),
