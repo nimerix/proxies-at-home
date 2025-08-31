@@ -8,6 +8,7 @@ import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
 
 const unit = "mm";
+const MAX_BLEED_MM = 2
 
 export function PageSettingsControls() {
   const cards = useCardsStore((state) => state.cards);
@@ -110,14 +111,14 @@ export function PageSettingsControls() {
             className="w-full"
             type="number"
             value={bleedEdgeWidth}
-            max={2}
+            max={MAX_BLEED_MM}
             onFocus={(e) => e.target.select()}
             onChange={(e) => {
-              const val = parseInt(e.target.value);
-              if (!isNaN(val)) {
-                setBleedEdgeWidth(val);
-                debouncedReprocess(cards, val);
-              }
+              const parsed = parseInt(e.target.value);
+              if (isNaN(parsed)) return;
+              const val = parsed > MAX_BLEED_MM ? MAX_BLEED_MM : parsed;
+              setBleedEdgeWidth(val);
+              debouncedReprocess(cards, val);
             }}
           />
         </div>
