@@ -13,16 +13,16 @@ type Store = {
   appendCards: (newCards: CardOption[]) => void;
   updateCard: (pos: number, updatedCard: Partial<CardOption>) => void;
 
+  originalSelectedImages: Record<string, string>;
+  setOriginalSelectedImages: (images: Record<string, string>) => void;
+  appendOriginalSelectedImages: (newImages: Record<string, string>) => void;
+
   // ---------- volatile (NOT persisted) ----------
   selectedImages: Record<string, string>;
   setSelectedImages: (images: Record<string, string>) => void;
   appendSelectedImages: (newImages: Record<string, string>) => void;
   clearSelectedImage: (uuid: string) => void;
   clearManySelectedImages: (uuids: string[]) => void;
-
-  originalSelectedImages: Record<string, string>;
-  setOriginalSelectedImages: (images: Record<string, string>) => void;
-  appendOriginalSelectedImages: (newImages: Record<string, string>) => void;
 
   uploadedImages: Record<string, string>;
   setUploadedImages: (images: Record<string, string>) => void;
@@ -175,11 +175,12 @@ export const useCardsStore = create<Store>()(
         }),
     }),
     {
-      name: "proxxied:cards:v3", 
-      version: 3,
+      name: "proxxied:cards:v4", 
+      version: 4,
 
       partialize: (state) => ({
         cards: state.cards,
+        originalSelectedImages: state.originalSelectedImages,
       }),
 
       storage: createJSONStorage(() => localStorage),
@@ -194,6 +195,13 @@ export const useCardsStore = create<Store>()(
           delete persistedState.uploadedOriginalImages;
           delete persistedState.uploadedFiles;
         }
+        
+        if (version < 4) {
+          if (!persistedState.originalSelectedImages) {
+            persistedState.originalSelectedImages = {};
+          }
+        }
+        
         return persistedState;
       },
     }
