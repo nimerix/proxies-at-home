@@ -788,12 +788,14 @@ export async function exportProxyPagesToPdf({
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
 
-  // Grid + centering + offsets
+  // Grid + centering + offsets (matching the preview logic)
   const perPage = Math.max(1, columns * rows);
   const gridWidthPx = columns * cardWidthPx;
   const gridHeightPx = rows * cardHeightPx;
-  const offsetXPx = pageSizeUnit === "in" ? IN_DPI(offsetX) : MM_TO_PX_DPI(offsetX);
-  const offsetYPx = pageSizeUnit === "in" ? IN_DPI(offsetY) : MM_TO_PX_DPI(offsetY);
+  
+  const offsetXPx = MM_TO_PX_DPI(offsetX);
+  const offsetYPx = MM_TO_PX_DPI(offsetY);
+  
   const startX = Math.round((pageWidthPx - gridWidthPx) / 2) + offsetXPx;
   const startY = Math.round((pageHeightPx - gridHeightPx) / 2) + offsetYPx;
 
@@ -881,6 +883,7 @@ export async function exportProxyPagesToPdf({
 
     const pageImg = canvas.toDataURL("image/jpeg", 0.95);
     if (pageIndex > 0) pdf.addPage();
+  
     pdf.addImage(pageImg, "JPEG", 0, 0, pdfWidth, pdfHeight);
   }
 
