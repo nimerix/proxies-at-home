@@ -481,11 +481,10 @@ function drawCornerGuides(
   ctx.restore();
 }
 
-/** POST EXPORT — matches preview layout exactly */
 export async function exportProxyPagesToPdf({
   cards,
   originalSelectedImages,
-  cachedImageUrls,           // <-- NEW
+  cachedImageUrls,           
   bleedEdge,
   bleedEdgeWidthMm,
   guideColor,

@@ -20,15 +20,10 @@ export function getLocalBleedImageUrl(originalUrl: string): string {
 }
 
 export async function urlToDataUrl(url: string): Promise<string> {
-  const src = toProxied(url);
-  const resp = await fetch(src, { mode: "cors", credentials: "omit" });
-  if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status} ${resp.statusText}`);
+  const resp = await fetch(toProxied(url));
+  if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status}`);
   const blob = await resp.blob();
-  return await new Promise<string>((resolve) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.readAsDataURL(blob);
-  });
+  return URL.createObjectURL(blob);
 }
 
 export function pngToNormal(pngUrl: string) {
@@ -41,35 +36,71 @@ export function pngToNormal(pngUrl: string) {
   }
 }
 
-export function trimBleedEdge(dataUrl: string): Promise<string> {
+async function canvasToBlob(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  type = "image/png",
+  quality?: number
+): Promise<Blob> {
+  if ("convertToBlob" in canvas) {
+    return (canvas as any).convertToBlob({ type, quality });
+  }
+  return await new Promise<Blob>((resolve, reject) => {
+    (canvas as HTMLCanvasElement).toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
+      type,
+      quality
+    );
+  });
+}
+
+async function canvasToObjectUrl(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  type = "image/png",
+  quality?: number
+): Promise<string> {
+  const blob = await canvasToBlob(canvas, type, quality);
+  return URL.createObjectURL(blob);
+}
+
+export function trimBleedEdge(src: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const canvas = document.createElement("canvas");
 
     const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 10000);
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 
-    img.onload = () => {
+    img.onload = async () => {
+      clearTimeout(timeoutId);
       try {
-        clearTimeout(timeoutId);
-
         let bleedTrim = 76;
         if (img.height >= 2220 && img.height < 2960) bleedTrim = 78;
         if (img.height >= 2960 && img.height < 4440) bleedTrim = 104;
         if (img.height >= 4440) bleedTrim = 156;
 
-        const height = img.height - bleedTrim * 2;
         const width = img.width - bleedTrim * 2;
+        const height = img.height - bleedTrim * 2;
 
-        if (width <= 0 || height <= 0) return resolve(dataUrl);
+        if (width <= 0 || height <= 0) {
+          return resolve(src);
+        }
 
         canvas.width = width;
         canvas.height = height;
 
         const ctx = canvas.getContext("2d");
-        if (!ctx) return resolve(dataUrl);
+        if (!ctx) return resolve(src);
 
         ctx.drawImage(img, bleedTrim, bleedTrim, width, height, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/png"));
+
+        const outUrl = await canvasToObjectUrl(canvas, "image/png");
+
+        try {
+          const u = new URL(src);
+          if (u.protocol === "blob:") URL.revokeObjectURL(src);
+        } catch {}
+
+        resolve(outUrl);
       } catch (error) {
         reject(error);
       }
@@ -80,7 +111,7 @@ export function trimBleedEdge(dataUrl: string): Promise<string> {
       reject(new Error(`Failed to load image: ${String(error)}`));
     };
 
-    img.src = dataUrl; // already a data URL
+    img.src = src.startsWith("http") ? toProxied(src) : src;
   });
 }
 
@@ -113,7 +144,6 @@ export function blackenAllNearBlackPixels(
   ctx.putImageData(imageData, 0, 0);
 }
 
-/** Pick a non-transparent / non-near-white patch near a corner */
 export function getPatchNearCorner(
   sx: number,
   sy: number,
@@ -162,7 +192,7 @@ export async function addBleedEdge(
   opts?: { unit?: "mm" | "in"; bleedEdgeWidth?: number }
 ) {
   return new Promise<string>((resolve, reject) => {
-    const targetCardWidth = 744;  // 2.48" * 300
+    const targetCardWidth = 744;   // 2.48" * 300
     const targetCardHeight = 1040; // 3.47" * 300
     const bleed = Math.round(getBleedInPixels(bleedOverride ?? opts?.bleedEdgeWidth ?? 0, opts?.unit ?? "mm"));
 
@@ -182,14 +212,12 @@ export async function addBleedEdge(
 
     const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 15000);
 
-    // only set CORS for remote images
     if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 
-    img.onload = () => {
+    img.onload = async () => {
       try {
         clearTimeout(timeoutId);
 
-        // fit into targetCardWidth x targetCardHeight (cover)
         const aspectRatio = img.width / img.height;
         const targetAspect = targetCardWidth / targetCardHeight;
 
@@ -214,8 +242,8 @@ export async function addBleedEdge(
         ctx2d.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
         if (bleed === 0) {
-          const scaledOnly = temp.toDataURL("image/png");
-          return resolve(scaledOnly);
+          const outUrl = await canvasToObjectUrl(temp, "image/png");
+          return resolve(outUrl);
         }
 
         const cornerSize = 30;
@@ -279,16 +307,18 @@ export async function addBleedEdge(
         }
         const isMostlyBlack = blackCount / targetCardHeight > blackToleranceRatio;
 
+        const scaledUrl = await canvasToObjectUrl(temp, "image/png");
         const scaledImg = new Image();
-        scaledImg.onload = () => {
+        scaledImg.onload = async () => {
           // place core image
           ctx.drawImage(scaledImg, bleed, bleed);
 
           if (isMostlyBlack) {
             // sample a small slice for solid-ish edges
             const slice = Math.max(8, Math.min(bleed, 64));
-            // L, R, T, B
+            // L
             ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight);
+            // R
             ctx.drawImage(
               scaledImg,
               targetCardWidth - slice,
@@ -300,7 +330,9 @@ export async function addBleedEdge(
               bleed,
               targetCardHeight
             );
+            // T
             ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed);
+            // B
             ctx.drawImage(
               scaledImg,
               0,
@@ -360,7 +392,7 @@ export async function addBleedEdge(
               0,
               bleed,
               targetCardHeight,
-              - (targetCardWidth + bleed * 2),
+              -(targetCardWidth + bleed * 2),
               bleed,
               bleed,
               targetCardHeight
@@ -379,7 +411,7 @@ export async function addBleedEdge(
               targetCardWidth,
               bleed,
               bleed,
-              - (targetCardHeight + bleed * 2),
+              -(targetCardHeight + bleed * 2),
               targetCardWidth,
               bleed
             );
@@ -396,7 +428,7 @@ export async function addBleedEdge(
               0,
               bleed,
               bleed,
-              - (targetCardWidth + bleed * 2),
+              -(targetCardWidth + bleed * 2),
               -bleed,
               bleed,
               bleed
@@ -410,7 +442,7 @@ export async function addBleedEdge(
               bleed,
               bleed,
               -bleed,
-              - (targetCardHeight + bleed * 2),
+              -(targetCardHeight + bleed * 2),
               bleed,
               bleed
             ); ctx.restore();
@@ -422,18 +454,24 @@ export async function addBleedEdge(
               targetCardHeight - bleed,
               bleed,
               bleed,
-              - (targetCardWidth + bleed * 2),
-              - (targetCardHeight + bleed * 2),
+              -(targetCardWidth + bleed * 2),
+              -(targetCardHeight + bleed * 2),
               bleed,
               bleed
             ); ctx.restore();
           }
 
-          resolve(canvas.toDataURL("image/png"));
+          // Final output as object URL
+          const outUrl = await canvasToObjectUrl(canvas, "image/png");
+
+          // Clean up the temporary scaled URL
+          try { URL.revokeObjectURL(scaledUrl); } catch {}
+
+          resolve(outUrl);
         };
 
         scaledImg.onerror = (error) => reject(new Error(`Failed to load scaled image: ${String(error)}`));
-        scaledImg.src = temp.toDataURL("image/png");
+        scaledImg.src = scaledUrl;
       } catch (error) {
         reject(error);
       }
