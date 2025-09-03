@@ -88,8 +88,8 @@ export async function ExportImagesZip(opts: ExportOpts) {
         // Try to keep the right extension if we know it; default to .png
         const ext =
           blob.type === "image/jpeg" ? "jpg" :
-          blob.type === "image/webp" ? "webp" :
-          "png";
+            blob.type === "image/webp" ? "webp" :
+              "png";
 
         const filename = `${idx} - ${baseName}${suffix}.${ext}`;
         zip.file(filename, blob);

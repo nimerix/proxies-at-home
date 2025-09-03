@@ -41,12 +41,9 @@ export function ArtworkModal() {
     (state) => state.clearManySelectedImages
   );
 
-  // NEW: cached image url helpers (persisted)
   const appendCachedImageUrls = useCardsStore(
     (state) => state.appendCachedImageUrls
   );
-  const clearCachedForMany = useCardsStore((state) => state.clearCachedForMany);
-  const clearCachedForCard = useCardsStore((state) => state.clearCachedForCard);
 
   async function getMoreCards() {
     if (!modalCard) return;
@@ -94,7 +91,6 @@ export function ArtworkModal() {
 
               const newUuid = crypto.randomUUID();
 
-              // Update the card in the grid
               updateCard(modalIndex, {
                 uuid: newUuid,
                 name: newCard.name,
@@ -102,7 +98,6 @@ export function ArtworkModal() {
                 isUserUpload: false,
               });
 
-              // Keep the modal's reference in sync
               updateArtworkCard({
                 uuid: newUuid,
                 name: newCard.name,
@@ -110,17 +105,14 @@ export function ArtworkModal() {
                 isUserUpload: false,
               });
 
-              // Point original to first art
               appendOriginalSelectedImages({
                 [newUuid]: newCard.imageUrls[0],
               });
 
-              // NEW: seed the persisted cache with the proxied/origin URL
               appendCachedImageUrls({
                 [newUuid]: getLocalBleedImageUrl(newCard.imageUrls[0]),
               });
 
-              // Clear the processed image so the lazy processor can rebuild
               clearSelectedImage(newUuid);
 
               setSearchQuery("");
@@ -152,11 +144,10 @@ export function ArtworkModal() {
                     onError={(e) => {
                       (e.currentTarget as HTMLImageElement).src = pngUrl;
                     }} // fallback
-                    className={`w-full cursor-pointer border-4 ${
-                      originalSelectedImages[modalCard.uuid] === pngUrl
+                    className={`w-full cursor-pointer border-4 ${originalSelectedImages[modalCard.uuid] === pngUrl
                         ? "border-green-500"
                         : "border-transparent"
-                    }`}
+                      }`}
                     onClick={async () => {
                       if (applyToAll) {
                         const newOriginalSelectedImages: Record<
@@ -166,7 +157,6 @@ export function ArtworkModal() {
                         const cachedUpdates: Record<string, string> = {};
                         const uuidsToClear: string[] = [];
 
-                        // apply to every card with the same name
                         cards.forEach((card) => {
                           if (card.name === modalCard.name) {
                             newOriginalSelectedImages[card.uuid] = pngUrl;
@@ -176,31 +166,22 @@ export function ArtworkModal() {
                           }
                         });
 
-                        // update originals + cache, then clear processed images
                         appendOriginalSelectedImages(
                           newOriginalSelectedImages
                         );
                         appendCachedImageUrls(cachedUpdates);
                         clearManySelectedImages(uuidsToClear);
 
-                        // optional: if you prefer to wipe any stale cache first
-                        // clearCachedForMany(uuidsToClear); // then appendCachedImageUrls(...)
                       } else {
-                        // single-card replace
                         appendOriginalSelectedImages({
                           [modalCard.uuid]: pngUrl,
                         });
 
-                        // NEW: seed cache for this uuid
                         appendCachedImageUrls({
                           [modalCard.uuid]: getLocalBleedImageUrl(pngUrl),
                         });
 
-                        // force the re-process for this card
                         clearSelectedImage(modalCard.uuid);
-
-                        // optional: clear old cache entry first
-                        // clearCachedForCard(modalCard.uuid);
                       }
 
                       closeArtworkModal();
