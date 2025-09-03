@@ -17,6 +17,7 @@ type Store = {
   setOriginalSelectedImages: (images: Record<string, string>) => void;
   appendOriginalSelectedImages: (newImages: Record<string, string>) => void;
 
+
   // ---------- volatile (NOT persisted) ----------
   selectedImages: Record<string, string>;
   setSelectedImages: (images: Record<string, string>) => void;
@@ -60,6 +61,17 @@ export const useCardsStore = create<Store>()(
         })),
 
       // ---------- volatile ----------
+      originalSelectedImages: {},
+      setOriginalSelectedImages: (images) =>
+        set({ originalSelectedImages: images }),
+      appendOriginalSelectedImages: (newImages) =>
+        set((state) => ({
+          originalSelectedImages: {
+            ...state.originalSelectedImages,
+            ...newImages,
+          },
+        })),
+
       selectedImages: {},
       setSelectedImages: (images) => set({ selectedImages: images }),
       appendSelectedImages: (newImages) =>
@@ -80,17 +92,6 @@ export const useCardsStore = create<Store>()(
           }
           return { selectedImages: newSelected };
         }),
-
-      originalSelectedImages: {},
-      setOriginalSelectedImages: (images) =>
-        set({ originalSelectedImages: images }),
-      appendOriginalSelectedImages: (newImages) =>
-        set((state) => ({
-          originalSelectedImages: {
-            ...state.originalSelectedImages,
-            ...newImages,
-          },
-        })),
 
       uploadedImages: {},
       setUploadedImages: (images) => set({ uploadedImages: images }),
@@ -180,7 +181,6 @@ export const useCardsStore = create<Store>()(
 
       partialize: (state) => ({
         cards: state.cards,
-        originalSelectedImages: state.originalSelectedImages,
       }),
 
       storage: createJSONStorage(() => localStorage),
@@ -197,9 +197,8 @@ export const useCardsStore = create<Store>()(
         }
         
         if (version < 4) {
-          if (!persistedState.originalSelectedImages) {
-            persistedState.originalSelectedImages = {};
-          }
+          delete persistedState.originalSelectedImages;
+          delete persistedState.artworkSelections;
         }
         
         return persistedState;
