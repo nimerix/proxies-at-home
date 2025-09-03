@@ -8,10 +8,13 @@ import { Button } from "flowbite-react";
 
 export function ExportActions() {
   const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
+
   const cards = useCardsStore((state) => state.cards);
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
+  const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls); // <-- NEW
+
   const pageOrientation = useSettingsStore((state) => state.pageOrientation);
   const pageSizePreset = useSettingsStore((state) => state.pageSizePreset);
   const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
@@ -36,24 +39,32 @@ export function ExportActions() {
   };
 
   const handleExport = async () => {
-    setLoadingTask("Generating PDF");
-    await exportProxyPagesToPdf({
-      cards,
-      originalSelectedImages,
-      bleedEdge,
-      bleedEdgeWidthMm: bleedEdgeWidth,
-      guideColor,
-      guideWidthPx: guideWidth,
-      pageOrientation,
-      pageSizePreset,
-      pageSizeUnit,
-      pageWidth,
-      pageHeight,
-      columns,
-      rows,
-    });
+    if (!cards.length) return;
 
-    setLoadingTask(null);
+    setLoadingTask("Generating PDF");
+    try {
+      await exportProxyPagesToPdf({
+        cards,
+        originalSelectedImages,
+        cachedImageUrls,              // <-- NEW: let the exporter use warmed URLs
+        bleedEdge,
+        bleedEdgeWidthMm: bleedEdgeWidth,
+        guideColor,
+        guideWidthPx: guideWidth,
+        pageOrientation,
+        pageSizePreset,
+        pageSizeUnit,
+        pageWidth,
+        pageHeight,
+        columns,
+        rows,
+      });
+    } catch (err) {
+      console.error("Export failed:", err);
+      // optional: surface a toast here if you have one
+    } finally {
+      setLoadingTask(null);
+    }
   };
 
   return (
@@ -61,6 +72,7 @@ export function ExportActions() {
       <Button color="green" onClick={handleExport} disabled={!cards.length}>
         Export to PDF
       </Button>
+
       <Button
         color="indigo"
         onClick={() =>
@@ -68,16 +80,19 @@ export function ExportActions() {
             cards,
             originalSelectedImages,
             fileBaseName: "card_images",
+            // If your zip helper later supports it, you can pass cachedImageUrls here too.
           })
         }
         disabled={!cards.length}
       >
         Export Card Images (.zip)
       </Button>
-      <Button color="cyan" onClick={handleCopyDecklist}>
+
+      <Button color="cyan" onClick={handleCopyDecklist} disabled={!cards.length}>
         Copy Decklist
       </Button>
-      <Button color="blue" onClick={handleDownloadDecklist}>
+
+      <Button color="blue" onClick={handleDownloadDecklist} disabled={!cards.length}>
         Download Decklist (.txt)
       </Button>
     </div>

@@ -1,19 +1,28 @@
 import { API_BASE } from "../constants";
 
+const DPI = 300;
+const IN = (inches: number) => Math.round(inches * DPI);
+
+export function toProxied(url: string) {
+  if (!url) return url;
+  if (url.startsWith("data:")) return url;
+  const prefix = `${API_BASE}/api/cards/images/proxy?url=`;
+  if (url.startsWith(prefix)) return url;
+  return `${prefix}${encodeURIComponent(url)}`;
+}
+
 export function getBleedInPixels(bleedEdgeWidth: number, unit: string): number {
-  if (unit === "mm") {
-    return (bleedEdgeWidth / 25.4) * 300;
-  } else {
-    return bleedEdgeWidth * 300;
-  }
+  return unit === "mm" ? IN(bleedEdgeWidth / 25.4) : IN(bleedEdgeWidth);
 }
 
 export function getLocalBleedImageUrl(originalUrl: string): string {
-  return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
+  return toProxied(originalUrl);
 }
 
 export async function urlToDataUrl(url: string): Promise<string> {
-  const resp = await fetch(url);
+  const src = toProxied(url);
+  const resp = await fetch(src, { mode: "cors", credentials: "omit" });
+  if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status} ${resp.statusText}`);
   const blob = await resp.blob();
   return await new Promise<string>((resolve) => {
     const reader = new FileReader();
@@ -25,12 +34,10 @@ export async function urlToDataUrl(url: string): Promise<string> {
 export function pngToNormal(pngUrl: string) {
   try {
     const u = new URL(pngUrl);
-    u.pathname = u.pathname
-      .replace("/png/", "/normal/")
-      .replace(/\.png$/i, ".jpg");
+    u.pathname = u.pathname.replace("/png/", "/normal/").replace(/\.png$/i, ".jpg");
     return u.toString();
   } catch {
-    return pngUrl; //fallback
+    return pngUrl;
   }
 }
 
@@ -38,49 +45,31 @@ export function trimBleedEdge(dataUrl: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const canvas = document.createElement("canvas");
-    
-    const timeoutId = setTimeout(() => {
-      reject(new Error("Image processing timeout"));
-    }, 10000);
+
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 10000);
 
     img.onload = () => {
       try {
         clearTimeout(timeoutId);
-        
+
         let bleedTrim = 76;
-        if (img.height >= 2220 && img.height < 2960) {
-          bleedTrim = 78;
-        }
-        if (img.height >= 2960 && img.height < 4440) {
-          bleedTrim = 104;
-        }
-        if (img.height >= 4440) {
-          bleedTrim = 156;
-        }
+        if (img.height >= 2220 && img.height < 2960) bleedTrim = 78;
+        if (img.height >= 2960 && img.height < 4440) bleedTrim = 104;
+        if (img.height >= 4440) bleedTrim = 156;
 
         const height = img.height - bleedTrim * 2;
         const width = img.width - bleedTrim * 2;
+
+        if (width <= 0 || height <= 0) return resolve(dataUrl);
 
         canvas.width = width;
         canvas.height = height;
 
         const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(
-            img,
-            bleedTrim,
-            bleedTrim,
-            width,
-            height,
-            0,
-            0,
-            width,
-            height
-          );
-          resolve(canvas.toDataURL("image/png"));
-        } else {
-          resolve(dataUrl);
-        }
+        if (!ctx) return resolve(dataUrl);
+
+        ctx.drawImage(img, bleedTrim, bleedTrim, width, height, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/png"));
       } catch (error) {
         reject(error);
       }
@@ -88,10 +77,10 @@ export function trimBleedEdge(dataUrl: string): Promise<string> {
 
     img.onerror = (error) => {
       clearTimeout(timeoutId);
-      reject(new Error(`Failed to load image: ${error}`));
+      reject(new Error(`Failed to load image: ${String(error)}`));
     };
 
-    img.src = dataUrl;
+    img.src = dataUrl; // already a data URL
   });
 }
 
@@ -100,35 +89,23 @@ export function blackenAllNearBlackPixels(
   width: number,
   height: number,
   threshold: number,
-  borderThickness = {
-    top: 96,
-    bottom: 400,
-    left: 48,
-    right: 48,
-  }
+  borderThickness = { top: 96, bottom: 400, left: 48, right: 48 }
 ) {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
   for (let y = 0; y < height; y++) {
+    const topEdge = y < borderThickness.top;
+    const botEdge = y >= height - borderThickness.bottom;
     for (let x = 0; x < width; x++) {
-      const inBorder =
-        y < borderThickness.top ||
-        y >= height - borderThickness.bottom ||
-        x < borderThickness.left ||
-        x >= width - borderThickness.right;
-
-      if (!inBorder) continue;
+      const leftEdge = x < borderThickness.left;
+      const rightEdge = x >= width - borderThickness.right;
+      if (!(topEdge || botEdge || leftEdge || rightEdge)) continue;
 
       const index = (y * width + x) * 4;
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-
+      const r = data[index], g = data[index + 1], b = data[index + 2];
       if (r < threshold && g < threshold && b < threshold) {
-        data[index] = 0;
-        data[index + 1] = 0;
-        data[index + 2] = 0;
+        data[index] = 0; data[index + 1] = 0; data[index + 2] = 0;
       }
     }
   }
@@ -136,7 +113,7 @@ export function blackenAllNearBlackPixels(
   ctx.putImageData(imageData, 0, 0);
 }
 
-// Helper: try to pick a non-transparent / non-white-ish patch near corners
+/** Pick a non-transparent / non-near-white patch near a corner */
 export function getPatchNearCorner(
   sx: number,
   sy: number,
@@ -146,47 +123,33 @@ export function getPatchNearCorner(
   tempCtx: CanvasRenderingContext2D
 ): { sx: number; sy: number } {
   const candidates = [
-    [0, 0],
-    [patchSize, 0],
-    [0, patchSize],
-    [-patchSize, 0],
-    [0, -patchSize],
-    [patchSize, patchSize],
-    [-patchSize, patchSize],
-    [patchSize, -patchSize],
-    [-patchSize, -patchSize],
+    [0, 0], [patchSize, 0], [0, patchSize], [-patchSize, 0], [0, -patchSize],
+    [patchSize, patchSize], [-patchSize, patchSize], [patchSize, -patchSize], [-patchSize, -patchSize],
   ];
 
-  const clamp = (v: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, v));
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
   for (const [dx, dy] of candidates) {
     const px = clamp(sx + dx, 0, w - patchSize);
     const py = clamp(sy + dy, 0, h - patchSize);
     const data = tempCtx.getImageData(px, py, patchSize, patchSize).data;
 
-    // Prefer patches that are mostly opaque and not “all white”
     let opaqueCount = 0;
-    let notTooWhiteCount = 0; // count pixels that are not near-white
+    let notTooWhiteCount = 0;
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-      if (a > 10) { // treat <=10 alpha as transparent-ish
+      if (a > 10) {
         opaqueCount++;
-        // consider anything <240 in at least one channel as “has color/texture”
         if (r < 240 || g < 240 || b < 240) notTooWhiteCount++;
       }
     }
-
     const total = patchSize * patchSize;
     const opaqueRatio = opaqueCount / total;
     const texturedRatio = opaqueCount ? notTooWhiteCount / opaqueCount : 0;
 
-    if (opaqueRatio >= 0.7 && texturedRatio >= 0.2) {
-      return { sx: px, sy: py };
-    }
+    if (opaqueRatio >= 0.7 && texturedRatio >= 0.2) return { sx: px, sy: py };
   }
 
-  // fallback: original spot
   return {
     sx: Math.max(0, Math.min(w - patchSize, sx)),
     sy: Math.max(0, Math.min(h - patchSize, sy)),
@@ -196,24 +159,18 @@ export function getPatchNearCorner(
 export async function addBleedEdge(
   src: string,
   bleedOverride?: number,
-  opts?: {
-    unit?: "mm" | "in";
-    bleedEdgeWidth?: number;
-  }
+  opts?: { unit?: "mm" | "in"; bleedEdgeWidth?: number }
 ) {
   return new Promise<string>((resolve, reject) => {
-    const targetCardWidth = 744;
-    const targetCardHeight = 1040;
-    const bleed = Math.round(
-      getBleedInPixels(
-        bleedOverride ?? opts?.bleedEdgeWidth ?? 0,
-        opts?.unit ?? "mm"
-      )
-    );
+    const targetCardWidth = 744;  // 2.48" * 300
+    const targetCardHeight = 1040; // 3.47" * 300
+    const bleed = Math.round(getBleedInPixels(bleedOverride ?? opts?.bleedEdgeWidth ?? 0, opts?.unit ?? "mm"));
+
     const finalWidth = targetCardWidth + bleed * 2;
     const finalHeight = targetCardHeight + bleed * 2;
-    const blackThreshold = 30; // max RGB value to still consider "black"
-    const blackToleranceRatio = 0.7; // how much of the edge must be black to switch modes
+
+    const blackThreshold = 30;
+    const blackToleranceRatio = 0.7;
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d")!;
@@ -222,17 +179,17 @@ export async function addBleedEdge(
 
     const img = new Image();
     const temp = document.createElement("canvas");
-    
-    const timeoutId = setTimeout(() => {
-      reject(new Error("Image processing timeout"));
-    }, 15000);
 
-    img.crossOrigin = "anonymous";
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 15000);
+
+    // only set CORS for remote images
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 
     img.onload = () => {
       try {
         clearTimeout(timeoutId);
-        
+
+        // fit into targetCardWidth x targetCardHeight (cover)
         const aspectRatio = img.width / img.height;
         const targetAspect = targetCardWidth / targetCardHeight;
 
@@ -256,165 +213,227 @@ export async function addBleedEdge(
         const ctx2d = temp.getContext("2d", { willReadFrequently: true })!;
         ctx2d.drawImage(img, -offsetX, -offsetY, drawWidth, drawHeight);
 
-      const cornerSize = 30;      // how big the corner fix area is
-      const sampleInset = 10;     // how far in from the edge we sample
-      const patchSize = 20;       // size of the tiny patch we upscale into the corner
-      const applySoftBlur = true; // set false if you don't want any blur on the upscaled patch
-
-      // --- NEW: transparency-only corner gate ---
-      const ALPHA_EMPTY = 10; // <=10 alpha counts as transparent-ish
-      function cornerNeedsFill(
-        ctx2: CanvasRenderingContext2D,
-        x: number,
-        y: number,
-        size: number
-      ) {
-        const data = ctx2.getImageData(x, y, size, size).data;
-        const total = size * size;
-        let empty = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] <= ALPHA_EMPTY) empty++;
-        }
-        return empty / total >= 0.05; // only if ≥5% transparent
-      }
-      // -----------------------------------------
-
-      const cornerCoords = [
-        { x: 0, y: 0 }, // TL
-        { x: temp.width - cornerSize, y: 0 }, // TR
-        { x: 0, y: temp.height - cornerSize }, // BL
-        { x: temp.width - cornerSize, y: temp.height - cornerSize }, // BR
-      ];
-
-      cornerCoords.forEach(({ x, y }) => {
-        // Only fill if the corner region actually has transparency
-        if (!cornerNeedsFill(ctx2d, x, y, cornerSize)) return;
-
-        const baseSx =
-          x < temp.width / 2 ? sampleInset : temp.width - sampleInset - patchSize;
-        const baseSy =
-          y < temp.height / 2 ? sampleInset : temp.height - sampleInset - patchSize;
-
-        const { sx, sy } = getPatchNearCorner(
-          baseSx,
-          baseSy,
-          temp.width,
-          temp.height,
-          patchSize,
-          ctx2d
-        );
-
-        // draw BEHIND existing pixels → won't overwrite opaque white borders
-        const prevFilter = ctx2d.filter;
-        const prevSmoothing = ctx2d.imageSmoothingEnabled;
-
-        ctx2d.save();
-        ctx2d.globalCompositeOperation = "destination-over";
-        ctx2d.filter = applySoftBlur ? "blur(0.6px)" : "none";
-        ctx2d.imageSmoothingEnabled = true;
-
-        // upscale the tiny patch into the corner area
-        ctx2d.drawImage(
-          temp,
-          sx,
-          sy,
-          patchSize,
-          patchSize, // source rect
-          x,
-          y,
-          cornerSize,
-          cornerSize // dest rect
-        );
-
-        ctx2d.restore();
-        ctx2d.filter = prevFilter;
-        ctx2d.imageSmoothingEnabled = prevSmoothing;
-      });
-
-      blackenAllNearBlackPixels(
-        ctx2d,
-        targetCardWidth,
-        targetCardHeight,
-        blackThreshold
-      );
-
-      const edgeData = ctx2d.getImageData(0, 0, 1, targetCardHeight).data;
-      let blackCount = 0;
-
-      for (let i = 0; i < targetCardHeight; i++) {
-        const r = edgeData[i * 4];
-        const g = edgeData[i * 4 + 1];
-        const b = edgeData[i * 4 + 2];
-        if (r < blackThreshold && g < blackThreshold && b < blackThreshold) {
-          blackCount++;
-        }
-      }
-
-      const isMostlyBlack = blackCount / targetCardHeight > blackToleranceRatio;
-
-      const scaledImg = new Image();
-      scaledImg.onload = () => {
-        ctx.drawImage(scaledImg, bleed, bleed);
-
-        if (isMostlyBlack) {
-          const slice = 8;
-          // Edges
-          ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight); // L
-          ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, targetCardHeight, targetCardWidth + bleed, bleed, bleed, targetCardHeight); // R
-          ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed); // T
-          ctx.drawImage(scaledImg, 0, targetCardHeight - slice, targetCardWidth, slice, bleed, targetCardHeight + bleed, targetCardWidth, bleed); // B
-
-          // Corners
-          ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed); // TL
-          ctx.drawImage(scaledImg, targetCardWidth - slice, 0, slice, slice, targetCardWidth + bleed, 0, bleed, bleed); // TR
-          ctx.drawImage(scaledImg, 0, targetCardHeight - slice, slice, slice, 0, targetCardHeight + bleed, bleed, bleed); // BL
-          ctx.drawImage(scaledImg, targetCardWidth - slice, targetCardHeight - slice, slice, slice, targetCardWidth + bleed, targetCardHeight + bleed, bleed, bleed); // BR
-        } else {
-          // mirrored bleed
-          ctx.save();
-          ctx.scale(-1, 1);
-          ctx.drawImage(scaledImg, 0, 0, bleed, targetCardHeight, -bleed, bleed, bleed, targetCardHeight);
-          ctx.restore();
-
-          ctx.save();
-          ctx.scale(-1, 1);
-          ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, targetCardHeight, -finalWidth, bleed, bleed, targetCardHeight);
-          ctx.restore();
-
-          ctx.save();
-          ctx.scale(1, -1);
-          ctx.drawImage(scaledImg, 0, 0, targetCardWidth, bleed, bleed, -bleed, targetCardWidth, bleed);
-          ctx.restore();
-
-          ctx.save();
-          ctx.scale(1, -1);
-          ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, targetCardWidth, bleed, bleed, -finalHeight, targetCardWidth, bleed);
-          ctx.restore();
-
-          // mirrored corners
-          ctx.save(); ctx.scale(-1, -1);
-          ctx.drawImage(scaledImg, 0, 0, bleed, bleed, -bleed, -bleed, bleed, bleed); ctx.restore();
-
-          ctx.save(); ctx.scale(-1, -1);
-          ctx.drawImage(scaledImg, targetCardWidth - bleed, 0, bleed, bleed, -finalWidth, -bleed, bleed, bleed); ctx.restore();
-
-          ctx.save(); ctx.scale(-1, -1);
-          ctx.drawImage(scaledImg, 0, targetCardHeight - bleed, bleed, bleed, -bleed, -finalHeight, bleed, bleed); ctx.restore();
-
-          ctx.save(); ctx.scale(-1, -1);
-          ctx.drawImage(scaledImg, targetCardWidth - bleed, targetCardHeight - bleed, bleed, bleed, -finalWidth, -finalHeight, bleed, bleed); ctx.restore();
+        if (bleed === 0) {
+          const scaledOnly = temp.toDataURL("image/png");
+          return resolve(scaledOnly);
         }
 
-        const result = canvas.toDataURL("image/png");
-        resolve(result);
-      };
+        const cornerSize = 30;
+        const sampleInset = 10;
+        const patchSize = 20;
+        const applySoftBlur = true;
 
-      scaledImg.onerror = (error) => {
-        reject(new Error(`Failed to load scaled image: ${error}`));
-      };
+        const ALPHA_EMPTY = 10;
+        function cornerNeedsFill(
+          ctx2: CanvasRenderingContext2D,
+          x: number,
+          y: number,
+          size: number
+        ) {
+          const data = ctx2.getImageData(x, y, size, size).data;
+          const total = size * size;
+          let empty = 0;
+          for (let i = 0; i < data.length; i += 4) if (data[i + 3] <= ALPHA_EMPTY) empty++;
+          return empty / total >= 0.05;
+        }
 
-      scaledImg.src = temp.toDataURL("image/png");
-      
+        const cornerCoords = [
+          { x: 0, y: 0 },
+          { x: temp.width - cornerSize, y: 0 },
+          { x: 0, y: temp.height - cornerSize },
+          { x: temp.width - cornerSize, y: temp.height - cornerSize },
+        ];
+
+        cornerCoords.forEach(({ x, y }) => {
+          if (!cornerNeedsFill(ctx2d, x, y, cornerSize)) return;
+
+          const baseSx = x < temp.width / 2 ? sampleInset : temp.width - sampleInset - patchSize;
+          const baseSy = y < temp.height / 2 ? sampleInset : temp.height - sampleInset - patchSize;
+
+          const { sx, sy } = getPatchNearCorner(baseSx, baseSy, temp.width, temp.height, patchSize, ctx2d);
+
+          const prevFilter = ctx2d.filter;
+          const prevSmoothing = ctx2d.imageSmoothingEnabled;
+
+          ctx2d.save();
+          ctx2d.globalCompositeOperation = "destination-over";
+          ctx2d.filter = applySoftBlur ? "blur(0.6px)" : "none";
+          ctx2d.imageSmoothingEnabled = true;
+
+          ctx2d.drawImage(temp, sx, sy, patchSize, patchSize, x, y, cornerSize, cornerSize);
+
+          ctx2d.restore();
+          ctx2d.filter = prevFilter;
+          ctx2d.imageSmoothingEnabled = prevSmoothing;
+        });
+
+        // Darken noisy near-black borders before mirroring check
+        blackenAllNearBlackPixels(ctx2d, targetCardWidth, targetCardHeight, blackThreshold);
+
+        // Check if left edge is mostly black → choose black-frame mode
+        const edgeData = ctx2d.getImageData(0, 0, 1, targetCardHeight).data;
+        let blackCount = 0;
+        for (let i = 0; i < targetCardHeight; i++) {
+          const r = edgeData[i * 4], g = edgeData[i * 4 + 1], b = edgeData[i * 4 + 2];
+          if (r < blackThreshold && g < blackThreshold && b < blackThreshold) blackCount++;
+        }
+        const isMostlyBlack = blackCount / targetCardHeight > blackToleranceRatio;
+
+        const scaledImg = new Image();
+        scaledImg.onload = () => {
+          // place core image
+          ctx.drawImage(scaledImg, bleed, bleed);
+
+          if (isMostlyBlack) {
+            // sample a small slice for solid-ish edges
+            const slice = Math.max(8, Math.min(bleed, 64));
+            // L, R, T, B
+            ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              0,
+              slice,
+              targetCardHeight,
+              targetCardWidth + bleed,
+              bleed,
+              bleed,
+              targetCardHeight
+            );
+            ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - slice,
+              targetCardWidth,
+              slice,
+              bleed,
+              targetCardHeight + bleed,
+              targetCardWidth,
+              bleed
+            );
+            // corners
+            ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              0,
+              slice,
+              slice,
+              targetCardWidth + bleed,
+              0,
+              bleed,
+              bleed
+            );
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - slice,
+              slice,
+              slice,
+              0,
+              targetCardHeight + bleed,
+              bleed,
+              bleed
+            );
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - slice,
+              targetCardHeight - slice,
+              slice,
+              slice,
+              targetCardWidth + bleed,
+              targetCardHeight + bleed,
+              bleed,
+              bleed
+            );
+          } else {
+            // mirrored edges
+            ctx.save(); ctx.scale(-1, 1);
+            ctx.drawImage(scaledImg, 0, 0, bleed, targetCardHeight, -bleed, bleed, bleed, targetCardHeight);
+            ctx.restore();
+
+            ctx.save(); ctx.scale(-1, 1);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              0,
+              bleed,
+              targetCardHeight,
+              - (targetCardWidth + bleed * 2),
+              bleed,
+              bleed,
+              targetCardHeight
+            );
+            ctx.restore();
+
+            ctx.save(); ctx.scale(1, -1);
+            ctx.drawImage(scaledImg, 0, 0, targetCardWidth, bleed, bleed, -bleed, targetCardWidth, bleed);
+            ctx.restore();
+
+            ctx.save(); ctx.scale(1, -1);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - bleed,
+              targetCardWidth,
+              bleed,
+              bleed,
+              - (targetCardHeight + bleed * 2),
+              targetCardWidth,
+              bleed
+            );
+            ctx.restore();
+
+            // mirrored corners
+            ctx.save(); ctx.scale(-1, -1);
+            ctx.drawImage(scaledImg, 0, 0, bleed, bleed, -bleed, -bleed, bleed, bleed); ctx.restore();
+
+            ctx.save(); ctx.scale(-1, -1);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              0,
+              bleed,
+              bleed,
+              - (targetCardWidth + bleed * 2),
+              -bleed,
+              bleed,
+              bleed
+            ); ctx.restore();
+
+            ctx.save(); ctx.scale(-1, -1);
+            ctx.drawImage(
+              scaledImg,
+              0,
+              targetCardHeight - bleed,
+              bleed,
+              bleed,
+              -bleed,
+              - (targetCardHeight + bleed * 2),
+              bleed,
+              bleed
+            ); ctx.restore();
+
+            ctx.save(); ctx.scale(-1, -1);
+            ctx.drawImage(
+              scaledImg,
+              targetCardWidth - bleed,
+              targetCardHeight - bleed,
+              bleed,
+              bleed,
+              - (targetCardWidth + bleed * 2),
+              - (targetCardHeight + bleed * 2),
+              bleed,
+              bleed
+            ); ctx.restore();
+          }
+
+          resolve(canvas.toDataURL("image/png"));
+        };
+
+        scaledImg.onerror = (error) => reject(new Error(`Failed to load scaled image: ${String(error)}`));
+        scaledImg.src = temp.toDataURL("image/png");
       } catch (error) {
         reject(error);
       }
@@ -422,9 +441,9 @@ export async function addBleedEdge(
 
     img.onerror = (error) => {
       clearTimeout(timeoutId);
-      reject(new Error(`Failed to load image: ${error}`));
+      reject(new Error(`Failed to load image: ${String(error)}`));
     };
 
-    img.src = src;
+    img.src = src.startsWith("http") ? toProxied(src) : src;
   });
 }

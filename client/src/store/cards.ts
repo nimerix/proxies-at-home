@@ -6,6 +6,13 @@ type Store = {
   // ---------- persisted ----------
   cards: CardOption[];
 
+  cachedImageUrls: Record<string, string>;
+  setCachedImageUrls: (images: Record<string, string>) => void;
+  appendCachedImageUrls: (newImages: Record<string, string>) => void;
+  clearCachedForCard: (uuid: string) => void;
+  clearCachedForMany: (uuids: string[]) => void;
+  resetCachedImageUrls: () => void;
+
   globalLanguage: string;
   setGlobalLanguage: (lang: string) => void;
 
@@ -42,9 +49,31 @@ type Store = {
 
 export const useCardsStore = create<Store>()(
   persist(
-    (set, _) => ({
+    (set, get) => ({
       // ---------- persisted ----------
       cards: [],
+
+      cachedImageUrls: {},
+      setCachedImageUrls: (images) => set({ cachedImageUrls: images }),
+      appendCachedImageUrls: (newImages) =>
+        set((state) => ({
+          cachedImageUrls: { ...state.cachedImageUrls, ...newImages },
+        })),
+      clearCachedForCard: (uuid) =>
+        set((state) => {
+          if (!state.cachedImageUrls?.[uuid]) return {};
+          const next = { ...state.cachedImageUrls };
+          delete next[uuid];
+          return { cachedImageUrls: next };
+        }),
+      clearCachedForMany: (uuids) =>
+        set((state) => {
+          if (!uuids?.length) return {};
+          const next = { ...state.cachedImageUrls };
+          for (const id of uuids) delete next[id];
+          return { cachedImageUrls: next };
+        }),
+      resetCachedImageUrls: () => set({ cachedImageUrls: {} }),
 
       globalLanguage: "en",
       setGlobalLanguage: (lang) => set({ globalLanguage: lang }),
@@ -75,9 +104,7 @@ export const useCardsStore = create<Store>()(
       clearManySelectedImages: (uuids) =>
         set((state) => {
           const newSelected = { ...state.selectedImages };
-          for (const uuid of uuids) {
-            delete newSelected[uuid];
-          }
+          for (const uuid of uuids) delete newSelected[uuid];
           return { selectedImages: newSelected };
         }),
 
@@ -129,7 +156,8 @@ export const useCardsStore = create<Store>()(
               originalSelectedImages,
               uploadedImages,
               uploadedOriginalImages,
-              uploadedFiles
+              uploadedFiles,
+              cachedImageUrls,
             } = state;
 
             delete selectedImages[uuid];
@@ -137,6 +165,7 @@ export const useCardsStore = create<Store>()(
             delete uploadedImages[uuid];
             delete uploadedOriginalImages[uuid];
             delete uploadedFiles[uuid];
+            delete cachedImageUrls[uuid];
 
             return {
               cards,
@@ -144,7 +173,8 @@ export const useCardsStore = create<Store>()(
               originalSelectedImages: { ...originalSelectedImages },
               uploadedImages: { ...uploadedImages },
               uploadedOriginalImages: { ...uploadedOriginalImages },
-              uploadedFiles: { ...uploadedFiles }
+              uploadedFiles: { ...uploadedFiles },
+              cachedImageUrls: { ...cachedImageUrls },
             };
           }
           return { cards };
@@ -158,12 +188,14 @@ export const useCardsStore = create<Store>()(
             uploadedImages,
             uploadedOriginalImages,
             uploadedFiles,
+            cachedImageUrls,
           } = state;
           delete selectedImages[uuid];
           delete originalSelectedImages[uuid];
           delete uploadedImages[uuid];
           delete uploadedOriginalImages[uuid];
           delete uploadedFiles[uuid];
+          delete cachedImageUrls[uuid];
 
           return {
             selectedImages: { ...selectedImages },
@@ -171,21 +203,33 @@ export const useCardsStore = create<Store>()(
             uploadedImages: { ...uploadedImages },
             uploadedOriginalImages: { ...uploadedOriginalImages },
             uploadedFiles: { ...uploadedFiles },
+            cachedImageUrls: { ...cachedImageUrls },
           };
         }),
     }),
     {
-      name: "proxxied:cards:v3", 
-      version: 3,
+      name: "proxxied:cards:v4",
+      version: 4,
 
       partialize: (state) => ({
         cards: state.cards,
+        cachedImageUrls: state.cachedImageUrls,
+        globalLanguage: state.globalLanguage,
       }),
 
       storage: createJSONStorage(() => localStorage),
 
       migrate: (persistedState: any, version) => {
         if (!persistedState) return persistedState;
+
+        if (version < 4) {
+          if (!persistedState.cachedImageUrls) {
+            persistedState.cachedImageUrls = {};
+          }
+          if (!persistedState.globalLanguage) {
+            persistedState.globalLanguage = "en";
+          }
+        }
 
         if (version < 3) {
           delete persistedState.selectedImages;
@@ -194,6 +238,7 @@ export const useCardsStore = create<Store>()(
           delete persistedState.uploadedOriginalImages;
           delete persistedState.uploadedFiles;
         }
+
         return persistedState;
       },
     }

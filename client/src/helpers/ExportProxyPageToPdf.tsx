@@ -47,32 +47,20 @@ function detectFlatBorderColor(
   sampleLen: number,   // how far inward to sample
   strip: number        // strip thickness
 ): "black" | "white" | null {
-  // which edges are we next to?
   const leftEdge = cornerX === 0;
   const topEdge = cornerY === 0;
   const rightEdge = cornerX >= contentW - strip;
   const bottomEdge = cornerY >= contentH - strip;
 
-  // build up to two sample rects: one along each adjacent edge
   const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
-
-  if (leftEdge) {
-    rects.push({ x: 0, y: cornerY, w: strip, h: Math.min(sampleLen, contentH - cornerY) });
-  }
-  if (topEdge) {
-    rects.push({ x: cornerX, y: 0, w: Math.min(sampleLen, contentW - cornerX), h: strip });
-  }
-  if (rightEdge) {
-    rects.push({ x: contentW - strip, y: Math.max(0, cornerY - (sampleLen - strip)), w: strip, h: Math.min(sampleLen, contentH - (cornerY - (sampleLen - strip))) });
-  }
-  if (bottomEdge) {
-    rects.push({ x: Math.max(0, cornerX - (sampleLen - strip)), y: contentH - strip, w: Math.min(sampleLen, contentW - (cornerX - (sampleLen - strip))), h: strip });
-  }
+  if (leftEdge) rects.push({ x: 0, y: cornerY, w: strip, h: Math.min(sampleLen, contentH - cornerY) });
+  if (topEdge) rects.push({ x: cornerX, y: 0, w: Math.min(sampleLen, contentW - cornerX), h: strip });
+  if (rightEdge) rects.push({ x: contentW - strip, y: Math.max(0, cornerY - (sampleLen - strip)), w: strip, h: Math.min(sampleLen, contentH - (cornerY - (sampleLen - strip))) });
+  if (bottomEdge) rects.push({ x: Math.max(0, cornerX - (sampleLen - strip)), y: contentH - strip, w: Math.min(sampleLen, contentW - (cornerX - (sampleLen - strip))), h: strip });
 
   if (!rects.length) return null;
 
   let black = 0, white = 0, total = 0;
-
   for (const r of rects) {
     const { data } = ctx.getImageData(r.x, r.y, r.w, r.h);
     for (let i = 0; i < data.length; i += 4) {
@@ -86,8 +74,6 @@ function detectFlatBorderColor(
   }
 
   if (total === 0) return null;
-
-  // require strong consensus to avoid false positives
   if (black / total >= 0.9) return "black";
   if (white / total >= 0.9) return "white";
   return null;
@@ -100,11 +86,7 @@ function resolveJsPdfFormat(opts: {
   height: number;
 }): string | [number, number] {
   const { preset, unit, width, height } = opts;
-
-  if (JSPDF_SUPPORTED.has(preset.toLowerCase())) {
-    return preset.toLowerCase();
-  }
-
+  if (JSPDF_SUPPORTED.has(preset.toLowerCase())) return preset.toLowerCase();
   const toMm = (n: number) => (unit === "in" ? n * 25.4 : n);
   return [toMm(width), toMm(height)];
 }
@@ -112,15 +94,12 @@ function resolveJsPdfFormat(opts: {
 function preferPng(url: string) {
   try {
     const u = new URL(url);
-    if (
-      u.hostname.endsWith("scryfall.io") &&
-      u.pathname.match(/\.(jpg|jpeg)$/i)
-    ) {
+    if (u.hostname.endsWith("scryfall.io") && u.pathname.match(/\.(jpg|jpeg)$/i)) {
       u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
       return u.toString();
     }
-  } catch (e) {
-    console.error("Error in preferPng:", e);
+  } catch {
+    /* noop */
   }
   return url;
 }
@@ -152,11 +131,6 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.onload = () => {
-      resolve(img);
-    };
-
     img.onerror = (e) => reject(e);
     img.src = src;
   });
@@ -207,14 +181,10 @@ function blackenAllNearBlackPixels(
       if (!(inY || inX)) continue;
 
       const i = (y * width + x) * 4;
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+      const r = data[i], g = data[i + 1], b = data[i + 2];
 
       if (r < threshold && g < threshold && b < threshold) {
-        data[i] = 0;
-        data[i + 1] = 0;
-        data[i + 2] = 0;
+        data[i] = 0; data[i + 1] = 0; data[i + 2] = 0;
       }
     }
   }
@@ -287,10 +257,7 @@ async function buildCardWithBleed(
 
   const aspect = baseImg.width / baseImg.height;
   const targetAspect = contentW / contentH;
-  let drawW = contentW,
-    drawH = contentH,
-    offX = 0,
-    offY = 0;
+  let drawW = contentW, drawH = contentH, offX = 0, offY = 0;
   if (aspect > targetAspect) {
     drawH = contentH;
     drawW = Math.round(baseImg.width * (contentH / baseImg.height));
@@ -329,26 +296,22 @@ async function buildCardWithBleed(
     const buf = document.createElement("canvas");
     buf.width = dw;
     buf.height = dh;
-    const bctx = buf.getContext("2d")!;
-    bctx.imageSmoothingEnabled = true;
-    bctx.imageSmoothingQuality = "high";
-    bctx.drawImage(dst.canvas, sx, sy, dw, dh, 0, 0, dw, dh);
+    const bctx2 = buf.getContext("2d")!;
+    bctx2.imageSmoothingEnabled = true;
+    bctx2.imageSmoothingQuality = "high";
+    bctx2.drawImage(dst.canvas, sx, sy, dw, dh, 0, 0, dw, dh);
 
-    // draw once with blur to kill seams, once sharp on top with slight alpha
     dst.save();
     dst.imageSmoothingEnabled = true;
     dst.imageSmoothingQuality = "high";
-
     // soft base
     dst.filter = `blur(${blurPx}px)`;
     dst.globalAlpha = 0.85;
     dst.drawImage(buf, tx, ty, dw, dh);
-
-    // sharp pass to keep detail
+    // sharp pass
     dst.filter = "none";
     dst.globalAlpha = 0.9;
     dst.drawImage(buf, tx, ty, dw, dh);
-
     dst.globalAlpha = 1;
     dst.restore();
   }
@@ -363,7 +326,6 @@ async function buildCardWithBleed(
   for (const { x, y } of corners) {
     if (!cornerNeedsFill(bctx, x, y, cornerSize)) continue;
 
-    // check if the border at this corner is strongly black or white
     const flat = detectFlatBorderColor(
       bctx,
       contentW,
@@ -380,7 +342,7 @@ async function buildCardWithBleed(
       bctx.fillStyle = flat === "black" ? "#000000" : "#FFFFFF";
       bctx.fillRect(x, y, cornerSize, cornerSize);
       bctx.restore();
-      continue; // skip patch tiling when flat color wins
+      continue;
     }
 
     const seedX = x < contentW / 2 ? sampleInset : contentW - sampleInset - patchSize;
@@ -415,14 +377,7 @@ async function buildCardWithBleed(
     bctx.restore();
   }
 
-  blackenAllNearBlackPixels(
-    bctx,
-    contentW,
-    contentH,
-    blackThreshold,
-    undefined,
-    DPI
-  );
+  blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold, undefined, DPI);
 
   const out = document.createElement("canvas");
   out.width = finalW;
@@ -436,196 +391,49 @@ async function buildCardWithBleed(
       let blackCount = 0;
       for (let i = 0; i < contentH; i++) {
         const idx = i * 4;
-        const r = edge[idx],
-          g = edge[idx + 1],
-          b = edge[idx + 2];
-        if (r < blackThreshold && g < blackThreshold && b < blackThreshold)
-          blackCount++;
+        const r = edge[idx], g = edge[idx + 1], b = edge[idx + 2];
+        if (r < blackThreshold && g < blackThreshold && b < blackThreshold) blackCount++;
       }
       return blackCount / contentH > 0.7;
     })();
 
     if (mostlyBlack) {
       const slice = Math.min(8, Math.floor(contentW / 100));
+      // L R T B
       ctx.drawImage(base, 0, 0, slice, contentH, 0, bleedPx, bleedPx, contentH);
-      ctx.drawImage(
-        base,
-        contentW - slice,
-        0,
-        slice,
-        contentH,
-        contentW + bleedPx,
-        bleedPx,
-        bleedPx,
-        contentH
-      );
+      ctx.drawImage(base, contentW - slice, 0, slice, contentH, contentW + bleedPx, bleedPx, bleedPx, contentH);
       ctx.drawImage(base, 0, 0, contentW, slice, bleedPx, 0, contentW, bleedPx);
-      ctx.drawImage(
-        base,
-        0,
-        contentH - slice,
-        contentW,
-        slice,
-        bleedPx,
-        contentH + bleedPx,
-        contentW,
-        bleedPx
-      );
-
+      ctx.drawImage(base, 0, contentH - slice, contentW, slice, bleedPx, contentH + bleedPx, contentW, bleedPx);
+      // corners
       ctx.drawImage(base, 0, 0, slice, slice, 0, 0, bleedPx, bleedPx);
-      ctx.drawImage(
-        base,
-        contentW - slice,
-        0,
-        slice,
-        slice,
-        contentW + bleedPx,
-        0,
-        bleedPx,
-        bleedPx
-      );
-      ctx.drawImage(
-        base,
-        0,
-        contentH - slice,
-        slice,
-        slice,
-        0,
-        contentH + bleedPx,
-        bleedPx,
-        bleedPx
-      );
-      ctx.drawImage(
-        base,
-        contentW - slice,
-        contentH - slice,
-        slice,
-        slice,
-        contentW + bleedPx,
-        contentH + bleedPx,
-        bleedPx,
-        bleedPx
-      );
+      ctx.drawImage(base, contentW - slice, 0, slice, slice, contentW + bleedPx, 0, bleedPx, bleedPx);
+      ctx.drawImage(base, 0, contentH - slice, slice, slice, 0, contentH + bleedPx, bleedPx, bleedPx);
+      ctx.drawImage(base, contentW - slice, contentH - slice, slice, slice, contentW + bleedPx, contentH + bleedPx, bleedPx, bleedPx);
     } else {
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(
-        base,
-        0,
-        0,
-        bleedPx,
-        contentH,
-        -bleedPx,
-        bleedPx,
-        bleedPx,
-        contentH
-      );
-      ctx.restore();
+      // mirrored edges + corners
+      ctx.save(); ctx.scale(-1, 1);
+      ctx.drawImage(base, 0, 0, bleedPx, contentH, -bleedPx, bleedPx, bleedPx, contentH); ctx.restore();
 
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(
-        base,
-        contentW - bleedPx,
-        0,
-        bleedPx,
-        contentH,
-        -(contentW + 2 * bleedPx),
-        bleedPx,
-        bleedPx,
-        contentH
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(-1, 1);
+      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, contentH, -(contentW + 2 * bleedPx), bleedPx, bleedPx, contentH); ctx.restore();
 
-      ctx.save();
-      ctx.scale(1, -1);
-      ctx.drawImage(
-        base,
-        0,
-        0,
-        contentW,
-        bleedPx,
-        bleedPx,
-        -bleedPx,
-        contentW,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(1, -1);
+      ctx.drawImage(base, 0, 0, contentW, bleedPx, bleedPx, -bleedPx, contentW, bleedPx); ctx.restore();
 
-      ctx.save();
-      ctx.scale(1, -1);
-      ctx.drawImage(
-        base,
-        0,
-        contentH - bleedPx,
-        contentW,
-        bleedPx,
-        bleedPx,
-        -(contentH + 2 * bleedPx),
-        contentW,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(1, -1);
+      ctx.drawImage(base, 0, contentH - bleedPx, contentW, bleedPx, bleedPx, -(contentH + 2 * bleedPx), contentW, bleedPx); ctx.restore();
 
-      ctx.save();
-      ctx.scale(-1, -1);
-      ctx.drawImage(
-        base,
-        0,
-        0,
-        bleedPx,
-        bleedPx,
-        -bleedPx,
-        -bleedPx,
-        bleedPx,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(-1, -1);
+      ctx.drawImage(base, 0, 0, bleedPx, bleedPx, -bleedPx, -bleedPx, bleedPx, bleedPx); ctx.restore();
 
-      ctx.save();
-      ctx.scale(-1, -1);
-      ctx.drawImage(
-        base,
-        contentW - bleedPx,
-        0,
-        bleedPx,
-        bleedPx,
-        -(contentW + 2 * bleedPx),
-        -bleedPx,
-        bleedPx,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(-1, -1);
+      ctx.drawImage(base, contentW - bleedPx, 0, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -bleedPx, bleedPx, bleedPx); ctx.restore();
 
-      ctx.save();
-      ctx.scale(-1, -1);
-      ctx.drawImage(
-        base,
-        0,
-        contentH - bleedPx,
-        bleedPx,
-        bleedPx,
-        -bleedPx,
-        -(contentH + 2 * bleedPx),
-        bleedPx,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(-1, -1);
+      ctx.drawImage(base, 0, contentH - bleedPx, bleedPx, bleedPx, -bleedPx, -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
 
-      ctx.save();
-      ctx.scale(-1, -1);
-      ctx.drawImage(
-        base,
-        contentW - bleedPx,
-        contentH - bleedPx,
-        bleedPx,
-        bleedPx,
-        -(contentW + 2 * bleedPx),
-        -(contentH + 2 * bleedPx),
-        bleedPx,
-        bleedPx
-      );
-      ctx.restore();
+      ctx.save(); ctx.scale(-1, -1);
+      ctx.drawImage(base, contentW - bleedPx, contentH - bleedPx, bleedPx, bleedPx, -(contentW + 2 * bleedPx), -(contentH + 2 * bleedPx), bleedPx, bleedPx); ctx.restore();
     }
   }
 
@@ -662,41 +470,22 @@ function drawCornerGuides(
   ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
   // TR
   ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
-  ctx.fillRect(
-    gx + contentW - guideLenPx + guideWidthPx,
-    gy,
-    guideLenPx,
-    guideWidthPx
-  );
+  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
   // BL
-  ctx.fillRect(
-    gx,
-    gy + contentH - guideLenPx + guideWidthPx,
-    guideWidthPx,
-    guideLenPx
-  );
+  ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
   ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
   // BR
-  ctx.fillRect(
-    gx + contentW,
-    gy + contentH - guideLenPx + guideWidthPx,
-    guideWidthPx,
-    guideLenPx
-  );
-  ctx.fillRect(
-    gx + contentW - guideLenPx + guideWidthPx,
-    gy + contentH,
-    guideLenPx,
-    guideWidthPx
-  );
+  ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
+  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
 
   ctx.restore();
 }
 
-// POST EXPORT — matches preview layout exactly
+/** POST EXPORT — matches preview layout exactly */
 export async function exportProxyPagesToPdf({
   cards,
   originalSelectedImages,
+  cachedImageUrls,           // <-- NEW
   bleedEdge,
   bleedEdgeWidthMm,
   guideColor,
@@ -711,6 +500,7 @@ export async function exportProxyPagesToPdf({
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
+  cachedImageUrls?: Record<string, string>; // <-- NEW
   bleedEdge: boolean;
   bleedEdgeWidthMm: number;
   guideColor: string;
@@ -725,13 +515,9 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
-  // Canvas size (pixels at DPI) — used for high-res page render
-  const pageWidthPx =
-    pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
-  const pageHeightPx =
-    pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
+  const pageWidthPx = pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
+  const pageHeightPx = pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
 
-  // Card + bleed in pixels (at DPI)
   const contentWidthInPx = MM_TO_PX(63);
   const contentHeightInPx = MM_TO_PX(88);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
@@ -746,14 +532,10 @@ export async function exportProxyPagesToPdf({
   const startY = Math.round((pageHeightPx - gridHeightPx) / 2);
 
   const pages: CardOption[][] = [];
-
-  for (let i = 0; i < cards.length; i += perPage) {
-    pages.push(cards.slice(i, i + perPage));
-  }
-
+  for (let i = 0; i < cards.length; i += perPage) pages.push(cards.slice(i, i + perPage));
   if (pages.length === 0) pages.push([]);
 
-    const format = resolveJsPdfFormat({
+  const format = resolveJsPdfFormat({
     preset: pageSizePreset,
     unit: pageSizeUnit,
     width: pageWidth,
@@ -763,7 +545,7 @@ export async function exportProxyPagesToPdf({
   const pdf = new jsPDF({
     orientation: pageOrientation,
     unit: "mm",
-    format, // string or [wMm, hMm]C
+    format,
     compress: true,
   });
 
@@ -787,8 +569,15 @@ export async function exportProxyPagesToPdf({
       const x = startX + col * cardWidthPx;
       const y = startY + row * cardHeightPx;
 
-      let src = originalSelectedImages[card.uuid] ?? card.imageUrls?.[0] ?? "";
-      if (!card.isUserUpload) src = getLocalBleedImageUrl(preferPng(src));
+      let src =
+        (cachedImageUrls && cachedImageUrls[card.uuid]) ||
+        originalSelectedImages[card.uuid] ||
+        card.imageUrls?.[0] ||
+        "";
+
+      if (!card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
+        src = getLocalBleedImageUrl(preferPng(src));
+      }
 
       const cardCanvas = await buildCardWithBleed(src, bleedPx, {
         isUserUpload: !!card.isUserUpload,
@@ -798,16 +587,7 @@ export async function exportProxyPagesToPdf({
 
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
-        drawCornerGuides(
-          ctx,
-          x,
-          y,
-          contentWidthInPx,
-          contentHeightInPx,
-          bleedPx,
-          guideColor,
-          scaledGuideWidth
-        );
+        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth);
         drawEdgeStubs(
           ctx,
           pageWidthPx,
