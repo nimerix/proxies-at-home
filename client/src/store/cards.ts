@@ -49,7 +49,7 @@ type Store = {
 
 export const useCardsStore = create<Store>()(
   persist(
-    (set, get) => ({
+    (set, _) => ({
       // ---------- persisted ----------
       cards: [],
 
