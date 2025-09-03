@@ -10,8 +10,8 @@ import {
   rectSortingStrategy,
   SortableContext,
 } from "@dnd-kit/sortable";
-import { Button, Label } from "flowbite-react";
-import { Copy, Trash } from "lucide-react";
+import { Button, Label, Modal, ModalBody, ModalHeader, Checkbox } from "flowbite-react";
+import { Copy, Trash, Trash2, Plus, Minus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import fullLogo from "../assets/fullLogo.png";
 import CardCellLazy from "../components/CardCellLazy";
@@ -48,6 +48,9 @@ export function PageView() {
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
+  const uploadedImages = useCardsStore((state) => state.uploadedImages);
+  const uploadedOriginalImages = useCardsStore((state) => state.uploadedOriginalImages);
+  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
   const openArtworkModal = useArtworkModalStore((state) => state.openModal);
 
   const setCards = useCardsStore((state) => state.setCards);
@@ -60,6 +63,15 @@ export function PageView() {
   );
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
+  );
+  const appendUploadedImages = useCardsStore(
+    (state) => state.appendUploadedImages
+  );
+  const appendUploadedOriginalImages = useCardsStore(
+    (state) => state.appendUploadedOriginalImages
+  );
+  const appendUploadedFiles = useCardsStore(
+    (state) => state.appendUploadedFiles
   );
 
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
@@ -75,34 +87,23 @@ export function PageView() {
     x: 0,
     y: 0,
     cardIndex: null as number | null,
+    duplicateCount: 1,
+  });
+
+  const [deleteModal, setDeleteModal] = useState({
+    open: false,
+    cardIndex: null as number | null,
+    sameName: false,
+    sameArtwork: true,
   });
 
   useEffect(() => {
     const handler = () =>
-      setContextMenu((prev) => ({ ...prev, visible: false }));
+      setContextMenu((prev) => ({ ...prev, visible: false, duplicateCount: 1 }));
     window.addEventListener("click", handler);
     return () => window.removeEventListener("click", handler);
   }, []);
 
-  function duplicateCard(index: number) {
-    const cardToCopy = cards[index];
-    const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
-
-    const newCards = [...cards];
-    newCards.splice(index + 1, 0, newCard);
-    setCards(newCards);
-
-    const original = originalSelectedImages[cardToCopy.uuid];
-    const processed = selectedImages[cardToCopy.uuid];
-
-    appendOriginalSelectedImages({
-      [newCard.uuid]: original,
-    });
-
-    appendSelectedImages({
-      [newCard.uuid]: processed,
-    });
-  }
 
   function deleteCard(index: number) {
     const cardToRemove = cards[index];
@@ -113,6 +114,99 @@ export function PageView() {
     const { [cardUuid]: _, ...newSelectedImages } = selectedImages;
     const { [cardUuid]: __, ...newOriginalSelectedImages } =
       originalSelectedImages;
+
+    setCards(newCards);
+    setSelectedImages(newSelectedImages);
+    setOriginalSelectedImages(newOriginalSelectedImages);
+  }
+
+  function duplicateCardNTimes(index: number, count: number) {
+    if (count <= 0) return;
+    
+    const cardToCopy = cards[index];
+    const newCards = [...cards];
+    const newOriginalImages: Record<string, string> = {};
+    const newProcessedImages: Record<string, string> = {};
+    const newUploadedImages: Record<string, string> = {};
+    const newUploadedOriginalImages: Record<string, string> = {};
+    const newUploadedFiles: Record<string, File> = {};
+
+    const originalImage = originalSelectedImages[cardToCopy.uuid];
+    const processedImage = selectedImages[cardToCopy.uuid];
+    const uploadedImage = uploadedImages[cardToCopy.uuid];
+    const uploadedOriginalImage = uploadedOriginalImages[cardToCopy.uuid];
+    const uploadedFile = uploadedFiles[cardToCopy.uuid];
+
+    for (let i = 0; i < count; i++) {
+      const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
+      newCards.splice(index + 1 + i, 0, newCard);
+
+      if (originalImage) {
+        newOriginalImages[newCard.uuid] = originalImage;
+      }
+      if (processedImage) {
+        newProcessedImages[newCard.uuid] = processedImage;
+      }
+
+      if (uploadedImage) {
+        newUploadedImages[newCard.uuid] = uploadedImage;
+      }
+      if (uploadedOriginalImage) {
+        newUploadedOriginalImages[newCard.uuid] = uploadedOriginalImage;
+      }
+      if (uploadedFile) {
+        newUploadedFiles[newCard.uuid] = uploadedFile;
+      }
+    }
+
+    setCards(newCards);
+    
+    if (Object.keys(newOriginalImages).length > 0) {
+      appendOriginalSelectedImages(newOriginalImages);
+    }
+    if (Object.keys(newProcessedImages).length > 0) {
+      appendSelectedImages(newProcessedImages);
+    }
+    if (Object.keys(newUploadedImages).length > 0) {
+      appendUploadedImages(newUploadedImages);
+    }
+    if (Object.keys(newUploadedOriginalImages).length > 0) {
+      appendUploadedOriginalImages(newUploadedOriginalImages);
+    }
+    if (Object.keys(newUploadedFiles).length > 0) {
+      appendUploadedFiles(newUploadedFiles);
+    }
+  }
+
+  function deleteCardsByName(index: number, sameArtworkOnly: boolean) {
+    const targetCard = cards[index];
+    const targetArtwork = originalSelectedImages[targetCard.uuid];
+
+    const uuidsToRemove: string[] = [];
+    const newCards = cards.filter((card) => {
+      if (card.name === targetCard.name) {
+        if (sameArtworkOnly) {
+          const cardArtwork = originalSelectedImages[card.uuid];
+          if (cardArtwork === targetArtwork) {
+            uuidsToRemove.push(card.uuid);
+            return false;
+          }
+        } else {
+          uuidsToRemove.push(card.uuid);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Clean up image maps
+    const newSelectedImages = { ...selectedImages };
+    const newOriginalSelectedImages = { ...originalSelectedImages };
+    
+    uuidsToRemove.forEach(uuid => {
+      delete newSelectedImages[uuid];
+      delete newOriginalSelectedImages[uuid];
+    });
 
     setCards(newCards);
     setSelectedImages(newSelectedImages);
@@ -174,26 +268,61 @@ export function PageView() {
       <div ref={pageRef} className="flex flex-col gap-[1rem]">
         {contextMenu.visible && contextMenu.cardIndex !== null && (
           <div
-            className="absolute bg-white border rounded-xl border-gray-300 shadow-md z-50 text-sm flex flex-col gap-1"
+            className="absolute bg-white border rounded-xl border-gray-300 shadow-md z-50 text-sm flex flex-col gap-1 dark:bg-gray-700"
             style={{
               top: contextMenu.y,
               left: contextMenu.x,
               padding: "0.25rem",
             }}
-            onMouseLeave={() =>
-              setContextMenu({ ...contextMenu, visible: false })
-            }
           >
-            <Button
-              size="xs"
-              onClick={() => {
-                duplicateCard(contextMenu.cardIndex!);
-                setContextMenu({ ...contextMenu, visible: false });
-              }}
-            >
-              <Copy className="size-3 mr-1" />
-              Duplicate
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                size="xs"
+                onClick={() => {
+                  duplicateCardNTimes(contextMenu.cardIndex!, contextMenu.duplicateCount);
+                  setContextMenu({ ...contextMenu, visible: false });
+                }}
+                className="flex-1"
+              >
+                <Copy className="size-3 mr-1" />
+                Duplicate
+              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  size="xs"
+                  color="gray"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setContextMenu(prev => ({
+                      ...prev,
+                      duplicateCount: Math.max(1, prev.duplicateCount - 1)
+                    }));
+                  }}
+                  className="p-1 min-w-0"
+                  disabled={contextMenu.duplicateCount <= 1}
+                >
+                  <Minus className="size-3" />
+                </Button>
+                <span className="text-xs font-medium px-1 min-w-[20px] text-center dark:text-gray-200">
+                  {contextMenu.duplicateCount}
+                </span>
+                <Button
+                  size="xs"
+                  color="gray"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setContextMenu(prev => ({
+                      ...prev,
+                      duplicateCount: Math.min(100, prev.duplicateCount + 1)
+                    }));
+                  }}
+                  className="p-1 min-w-0"
+                >
+                  <Plus className="size-3" />
+                </Button>
+              </div>
+            </div>
+            
             <Button
               size="xs"
               color="red"
@@ -204,6 +333,23 @@ export function PageView() {
             >
               <Trash className="size-3 mr-1" />
               Delete
+            </Button>
+            <Button
+              size="xs"
+              color="red"
+              onClick={() => {
+                setDeleteModal({
+                  open: true,
+                  cardIndex: contextMenu.cardIndex!,
+                  sameName: true,
+                  sameArtwork: true,
+                });
+                setContextMenu({ ...contextMenu, visible: false });
+              }}
+            >
+              <Trash2 className="size-3 mr-1" />
+              {/* Delete All "{cards[contextMenu.cardIndex!]?.name}" */}
+              Delete All
             </Button>
           </div>
         )}
@@ -285,6 +431,7 @@ export function PageView() {
                               x: e.clientX,
                               y: e.clientY,
                               cardIndex: globalIndex,
+                              duplicateCount: 1,
                             });
                           }}
                           onClick={() => {
@@ -350,6 +497,57 @@ export function PageView() {
       </div>
 
       <ArtworkModal />
+
+      <Modal show={deleteModal.open} onClose={() => setDeleteModal(prev => ({ ...prev, open: false }))}>
+        <ModalHeader>Delete Cards</ModalHeader>
+        <ModalBody>
+          {deleteModal.cardIndex !== null && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-gray-700 dark:text-gray-300">
+                  Delete all cards named "{cards[deleteModal.cardIndex]?.name}"?
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="same-artwork"
+                  checked={deleteModal.sameArtwork}
+                  onChange={(e) => setDeleteModal(prev => ({ ...prev, sameArtwork: e.target.checked }))}
+                />
+                <Label htmlFor="same-artwork">
+                  Only delete cards with the same artwork
+                </Label>
+              </div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {deleteModal.sameArtwork 
+                  ? `This will delete cards with the same name and artwork selection.`
+                  : `This will delete ALL cards named "${cards[deleteModal.cardIndex]?.name}" regardless of artwork.`
+                }
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  color="gray"
+                  onClick={() => setDeleteModal(prev => ({ ...prev, open: false }))}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  color="red"
+                  onClick={() => {
+                    if (deleteModal.cardIndex !== null) {
+                      deleteCardsByName(deleteModal.cardIndex, deleteModal.sameArtwork);
+                    }
+                    setDeleteModal(prev => ({ ...prev, open: false }));
+                  }}
+                >
+                  <Trash2 className="size-4 mr-1" />
+                  Delete Cards
+                </Button>
+              </div>
+            </div>
+          )}
+        </ModalBody>
+      </Modal>
     </div>
   );
 }

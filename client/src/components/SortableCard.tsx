@@ -16,6 +16,7 @@ type SortableCardProps = {
     x: number;
     y: number;
     cardIndex: number;
+    duplicateCount: number;
   }) => void;
 };
 
@@ -65,6 +66,7 @@ export default function SortableCard({
             x: e.clientX,
             y: e.clientY,
             cardIndex: globalIndex,
+            duplicateCount: 1,
           });
         }}
       />
