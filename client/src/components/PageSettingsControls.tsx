@@ -31,8 +31,6 @@ export function PageSettingsControls() {
   const setZoom = useSettingsStore((state) => state.setZoom);
   const resetSettings = useSettingsStore((state) => state.resetSettings);
 
-  const [resetting, setResetting] = useState(false);
-
   const { reprocessSelectedImages } = useImageProcessing({
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
@@ -57,9 +55,8 @@ export function PageSettingsControls() {
       "This will clear all saved Proxxied data (cards, cached images, settings) and reload the page. Continue?"
     );
     if (!ok) return;
-    setResetting(true);
+
     try {
-      // Remove all localStorage keys under proxxied:
       const toRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -67,7 +64,6 @@ export function PageSettingsControls() {
       }
       toRemove.forEach((k) => localStorage.removeItem(k));
 
-      // Optional: clear Cache Storage entries if you use a SW with proxxied-* cache names
       if ("caches" in window) {
         const names = await caches.keys();
         await Promise.all(
@@ -77,7 +73,6 @@ export function PageSettingsControls() {
         );
       }
     } catch {
-      // ignore
     } finally {
       window.location.reload();
     }
