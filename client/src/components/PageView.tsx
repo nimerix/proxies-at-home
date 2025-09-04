@@ -11,7 +11,7 @@ import {
   SortableContext,
 } from "@dnd-kit/sortable";
 import { Button, Label, Modal, ModalBody, ModalHeader, Checkbox } from "flowbite-react";
-import { Copy, Trash, Trash2, Plus, Minus } from "lucide-react";
+import { Copy, Trash, Trash2, Plus, Minus, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import fullLogo from "../assets/fullLogo.png";
 import CardCellLazy from "../components/CardCellLazy";
@@ -26,6 +26,38 @@ import {
 } from "../store";
 import type { CardOption } from "../types/Card";
 import { ArtworkModal } from "./ArtworkModal";
+
+type DeleteButtonsProps = {
+  cardIndex: number;
+  onDelete: (index: number) => void;
+  onDeleteAll: (index: number) => void;
+};
+
+function DeleteButtons({ cardIndex, onDelete, onDeleteAll }: DeleteButtonsProps) {
+  return (
+    <div className="flex gap-1">
+      <Button
+        size="xs"
+        color="red"
+        onClick={() => onDelete(cardIndex)}
+        className="flex-[2]"
+      >
+        <Trash className="size-3 mr-1" />
+        Delete
+      </Button>
+      
+      <Button
+        size="xs"
+        color="red"
+        onClick={() => onDeleteAll(cardIndex)}
+        className="flex-1"
+      >
+        <Trash className="size-3 mr-1" />
+        All
+      </Button>
+    </div>
+  );
+}
 
 const unit = "mm";
 const baseCardWidthMm = 63;
@@ -323,34 +355,22 @@ export function PageView() {
               </div>
             </div>
             
-            <Button
-              size="xs"
-              color="red"
-              onClick={() => {
-                deleteCard(contextMenu.cardIndex!);
+            <DeleteButtons
+              cardIndex={contextMenu.cardIndex!}
+              onDelete={(index) => {
+                deleteCard(index);
                 setContextMenu({ ...contextMenu, visible: false });
               }}
-            >
-              <Trash className="size-3 mr-1" />
-              Delete
-            </Button>
-            <Button
-              size="xs"
-              color="red"
-              onClick={() => {
+              onDeleteAll={(index) => {
                 setDeleteModal({
                   open: true,
-                  cardIndex: contextMenu.cardIndex!,
+                  cardIndex: index,
                   sameName: true,
                   sameArtwork: true,
                 });
                 setContextMenu({ ...contextMenu, visible: false });
               }}
-            >
-              <Trash2 className="size-3 mr-1" />
-              {/* Delete All "{cards[contextMenu.cardIndex!]?.name}" */}
-              Delete All
-            </Button>
+            />
           </div>
         )}
 
