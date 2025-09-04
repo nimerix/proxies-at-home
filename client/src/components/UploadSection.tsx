@@ -1,4 +1,3 @@
-import cardBack from "@/assets/cardBack.png";
 import fullLogo from "@/assets/fullLogo.png";
 import { API_BASE, LANGUAGE_OPTIONS } from "@/constants";
 import {
@@ -9,8 +8,7 @@ import {
 import {
   addBleedEdge,
   getLocalBleedImageUrl,
-  trimBleedEdge,
-  urlToDataUrl,
+  trimBleedEdge
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -319,49 +317,6 @@ export function UploadSection() {
     setLoadingTask(null);
   };
 
-  const addCardBackPage = async () => {
-    setLoadingTask("Uploading Images");
-
-    try {
-      const base64 = await urlToDataUrl(cardBack);
-      const trimmed = await trimBleedEdge(base64);
-      const withBleed = await addBleedEdge(trimmed, bleedEdgeWidth, {
-        unit: "mm",
-        bleedEdgeWidth,
-      });
-
-      const newCards: CardOption[] = Array.from({ length: 9 }).map(() => ({
-        uuid: crypto.randomUUID(),
-        name: "Default Card Back",
-        imageUrls: [],
-        isUserUpload: true,
-      }));
-
-      appendCards(newCards);
-
-      appendOriginalSelectedImages(
-        newCards.reduce(
-          (acc, c) => {
-            acc[c.uuid] = base64;
-            return acc;
-          },
-          {} as Record<string, string>
-        )
-      );
-      appendSelectedImages(
-        newCards.reduce(
-          (acc, c) => {
-            acc[c.uuid] = withBleed;
-            return acc;
-          },
-          {} as Record<string, string>
-        )
-      );
-    } finally {
-      setLoadingTask(null);
-    }
-  };
-
   return (
     <div className="w-1/5 dark:bg-gray-700 bg-gray-100 flex flex-col">
       <img src={fullLogo} alt="Proxxied Logo" />
@@ -518,14 +473,6 @@ or Repurposing Bay (dft) 380`}
         </div>
 
         <HR className="my-0 dark:bg-gray-500" />
-
-        <Button
-          color="purple"
-          className="flex-shrink-0"
-          onClick={addCardBackPage}
-        >
-          Add Card Backs
-        </Button>
       </div>
     </div>
   );
