@@ -2,7 +2,7 @@ import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
 import { Button, Checkbox, HR, Label, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
