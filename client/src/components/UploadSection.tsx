@@ -241,81 +241,126 @@ export function UploadSection() {
   const handleSubmit = async () => {
     setLoadingTask("Fetching cards");
 
-    const infos = parseDeckToInfos(deckText);
-
-    const uniqueMap = new Map<string, CardInfo>();
-    for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
-    const uniqueInfos = Array.from(uniqueMap.values());
-
-    const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
-
-    await axios.delete(`${API_BASE}/api/cards/images`);
-
-    const response = await axios.post<CardOption[]>(
-      `${API_BASE}/api/cards/images`,
-      {
-        cardQueries: uniqueInfos,
-        cardNames: uniqueNames,
-        cardArt: "art",
-        language: globalLanguage,
+    try {
+      const infos = parseDeckToInfos(deckText || "");
+      if (!infos.length) {
+        setLoadingTask(null);
+        return;
       }
-    );
 
-    const optionByKey: Record<string, CardOption> = {};
-    for (const opt of response.data) {
-      const k = `${opt.name.toLowerCase()}|${opt.set ?? ""}|${opt.number ?? ""}`;
-      optionByKey[k] = opt;
-      const nameOnlyKey = `${opt.name.toLowerCase()}||`;
-      if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
-    }
+      const uniqueMap = new Map<string, CardInfo>();
+      for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
+      const uniqueInfos = Array.from(uniqueMap.values());
+      const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
 
-    const expandedCards: CardOption[] = infos.map((ci) => {
-      const k = cardKey(ci);
-      const fallbackK = `${ci.name.toLowerCase()}||`;
-      const card = optionByKey[k] ?? optionByKey[fallbackK];
-      return {
-        ...card,
-        uuid: crypto.randomUUID(),
-      };
-    });
-
-    appendCards(expandedCards);
-
-    const newOriginals: Record<string, string> = {};
-    for (const card of expandedCards) {
-      if (card?.imageUrls?.length > 0) {
-        newOriginals[card.uuid] = card.imageUrls[0];
+      try {
+        await axios.delete(`${API_BASE}/api/cards/images`, { timeout: 15000 });
+      } catch (e) {
+        console.warn("[FetchCards] DELETE failed (continuing):", e);
       }
-    }
-    appendOriginalSelectedImages(newOriginals);
 
-    setLoadingTask(null); //allows processing to lazy load
+      let response: { data: CardOption[] } | null = null;
+      try {
+        response = await axios.post<CardOption[]>(
+          `${API_BASE}/api/cards/images`,
+          {
+            cardQueries: uniqueInfos,
+            cardNames: uniqueNames,
+            cardArt: "art",
+            language: globalLanguage,
+          },
+          { timeout: 20000 }
+        );
+      } catch (e: any) {
+        console.error("[FetchCards] POST failed:", e);
+        throw new Error(
+          e?.response?.data?.error ||
+          e?.message ||
+          "Failed to fetch cards. Check network/CORS."
+        );
+      }
 
-    const processed: Record<string, string> = {};
-    for (const [uuid, url] of Object.entries(newOriginals)) {
-      const proxiedUrl = getLocalBleedImageUrl(url);
-      const bleedImage = await addBleedEdge(proxiedUrl, bleedEdgeWidth, {
-        unit: "mm",
-        bleedEdgeWidth,
+      const data = Array.isArray(response?.data) ? response!.data : [];
+      if (!data.length) {
+        throw new Error("No images found for the provided list.");
+      }
+
+      const optionByKey: Record<string, CardOption> = {};
+      for (const opt of data) {
+        if (!opt?.name) continue;
+        const k = `${opt.name.toLowerCase()}|${opt.set ?? ""}|${opt.number ?? ""}`;
+        optionByKey[k] = opt;
+        const nameOnlyKey = `${opt.name.toLowerCase()}||`;
+        if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
+      }
+
+      const expandedCards: CardOption[] = infos.map((ci) => {
+        const k = cardKey(ci);
+        const fallbackK = `${ci.name.toLowerCase()}||`;
+        const card = optionByKey[k] ?? optionByKey[fallbackK];
+        return {
+          ...(card ?? { name: ci.name, imageUrls: [] }),
+          uuid: crypto.randomUUID(),
+        } as CardOption;
       });
-      processed[uuid] = bleedImage;
-    }
 
-    appendSelectedImages(processed);
-    setLoadingTask(null);
-    setDeckText("");
+      appendCards(expandedCards);
+
+      const newOriginals: Record<string, string> = {};
+      for (const card of expandedCards) {
+        if (card?.imageUrls?.length > 0) {
+          newOriginals[card.uuid] = card.imageUrls[0];
+        }
+      }
+      appendOriginalSelectedImages(newOriginals);
+
+      setLoadingTask(null);
+
+      const processed: Record<string, string> = {};
+      for (const [uuid, url] of Object.entries(newOriginals)) {
+        try {
+          const proxiedUrl = getLocalBleedImageUrl(url);
+          const bleedImage = await addBleedEdge(proxiedUrl, bleedEdgeWidth, {
+            unit: "mm",
+            bleedEdgeWidth,
+          });
+          processed[uuid] = bleedImage;
+        } catch (e) {
+          console.warn(`[Bleed] Failed for ${uuid}:`, e);
+        }
+      }
+      if (Object.keys(processed).length) appendSelectedImages(processed);
+
+      setDeckText("");
+    } catch (err: any) {
+      console.error("[FetchCards] Error:", err);
+      alert(err?.message || "Something went wrong while fetching cards.");
+    } finally {
+      setLoadingTask(null);
+    }
   };
 
   const handleClear = async () => {
     setLoadingTask("Clearing Images");
 
-    await axios.delete(`${API_BASE}/api/cards/images`);
-    setCards([]);
-    setSelectedImages({});
-    setOriginalSelectedImages({});
+    try {
+      setCards([]);
+      setSelectedImages({});
+      setOriginalSelectedImages({});
 
-    setLoadingTask(null);
+      try {
+        await axios.delete(`${API_BASE}/api/cards/images`, { timeout: 15000 });
+      } catch (e) {
+        console.warn("[Clear] Server cache clear failed (UI already cleared):", e);
+      }
+    } catch (err: any) {
+      console.error("[Clear] Error:", err);
+      alert(err?.message || "Failed to clear images.");
+    } finally {
+      setLoadingTask(null);
+    }
   };
+
 
   return (
     <div className="w-1/5 dark:bg-gray-700 bg-gray-100 flex flex-col">
