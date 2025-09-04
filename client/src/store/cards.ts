@@ -208,8 +208,8 @@ export const useCardsStore = create<Store>()(
         }),
     }),
     {
-      name: "proxxied:cards:v4",
-      version: 4,
+      name: "proxxied:cards:v5",
+      version: 5,
 
       partialize: (state) => ({
         cards: state.cards,
@@ -219,28 +219,31 @@ export const useCardsStore = create<Store>()(
 
       storage: createJSONStorage(() => localStorage),
 
-      migrate: (persistedState: any, version) => {
-        if (!persistedState) return persistedState;
-
-        if (version < 4) {
-          if (!persistedState.cachedImageUrls) {
-            persistedState.cachedImageUrls = {};
-          }
-          if (!persistedState.globalLanguage) {
-            persistedState.globalLanguage = "en";
-          }
+      migrate: (persistedState: any, prevVersion) => {
+        if (!persistedState || prevVersion < 5) {
+          return {
+            cards: [],
+            cachedImageUrls: {},
+            globalLanguage: "en",
+          };
         }
-
-        if (version < 3) {
-          delete persistedState.selectedImages;
-          delete persistedState.originalSelectedImages;
-          delete persistedState.uploadedImages;
-          delete persistedState.uploadedOriginalImages;
-          delete persistedState.uploadedFiles;
-        }
-
         return persistedState;
       },
+
+      // After rehydrate, remove all legacy keys
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) return;
+        try {
+          const toRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith("proxxied:") && !k.startsWith("proxxied:cards:v5")) {
+              toRemove.push(k);
+            }
+          }
+          toRemove.forEach(k => localStorage.removeItem(k));
+        } catch { }
+      }
     }
   )
 );

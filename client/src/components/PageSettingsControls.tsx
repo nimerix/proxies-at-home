@@ -2,7 +2,7 @@ import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
 import { Button, Checkbox, HR, Label, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
@@ -31,6 +31,8 @@ export function PageSettingsControls() {
   const setZoom = useSettingsStore((state) => state.setZoom);
   const resetSettings = useSettingsStore((state) => state.resetSettings);
 
+  const [resetting, setResetting] = useState(false);
+
   const { reprocessSelectedImages } = useImageProcessing({
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
@@ -49,6 +51,37 @@ export function PageSettingsControls() {
     },
     [reprocessSelectedImages]
   );
+
+  const handleResetAppData = useCallback(async () => {
+    const ok = window.confirm(
+      "This will clear all saved Proxxied data (cards, cached images, settings) and reload the page. Continue?"
+    );
+    if (!ok) return;
+    setResetting(true);
+    try {
+      // Remove all localStorage keys under proxxied:
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("proxxied:")) toRemove.push(k);
+      }
+      toRemove.forEach((k) => localStorage.removeItem(k));
+
+      // Optional: clear Cache Storage entries if you use a SW with proxxied-* cache names
+      if ("caches" in window) {
+        const names = await caches.keys();
+        await Promise.all(
+          names
+            .filter((n) => n.startsWith("proxxied-"))
+            .map((n) => caches.delete(n))
+        );
+      }
+    } catch {
+      // ignore
+    } finally {
+      window.location.reload();
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -187,6 +220,15 @@ export function PageSettingsControls() {
           onClick={resetSettings}
         >
           Reset Settings
+        </span>
+      </div>
+
+      <div className="w-full flex justify-center">
+        <span
+          className="text-red-600 hover:underline cursor-pointer text-sm font-medium"
+          onClick={handleResetAppData}
+        >
+          Reset App Data
         </span>
       </div>
 
