@@ -23,14 +23,17 @@ const EdgeCutLines = ({
   const pageHeight = useSettingsStore((state) => state.pageHeight);
   const columns = useSettingsStore((state) => state.columns);
   const rows = useSettingsStore((state) => state.rows);
+  const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
 
   if (!bleedEdge) return null;
 
   const pageWidthMm = pageSizeUnit === "mm" ? pageWidth : pageWidth * 25.4;
   const pageHeightMm = pageSizeUnit === "mm" ? pageHeight : pageHeight * 25.4;
 
-  const gridWidthMm = columns * totalCardWidthMm;
-  const gridHeightMm = rows * totalCardHeightMm;
+  const gridWidthMm =
+    columns * totalCardWidthMm + Math.max(0, columns - 1) * cardSpacingMm;   // NEW
+  const gridHeightMm =
+    rows * totalCardHeightMm + Math.max(0, rows - 1) * cardSpacingMm; 
 
   const startXmm = (pageWidthMm - gridWidthMm) / 2;
   const startYmm = (pageHeightMm - gridHeightMm) / 2;
@@ -43,13 +46,13 @@ const EdgeCutLines = ({
   // Collect all vertical/horizontal cut positions
   const xCuts = new Set<number>();
   for (let c = 0; c < columns; c++) {
-    const cellLeft = startXmm + c * totalCardWidthMm;
+    const cellLeft = startXmm + c * (totalCardWidthMm + cardSpacingMm);
     xCuts.add(cellLeft + cutInX);
     xCuts.add(cellLeft + cutOutX);
   }
   const yCuts = new Set<number>();
   for (let r = 0; r < rows; r++) {
-    const cellTop = startYmm + r * totalCardHeightMm;
+    const cellTop = startYmm + r * (totalCardHeightMm + cardSpacingMm);  
     yCuts.add(cellTop + cutInY);
     yCuts.add(cellTop + cutOutY);
   }

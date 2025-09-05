@@ -605,7 +605,8 @@ export async function exportProxyPagesToPdf({
           cardWidthPx,
           cardHeightPx,
           bleedPx,
-          scaledGuideWidth
+          scaledGuideWidth,
+          spacingPx
         );
       }
     }
