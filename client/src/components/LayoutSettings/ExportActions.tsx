@@ -26,6 +26,7 @@ export function ExportActions() {
   const bleedEdge = useSettingsStore((state) => state.bleedEdge);
   const guideColor = useSettingsStore((state) => state.guideColor);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
+  const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -58,6 +59,7 @@ export function ExportActions() {
         pageHeight,
         columns,
         rows,
+        cardSpacingMm,
       });
     } catch (err) {
       console.error("Export failed:", err);

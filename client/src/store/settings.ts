@@ -27,6 +27,8 @@ type Store = {
   zoom: number;
   setZoom: (value: number) => void;
   resetSettings: () => void;
+  cardSpacingMm: number;
+  setCardSpacingMm: (mm: number) => void;
 };
 
 const defaultPageSettings = {
@@ -41,6 +43,7 @@ const defaultPageSettings = {
   bleedEdge: true,
   guideColor: "#39FF14",
   guideWidth: 0.5,
+  cardSpacingMm: 0,
   zoom: 1,
 } as Store;
 
@@ -92,6 +95,7 @@ export const useSettingsStore = create<Store>()(
       setGuideColor: (value) => set({ guideColor: value }),
       setGuideWidth: (value) => set({ guideWidth: value }),
       setZoom: (value) => set({ zoom: value }),
+      setCardSpacingMm: (mm) => set({ cardSpacingMm: Math.max(0, mm) }),
       resetSettings: () => set({ ...defaultPageSettings }),
     }),
     {

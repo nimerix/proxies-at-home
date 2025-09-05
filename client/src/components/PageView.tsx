@@ -64,9 +64,14 @@ export function PageView() {
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
   const totalCardWidth = baseCardWidthMm + bleedEdgeWidth * 2;
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
-  const gridWidthMm = totalCardWidth * columns;
-  const gridHeightMm = totalCardHeight * rows;
   const pageCapacity = columns * rows;
+  // --- near your other settings selectors ---
+  const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm); // NEW
+
+  const gridWidthMm =
+    totalCardWidth * columns + Math.max(0, columns - 1) * cardSpacingMm;
+  const gridHeightMm =
+    totalCardHeight * rows + Math.max(0, rows - 1) * cardSpacingMm;
 
   const [contextMenu, setContextMenu] = useState({
     visible: false,
@@ -261,7 +266,7 @@ export function PageView() {
                     gridTemplateRows: `repeat(${rows}, ${totalCardHeight}mm)`,
                     width: `${gridWidthMm}mm`,
                     height: `${gridHeightMm}mm`,
-                    gap: 0,
+                    gap: `${cardSpacingMm}mm`,
                   }}
                 >
                   {page.map((card, index) => {

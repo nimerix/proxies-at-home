@@ -204,18 +204,19 @@ function drawEdgeStubs(
   cardW: number,
   cardH: number,
   bleedPx: number,
-  guideWidthPx: number
+  guideWidthPx: number,
+  spacingPx = 0
 ) {
   const xCuts: number[] = [];
   for (let c = 0; c < columns; c++) {
-    const cellLeft = startX + c * cardW;
+    const cellLeft = startX + c * (cardW + spacingPx);
     xCuts.push(cellLeft + bleedPx);
     xCuts.push(cellLeft + bleedPx + contentW);
   }
 
   const yCuts: number[] = [];
   for (let r = 0; r < rows; r++) {
-    const cellTop = startY + r * cardH;
+    const cellTop = startY + r * (cardH + spacingPx);
     yCuts.push(cellTop + bleedPx);
     yCuts.push(cellTop + bleedPx + contentH);
   }
@@ -484,7 +485,7 @@ function drawCornerGuides(
 export async function exportProxyPagesToPdf({
   cards,
   originalSelectedImages,
-  cachedImageUrls,           
+  cachedImageUrls,
   bleedEdge,
   bleedEdgeWidthMm,
   guideColor,
@@ -496,6 +497,7 @@ export async function exportProxyPagesToPdf({
   pageHeight,
   columns,
   rows,
+  cardSpacingMm
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -511,6 +513,7 @@ export async function exportProxyPagesToPdf({
   pageHeight: number;
   columns: number;
   rows: number;
+  cardSpacingMm: number;
 }) {
   if (!cards.length) return;
 
@@ -523,10 +526,12 @@ export async function exportProxyPagesToPdf({
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
 
+  const spacingPx = MM_TO_PX(cardSpacingMm || 0);
+
   // Grid + centering
   const perPage = Math.max(1, columns * rows);
-  const gridWidthPx = columns * cardWidthPx;
-  const gridHeightPx = rows * cardHeightPx;
+  const gridWidthPx = columns * cardWidthPx + Math.max(0, columns - 1) * spacingPx;
+  const gridHeightPx = rows * cardHeightPx + Math.max(0, rows - 1) * spacingPx;
   const startX = Math.round((pageWidthPx - gridWidthPx) / 2);
   const startY = Math.round((pageHeightPx - gridHeightPx) / 2);
 
@@ -565,8 +570,8 @@ export async function exportProxyPagesToPdf({
       const card = pageCards[idx];
       const col = idx % columns;
       const row = Math.floor(idx / columns);
-      const x = startX + col * cardWidthPx;
-      const y = startY + row * cardHeightPx;
+      const x = startX + col * (cardWidthPx + spacingPx); // NEW
+      const y = startY + row * (cardHeightPx + spacingPx);
 
       let src =
         (cachedImageUrls && cachedImageUrls[card.uuid]) ||
