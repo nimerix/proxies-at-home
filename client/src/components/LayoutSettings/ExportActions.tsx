@@ -47,7 +47,7 @@ export function ExportActions() {
       await exportProxyPagesToPdf({
         cards,
         originalSelectedImages,
-        cachedImageUrls,              // <-- NEW: let the exporter use warmed URLs
+        cachedImageUrls,
         bleedEdge,
         bleedEdgeWidthMm: bleedEdgeWidth,
         guideColor,
@@ -63,7 +63,6 @@ export function ExportActions() {
       });
     } catch (err) {
       console.error("Export failed:", err);
-      // optional: surface a toast here if you have one
     } finally {
       setLoadingTask(null);
     }
@@ -97,6 +96,16 @@ export function ExportActions() {
       <Button color="blue" onClick={handleDownloadDecklist} disabled={!cards.length}>
         Download Decklist (.txt)
       </Button>
+
+      <a
+        href="https://buymeacoffee.com/kaiserclipston"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 w-full">
+          Buy Me a Coffee
+        </Button>
+      </a>
     </div>
   );
 }

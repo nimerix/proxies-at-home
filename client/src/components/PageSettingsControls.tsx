@@ -3,7 +3,6 @@ import { useCardsStore, useSettingsStore } from "@/store";
 import { Button, Checkbox, HelperText, HR, Label, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import Donate from "./Donate";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
 
@@ -269,7 +268,6 @@ export function PageSettingsControls() {
       </div>
 
       <div className="mt-auto space-y-3 pt-4">
-        <Donate username="Kaiser-Clipston-1" />
         <a
           href="https://github.com/kclipsto/proxies-at-home"
           target="_blank"
