@@ -1,6 +1,7 @@
 import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
-import { Button, Checkbox, HelperText, HR, Label, TextInput } from "flowbite-react";
+import type { ExportDpi } from "@/store/settings";
+import { Button, Checkbox, HelperText, HR, Label, Select, TextInput } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ExportActions } from "./LayoutSettings/ExportActions";
@@ -32,6 +33,7 @@ export function PageSettingsControls() {
   const pageUnit = useSettingsStore((s) => s.pageSizeUnit);
 
   const cardSpacingMm = useSettingsStore((s) => s.cardSpacingMm);
+  const exportDpi = useSettingsStore((s) => s.exportDpi);
 
   const setColumns = useSettingsStore((state) => state.setColumns);
   const setRows = useSettingsStore((state) => state.setRows);
@@ -42,6 +44,7 @@ export function PageSettingsControls() {
   const setZoom = useSettingsStore((state) => state.setZoom);
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const setCardSpacingMm = useSettingsStore((s) => s.setCardSpacingMm);
+  const setExportDpi = useSettingsStore((s) => s.setExportDpi);
 
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
@@ -195,6 +198,24 @@ export function PageSettingsControls() {
               if (!isNaN(val)) setGuideWidth(val);
             }}
           />
+        </div>
+
+        <div>
+          <Label>Export DPI</Label>
+          <Select
+            value={exportDpi}
+            onChange={(e) => {
+              const value = parseInt(e.target.value) as ExportDpi;
+              setExportDpi(value);
+            }}
+          >
+            <option value={600}>600 DPI (Standard)</option>
+            <option value={900}>900 DPI (High Quality)</option>
+            <option value={1200}>1200 DPI (Print Quality)</option>
+          </Select>
+          <HelperText>
+            Higher DPI produces better quality but larger file sizes.
+          </HelperText>
         </div>
 
         <div>

@@ -7,10 +7,11 @@ import { getPatchNearCorner } from "./ImageHelper";
 const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
-const DPI = 600;
-const IN = (inches: number) => Math.round(inches * DPI);
 const MM_TO_IN = (mm: number) => mm / 25.4;
-const MM_TO_PX = (mm: number) => IN(MM_TO_IN(mm));
+const createDpiHelpers = (dpi: number) => ({
+  IN: (inches: number) => Math.round(inches * dpi),
+  MM_TO_PX: (mm: number) => Math.round(MM_TO_IN(mm) * dpi)
+});
 
 function getLocalBleedImageUrl(originalUrl: string) {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
@@ -161,7 +162,7 @@ function blackenAllNearBlackPixels(
   height: number,
   threshold: number,
   borderThickness = { top: 192, bottom: 800, left: 96, right: 96 },
-  targetDpi = DPI
+  targetDpi: number
 ) {
   const scale = targetDpi / 300;
   const bt = {
@@ -244,8 +245,10 @@ function drawEdgeStubs(
 async function buildCardWithBleed(
   src: string,
   bleedPx: number,
-  opts: { isUserUpload: boolean; hasBakedBleed?: boolean }
+  opts: { isUserUpload: boolean; hasBakedBleed?: boolean },
+  dpi: number
 ) {
+  const { MM_TO_PX } = createDpiHelpers(dpi);
   const contentW = MM_TO_PX(63);
   const contentH = MM_TO_PX(88);
   const finalW = contentW + bleedPx * 2;
@@ -278,7 +281,7 @@ async function buildCardWithBleed(
   bctx.imageSmoothingQuality = "high";
   bctx.drawImage(baseImg, -offX, -offY, drawW, drawH);
 
-  const dpiFactor = DPI / 300;
+  const dpiFactor = dpi / 300;
   const cornerSize = Math.round(30 * dpiFactor);
   const sampleInset = Math.round(10 * dpiFactor);
   const patchSize = Math.round(20 * dpiFactor);
@@ -378,7 +381,7 @@ async function buildCardWithBleed(
     bctx.restore();
   }
 
-  blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold, undefined, DPI);
+  blackenAllNearBlackPixels(bctx, contentW, contentH, blackThreshold, undefined, dpi);
 
   const out = document.createElement("canvas");
   out.width = finalW;
@@ -444,7 +447,7 @@ async function buildCardWithBleed(
 function scaleGuideWidthForDPI(
   screenPx: number,
   screenPPI = 96,
-  targetDPI = DPI
+  targetDPI: number
 ) {
   return Math.round((screenPx / screenPPI) * targetDPI);
 }
@@ -457,8 +460,10 @@ function drawCornerGuides(
   contentH: number,
   bleedPx: number,
   guideColor: string,
-  guideWidthPx: number
+  guideWidthPx: number,
+  dpi: number
 ) {
+  const { MM_TO_PX } = createDpiHelpers(dpi);
   const guideLenPx = MM_TO_PX(2);
   const gx = x + bleedPx;
   const gy = y + bleedPx;
@@ -497,11 +502,12 @@ export async function exportProxyPagesToPdf({
   pageHeight,
   columns,
   rows,
-  cardSpacingMm
+  cardSpacingMm,
+  exportDpi = 600
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
-  cachedImageUrls?: Record<string, string>; // <-- NEW
+  cachedImageUrls?: Record<string, string>;
   bleedEdge: boolean;
   bleedEdgeWidthMm: number;
   guideColor: string;
@@ -514,8 +520,11 @@ export async function exportProxyPagesToPdf({
   columns: number;
   rows: number;
   cardSpacingMm: number;
+  exportDpi?: number;
 }) {
   if (!cards.length) return;
+
+  const { IN, MM_TO_PX } = createDpiHelpers(exportDpi);
 
   const pageWidthPx = pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
   const pageHeightPx = pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
@@ -586,12 +595,12 @@ export async function exportProxyPagesToPdf({
       const cardCanvas = await buildCardWithBleed(src, bleedPx, {
         isUserUpload: !!card.isUserUpload,
         hasBakedBleed: !!card.hasBakedBleed,
-      });
+      }, exportDpi);
       ctx.drawImage(cardCanvas, x, y);
 
       if (bleedEdge) {
-        const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, DPI);
-        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth);
+        const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
+        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi);
         drawEdgeStubs(
           ctx,
           pageWidthPx,

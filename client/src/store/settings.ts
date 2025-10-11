@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type LayoutPreset = "A4" | "A3" | "Letter" | "Tabloid" | "Legal" | "ArchA" | "ArchB" | "SuperB" | "A2" | "A1";
 export type PageOrientation = "portrait" | "landscape";
+export type ExportDpi = 600 | 900 | 1200;
 
 type Store = {
   pageSizeUnit: "mm" | "in";
@@ -29,6 +30,8 @@ type Store = {
   resetSettings: () => void;
   cardSpacingMm: number;
   setCardSpacingMm: (mm: number) => void;
+  exportDpi: ExportDpi;
+  setExportDpi: (dpi: ExportDpi) => void;
 };
 
 const defaultPageSettings = {
@@ -45,6 +48,7 @@ const defaultPageSettings = {
   guideWidth: 0.5,
   cardSpacingMm: 0,
   zoom: 1,
+  exportDpi: 600,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -96,6 +100,7 @@ export const useSettingsStore = create<Store>()(
       setGuideWidth: (value) => set({ guideWidth: value }),
       setZoom: (value) => set({ zoom: value }),
       setCardSpacingMm: (mm) => set({ cardSpacingMm: Math.max(0, mm) }),
+      setExportDpi: (dpi) => set({ exportDpi: dpi }),
       resetSettings: () => set({ ...defaultPageSettings }),
     }),
     {
