@@ -7,10 +7,9 @@ import { getPatchNearCorner } from "./ImageHelper";
 const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
-const MM_TO_IN = (mm: number) => mm / 25.4;
 const createDpiHelpers = (dpi: number) => ({
-  IN: (inches: number) => Math.round(inches * dpi),
-  MM_TO_PX: (mm: number) => Math.round(MM_TO_IN(mm) * dpi)
+  IN_TO_PX: (inches: number) => Math.round(inches * dpi),
+  MM_TO_PX: (mm: number) => Math.round(mm * (dpi / 25.4)),
 });
 
 function getLocalBleedImageUrl(originalUrl: string) {
@@ -524,10 +523,10 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
-  const { IN, MM_TO_PX } = createDpiHelpers(exportDpi);
+  const { IN_TO_PX, MM_TO_PX } = createDpiHelpers(exportDpi);
 
-  const pageWidthPx = pageSizeUnit === "in" ? IN(pageWidth) : MM_TO_PX(pageWidth);
-  const pageHeightPx = pageSizeUnit === "in" ? IN(pageHeight) : MM_TO_PX(pageHeight);
+  const pageWidthPx = pageSizeUnit === "in" ? IN_TO_PX(pageWidth) : MM_TO_PX(pageWidth);
+  const pageHeightPx = pageSizeUnit === "in" ? IN_TO_PX(pageHeight) : MM_TO_PX(pageHeight);
 
   const contentWidthInPx = MM_TO_PX(63);
   const contentHeightInPx = MM_TO_PX(88);
