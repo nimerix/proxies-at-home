@@ -1,7 +1,29 @@
-import { API_BASE } from "../constants";
+import { API_BASE, 
+  DPI_MM_RECIP, 
+  pixelDPIMap} from "../constants";
 
 const DPI = 300;
 const IN = (inches: number) => Math.round(inches * DPI);
+
+export const DPMM = (dpi: number) => dpi * DPI_MM_RECIP;
+
+export function guessBucketDpiFromHeight(h: number) {
+  const epsilonMM = 0.1;
+  let res = {dpi: 300, hasBleed: false, epsilon: Infinity};
+
+  for (const [dpi, dims] of pixelDPIMap) {
+    let err = Math.abs(dims.height - h);
+    let errBleed = Math.abs(dims.heightWithBakedBleed - h);
+    if (Math.min(err, errBleed) < res.epsilon) res = {dpi, hasBleed: errBleed < err, epsilon: Math.min(err, errBleed)};
+    if (res.epsilon < Math.abs(DPMM(dpi) * epsilonMM)) return res; // good enough
+  }
+  return res;
+}
+
+export const createDpiHelpers = (dpi: number) => ({
+  IN_TO_PX: (inches: number) => Math.round(inches * dpi),
+  MM_TO_PX: (mm: number) => Math.round(mm * DPMM(dpi)),
+});
 
 export function toProxied(url: string) {
   if (!url) return url;

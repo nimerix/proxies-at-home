@@ -1,16 +1,13 @@
-import { API_BASE } from "@/constants";
+import { API_BASE, CARD_H_MM, CARD_W_MM } from "@/constants";
 import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import jsPDF from "jspdf";
-import { getPatchNearCorner } from "./ImageHelper";
+import { createDpiHelpers, getPatchNearCorner } from "./ImageHelper";
 
 const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
-const createDpiHelpers = (dpi: number) => ({
-  IN_TO_PX: (inches: number) => Math.round(inches * dpi),
-  MM_TO_PX: (mm: number) => Math.round(mm * (dpi / 25.4)),
-});
+
 
 function getLocalBleedImageUrl(originalUrl: string) {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
@@ -248,8 +245,8 @@ async function buildCardWithBleed(
   dpi: number
 ) {
   const { MM_TO_PX } = createDpiHelpers(dpi);
-  const contentW = MM_TO_PX(63);
-  const contentH = MM_TO_PX(88);
+  const contentW = MM_TO_PX(CARD_W_MM);
+  const contentH = MM_TO_PX(CARD_H_MM);
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
@@ -528,8 +525,8 @@ export async function exportProxyPagesToPdf({
   const pageWidthPx = pageSizeUnit === "in" ? IN_TO_PX(pageWidth) : MM_TO_PX(pageWidth);
   const pageHeightPx = pageSizeUnit === "in" ? IN_TO_PX(pageHeight) : MM_TO_PX(pageHeight);
 
-  const contentWidthInPx = MM_TO_PX(63);
-  const contentHeightInPx = MM_TO_PX(88);
+  const contentWidthInPx = MM_TO_PX(CARD_W_MM);
+  const contentHeightInPx = MM_TO_PX(CARD_H_MM);
   const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
   const cardWidthPx = contentWidthInPx + 2 * bleedPx;
   const cardHeightPx = contentHeightInPx + 2 * bleedPx;
