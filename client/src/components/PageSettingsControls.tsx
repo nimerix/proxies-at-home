@@ -35,6 +35,7 @@ export function PageSettingsControls() {
   const cardSpacingMm = useSettingsStore((s) => s.cardSpacingMm);
   const exportDpi = useSettingsStore((s) => s.exportDpi);
   const roundedCornerGuides = useSettingsStore((s) => s.roundedCornerGuides);
+  const cornerGuideOffsetMm = useSettingsStore((s) => s.cornerGuideOffsetMm);
 
   const setColumns = useSettingsStore((state) => state.setColumns);
   const setRows = useSettingsStore((state) => state.setRows);
@@ -47,6 +48,7 @@ export function PageSettingsControls() {
   const setCardSpacingMm = useSettingsStore((s) => s.setCardSpacingMm);
   const setExportDpi = useSettingsStore((s) => s.setExportDpi);
   const setRoundedCornerGuides = useSettingsStore((s) => s.setRoundedCornerGuides);
+  const setCornerGuideOffsetMm = useSettingsStore((s) => s.setCornerGuideOffsetMm);
 
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
@@ -172,6 +174,27 @@ export function PageSettingsControls() {
         <HelperText className="-mt-2">
           Draw guides that follow the 2.5mm corner radius
         </HelperText>
+
+        {roundedCornerGuides && (
+          <div>
+            <Label>Corner Guide Offset (mm)</Label>
+            <TextInput
+              className="w-full"
+              type="number"
+              min={-2}
+              max={2}
+              step={0.1}
+              value={cornerGuideOffsetMm}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) setCornerGuideOffsetMm(Math.max(-2, Math.min(2, val)));
+              }}
+            />
+            <HelperText>
+              Negative values move the guide inward, positive values move it outward
+            </HelperText>
+          </div>
+        )}
 
         {/* NEW: Card-to-card spacing */}
         <div>

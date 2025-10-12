@@ -536,7 +536,8 @@ function drawCornerGuides(
   guideColor: string,
   guideWidthPx: number,
   dpi: number,
-  useRoundedCorners: boolean = false
+  useRoundedCorners: boolean = false,
+  cornerOffsetMm: number = 0
 ) {
   const { MM_TO_PX } = createDpiHelpers(dpi);
   const guideLenPx = MM_TO_PX(2);
@@ -547,29 +548,34 @@ function drawCornerGuides(
 
   if (useRoundedCorners) {
     const cornerRadiusPx = MM_TO_PX(2.5);
+    const offsetPx = MM_TO_PX(cornerOffsetMm);
+
+    // Offset moves the arc center diagonally (inward for negative, outward for positive)
+    // For a corner arc, we need to move along the diagonal (45 degrees from the corner)
+    const diagonalOffset = offsetPx * Math.SQRT2; // offset along the 45° diagonal
 
     ctx.strokeStyle = guideColor;
     ctx.lineWidth = guideWidthPx;
     ctx.lineCap = "butt";
 
-    // Top-Left corner
+    // Top-Left corner - move center down-right for positive offset (outward)
     ctx.beginPath();
-    ctx.arc(gx + cornerRadiusPx, gy + cornerRadiusPx, cornerRadiusPx, Math.PI, Math.PI * 1.5);
+    ctx.arc(gx + cornerRadiusPx + diagonalOffset, gy + cornerRadiusPx + diagonalOffset, cornerRadiusPx, Math.PI, Math.PI * 1.5);
     ctx.stroke();
 
-    // Top-Right corner
+    // Top-Right corner - move center down-left for positive offset (outward)
     ctx.beginPath();
-    ctx.arc(gx + contentW - cornerRadiusPx, gy + cornerRadiusPx, cornerRadiusPx, Math.PI * 1.5, Math.PI * 2);
+    ctx.arc(gx + contentW - cornerRadiusPx - diagonalOffset, gy + cornerRadiusPx + diagonalOffset, cornerRadiusPx, Math.PI * 1.5, Math.PI * 2);
     ctx.stroke();
 
-    // Bottom-Left corner
+    // Bottom-Left corner - move center up-right for positive offset (outward)
     ctx.beginPath();
-    ctx.arc(gx + cornerRadiusPx, gy + contentH - cornerRadiusPx, cornerRadiusPx, Math.PI * 0.5, Math.PI);
+    ctx.arc(gx + cornerRadiusPx + diagonalOffset, gy + contentH - cornerRadiusPx - diagonalOffset, cornerRadiusPx, Math.PI * 0.5, Math.PI);
     ctx.stroke();
 
-    // Bottom-Right corner
+    // Bottom-Right corner - move center up-left for positive offset (outward)
     ctx.beginPath();
-    ctx.arc(gx + contentW - cornerRadiusPx, gy + contentH - cornerRadiusPx, cornerRadiusPx, 0, Math.PI * 0.5);
+    ctx.arc(gx + contentW - cornerRadiusPx - diagonalOffset, gy + contentH - cornerRadiusPx - diagonalOffset, cornerRadiusPx, 0, Math.PI * 0.5);
     ctx.stroke();
   } else {
     ctx.fillStyle = guideColor;
@@ -608,7 +614,8 @@ export async function exportProxyPagesToPdf({
   rows,
   cardSpacingMm,
   exportDpi = 600,
-  roundedCornerGuides = false
+  roundedCornerGuides = false,
+  cornerGuideOffsetMm = 0
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -627,6 +634,7 @@ export async function exportProxyPagesToPdf({
   cardSpacingMm: number;
   exportDpi?: number;
   roundedCornerGuides?: boolean;
+  cornerGuideOffsetMm?: number;
 }) {
   if (!cards.length) return;
 
@@ -706,7 +714,7 @@ export async function exportProxyPagesToPdf({
 
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
-        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi, roundedCornerGuides);
+        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi, roundedCornerGuides, cornerGuideOffsetMm);
         drawEdgeStubs(
           ctx,
           pageWidthPx,
