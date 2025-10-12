@@ -33,7 +33,7 @@ const EdgeCutLines = ({
   const gridWidthMm =
     columns * totalCardWidthMm + Math.max(0, columns - 1) * cardSpacingMm;   // NEW
   const gridHeightMm =
-    rows * totalCardHeightMm + Math.max(0, rows - 1) * cardSpacingMm; 
+    rows * totalCardHeightMm + Math.max(0, rows - 1) * cardSpacingMm;
 
   const startXmm = (pageWidthMm - gridWidthMm) / 2;
   const startYmm = (pageHeightMm - gridHeightMm) / 2;
@@ -52,7 +52,7 @@ const EdgeCutLines = ({
   }
   const yCuts = new Set<number>();
   for (let r = 0; r < rows; r++) {
-    const cellTop = startYmm + r * (totalCardHeightMm + cardSpacingMm);  
+    const cellTop = startYmm + r * (totalCardHeightMm + cardSpacingMm);
     yCuts.add(cellTop + cutInY);
     yCuts.add(cellTop + cutOutY);
   }

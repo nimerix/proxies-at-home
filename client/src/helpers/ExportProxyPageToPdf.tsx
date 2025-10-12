@@ -535,7 +535,8 @@ function drawCornerGuides(
   bleedPx: number,
   guideColor: string,
   guideWidthPx: number,
-  dpi: number
+  dpi: number,
+  useRoundedCorners: boolean = false
 ) {
   const { MM_TO_PX } = createDpiHelpers(dpi);
   const guideLenPx = MM_TO_PX(2);
@@ -543,20 +544,49 @@ function drawCornerGuides(
   const gy = y + bleedPx;
 
   ctx.save();
-  ctx.fillStyle = guideColor;
 
-  // TL
-  ctx.fillRect(gx, gy, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
-  // TR
-  ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
-  // BL
-  ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
-  // BR
-  ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-  ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
+  if (useRoundedCorners) {
+    const cornerRadiusPx = MM_TO_PX(2.5);
+
+    ctx.strokeStyle = guideColor;
+    ctx.lineWidth = guideWidthPx;
+    ctx.lineCap = "butt";
+
+    // Top-Left corner
+    ctx.beginPath();
+    ctx.arc(gx + cornerRadiusPx, gy + cornerRadiusPx, cornerRadiusPx, Math.PI, Math.PI * 1.5);
+    ctx.stroke();
+
+    // Top-Right corner
+    ctx.beginPath();
+    ctx.arc(gx + contentW - cornerRadiusPx, gy + cornerRadiusPx, cornerRadiusPx, Math.PI * 1.5, Math.PI * 2);
+    ctx.stroke();
+
+    // Bottom-Left corner
+    ctx.beginPath();
+    ctx.arc(gx + cornerRadiusPx, gy + contentH - cornerRadiusPx, cornerRadiusPx, Math.PI * 0.5, Math.PI);
+    ctx.stroke();
+
+    // Bottom-Right corner
+    ctx.beginPath();
+    ctx.arc(gx + contentW - cornerRadiusPx, gy + contentH - cornerRadiusPx, cornerRadiusPx, 0, Math.PI * 0.5);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = guideColor;
+
+    // TL
+    ctx.fillRect(gx, gy, guideWidthPx, guideLenPx);
+    ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
+    // TR
+    ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
+    ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
+    // BL
+    ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
+    ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
+    // BR
+    ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
+    ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
+  }
 
   ctx.restore();
 }
@@ -577,7 +607,8 @@ export async function exportProxyPagesToPdf({
   columns,
   rows,
   cardSpacingMm,
-  exportDpi = 600
+  exportDpi = 600,
+  roundedCornerGuides = false
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -595,6 +626,7 @@ export async function exportProxyPagesToPdf({
   rows: number;
   cardSpacingMm: number;
   exportDpi?: number;
+  roundedCornerGuides?: boolean;
 }) {
   if (!cards.length) return;
 
@@ -674,7 +706,7 @@ export async function exportProxyPagesToPdf({
 
       if (bleedEdge) {
         const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
-        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi);
+        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi, roundedCornerGuides);
         drawEdgeStubs(
           ctx,
           pageWidthPx,

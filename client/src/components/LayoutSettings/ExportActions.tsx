@@ -28,6 +28,7 @@ export function ExportActions() {
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
   const exportDpi = useSettingsStore((state) => state.exportDpi);
+  const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -62,6 +63,7 @@ export function ExportActions() {
         rows,
         cardSpacingMm,
         exportDpi,
+        roundedCornerGuides,
       });
     } catch (err) {
       console.error("Export failed:", err);

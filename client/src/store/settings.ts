@@ -32,6 +32,8 @@ type Store = {
   setCardSpacingMm: (mm: number) => void;
   exportDpi: ExportDpi;
   setExportDpi: (dpi: ExportDpi) => void;
+  roundedCornerGuides: boolean;
+  setRoundedCornerGuides: (value: boolean) => void;
 };
 
 const defaultPageSettings = {
@@ -49,6 +51,7 @@ const defaultPageSettings = {
   cardSpacingMm: 0,
   zoom: 1,
   exportDpi: 600,
+  roundedCornerGuides: false,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -101,6 +104,7 @@ export const useSettingsStore = create<Store>()(
       setZoom: (value) => set({ zoom: value }),
       setCardSpacingMm: (mm) => set({ cardSpacingMm: Math.max(0, mm) }),
       setExportDpi: (dpi) => set({ exportDpi: dpi }),
+      setRoundedCornerGuides: (value) => set({ roundedCornerGuides: value }),
       resetSettings: () => set({ ...defaultPageSettings }),
     }),
     {

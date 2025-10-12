@@ -34,6 +34,7 @@ export function PageSettingsControls() {
 
   const cardSpacingMm = useSettingsStore((s) => s.cardSpacingMm);
   const exportDpi = useSettingsStore((s) => s.exportDpi);
+  const roundedCornerGuides = useSettingsStore((s) => s.roundedCornerGuides);
 
   const setColumns = useSettingsStore((state) => state.setColumns);
   const setRows = useSettingsStore((state) => state.setRows);
@@ -45,6 +46,7 @@ export function PageSettingsControls() {
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const setCardSpacingMm = useSettingsStore((s) => s.setCardSpacingMm);
   const setExportDpi = useSettingsStore((s) => s.setExportDpi);
+  const setRoundedCornerGuides = useSettingsStore((s) => s.setRoundedCornerGuides);
 
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
@@ -158,6 +160,18 @@ export function PageSettingsControls() {
           />
           <Label htmlFor="bleed-edge">Enable Bleed Edge</Label>
         </div>
+
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="rounded-corner-guides"
+            checked={roundedCornerGuides}
+            onChange={(e) => setRoundedCornerGuides(e.target.checked)}
+          />
+          <Label htmlFor="rounded-corner-guides">Rounded Corner Guides</Label>
+        </div>
+        <HelperText className="-mt-2">
+          Draw guides that follow the 2.5mm corner radius
+        </HelperText>
 
         {/* NEW: Card-to-card spacing */}
         <div>
