@@ -1,8 +1,7 @@
 import { useRef, useState } from "react";
 import {
-  addBleedEdge,
+  addBleedEdgeSmartly,
   getLocalBleedImageUrl,
-  trimBleedEdge,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
 import { useCardsStore } from "../store";
@@ -53,16 +52,11 @@ export function useImageProcessing({
 
       setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
       try {
-        let base: string;
-        if (/^data:image\//i.test(src)) {
-          base = card.hasBakedBleed ? await trimBleedEdge(src) : src;
-        } else {
-          const dataUrl = await urlToDataUrl(src);
-          base = card.hasBakedBleed ? await trimBleedEdge(dataUrl) : dataUrl;
-        }
-        const withBleed = await addBleedEdge(base, bleedEdgeWidth, {
+        const srcToProcess = /^data:image\//i.test(src) ? src : await urlToDataUrl(src);
+        const withBleed = await addBleedEdgeSmartly(srcToProcess, bleedEdgeWidth, {
           unit,
           bleedEdgeWidth,
+          hasBakedBleed: card.hasBakedBleed,
         });
         appendSelectedImages({ [uuid]: withBleed });
         if (!originalSelectedImages[uuid]) {
@@ -94,23 +88,19 @@ export function useImageProcessing({
       if (!original) return;
       
       if (card.isUserUpload) {
-        let base: string;
-        if (/^data:image\//i.test(original)) {
-          base = card.hasBakedBleed ? await trimBleedEdge(original) : original;
-        } else {
-          const dataUrl = await urlToDataUrl(original);
-          base = card.hasBakedBleed ? await trimBleedEdge(dataUrl) : dataUrl;
-        }
-        updated[uuid] = await addBleedEdge(base, newBleedWidth, {
+        const srcToProcess = /^data:image\//i.test(original) ? original : await urlToDataUrl(original);
+        updated[uuid] = await addBleedEdgeSmartly(srcToProcess, newBleedWidth, {
           unit,
           bleedEdgeWidth: newBleedWidth,
+          hasBakedBleed: card.hasBakedBleed,
         });
       } else {
         // Scryfall Image -> proxy the URL and add bleed
         const proxiedUrl = getLocalBleedImageUrl(original);
-        updated[uuid] = await addBleedEdge(proxiedUrl, newBleedWidth, {
+        updated[uuid] = await addBleedEdgeSmartly(proxiedUrl, newBleedWidth, {
           unit,
           bleedEdgeWidth: newBleedWidth,
+          hasBakedBleed: false,
         });
       }
     });

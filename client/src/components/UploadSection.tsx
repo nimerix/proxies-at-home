@@ -6,9 +6,8 @@ import {
   type CardInfo,
 } from "@/helpers/CardInfoHelper";
 import {
-  addBleedEdge,
-  getLocalBleedImageUrl,
-  trimBleedEdge
+  addBleedEdgeSmartly,
+  getLocalBleedImageUrl
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -65,15 +64,10 @@ export function UploadSection() {
     srcBase64: string,
     opts: { hasBakedBleed: boolean }
   ) {
-    // If the image already includes extra border/bleed (MPC Fill), trim first.
-    const trimmed = opts.hasBakedBleed
-      ? await trimBleedEdge(srcBase64)
-      : srcBase64;
-
-    // Then add your consistent bleed
-    const withBleedBase64 = await addBleedEdge(trimmed, bleedEdgeWidth, {
+    const withBleedBase64 = await addBleedEdgeSmartly(srcBase64, bleedEdgeWidth, {
       unit: "mm",
       bleedEdgeWidth,
+      hasBakedBleed: opts.hasBakedBleed,
     });
 
     return { originalBase64: srcBase64, withBleedBase64 };
@@ -320,9 +314,10 @@ export function UploadSection() {
       for (const [uuid, url] of Object.entries(newOriginals)) {
         try {
           const proxiedUrl = getLocalBleedImageUrl(url);
-          const bleedImage = await addBleedEdge(proxiedUrl, bleedEdgeWidth, {
+          const bleedImage = await addBleedEdgeSmartly(proxiedUrl, bleedEdgeWidth, {
             unit: "mm",
             bleedEdgeWidth,
+            hasBakedBleed: false,
           });
           processed[uuid] = bleedImage;
         } catch (e) {

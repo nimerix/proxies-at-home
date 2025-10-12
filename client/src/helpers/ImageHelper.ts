@@ -208,6 +208,97 @@ export function getPatchNearCorner(
   };
 }
 
+export async function addBleedEdgeSmartly(
+  src: string,
+  bleedOverride?: number,
+  opts?: { unit?: "mm" | "in"; bleedEdgeWidth?: number; hasBakedBleed?: boolean }
+) {
+  const desiredBleedMm = bleedOverride ?? opts?.bleedEdgeWidth ?? 0;
+  const hasBakedBleed = opts?.hasBakedBleed ?? false;
+  const MPC_BLEED_MM = 3;
+
+  if (hasBakedBleed && desiredBleedMm > 0 && desiredBleedMm <= MPC_BLEED_MM) {
+    return smartTrimToDesiredBleed(src, desiredBleedMm);
+  }
+
+  if (hasBakedBleed && desiredBleedMm > MPC_BLEED_MM) {
+    const trimmed = await trimBleedEdge(src);
+    return addBleedEdge(trimmed, bleedOverride, opts);
+  }
+
+  if (hasBakedBleed && desiredBleedMm === 0) {
+    return trimBleedEdge(src);
+  }
+
+  return addBleedEdge(src, bleedOverride, opts);
+}
+
+async function smartTrimToDesiredBleed(src: string, desiredBleedMm: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 10000);
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
+
+    img.onload = async () => {
+      clearTimeout(timeoutId);
+      try {
+        const { dpi, hasBleed } = guessBucketDpiFromHeight(img.height);
+
+        if (!hasBleed) {
+          return resolve(src);
+        }
+
+        const dims = pixelDPIMap.get(dpi);
+        if (!dims) {
+          return resolve(src);
+        }
+
+        const MPC_BLEED_MM = 3;
+        const trimAmountMm = MPC_BLEED_MM - desiredBleedMm;
+        const trimPx = Math.round(trimAmountMm * DPMM(dpi));
+
+        if (trimPx <= 0) {
+          return resolve(src);
+        }
+
+        const canvas = document.createElement("canvas");
+        const targetWidth = img.width - trimPx * 2;
+        const targetHeight = img.height - trimPx * 2;
+
+        if (targetWidth <= 0 || targetHeight <= 0) {
+          return resolve(src);
+        }
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(src);
+
+        ctx.drawImage(img, trimPx, trimPx, targetWidth, targetHeight, 0, 0, targetWidth, targetHeight);
+
+        const outUrl = await canvasToObjectUrl(canvas, "image/png");
+
+        try {
+          const u = new URL(src);
+          if (u.protocol === "blob:") URL.revokeObjectURL(src);
+        } catch {}
+
+        resolve(outUrl);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = (error) => {
+      clearTimeout(timeoutId);
+      reject(new Error(`Failed to load image: ${String(error)}`));
+    };
+
+    img.src = src.startsWith("http") ? toProxied(src) : src;
+  });
+}
+
 export async function addBleedEdge(
   src: string,
   bleedOverride?: number,

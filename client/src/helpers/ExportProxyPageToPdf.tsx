@@ -1,8 +1,8 @@
-import { API_BASE, CARD_H_MM, CARD_W_MM } from "@/constants";
+import { API_BASE, CARD_H_MM, CARD_W_MM, pixelDPIMap } from "@/constants";
 import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import jsPDF from "jspdf";
-import { createDpiHelpers, getPatchNearCorner } from "./ImageHelper";
+import { createDpiHelpers, getPatchNearCorner, guessBucketDpiFromHeight, DPMM } from "./ImageHelper";
 
 const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
@@ -238,6 +238,55 @@ function drawEdgeStubs(
   ctx.restore();
 }
 
+async function smartTrimMpcBleed(
+  img: HTMLImageElement,
+  desiredBleedPx: number,
+  targetDpi: number
+): Promise<HTMLImageElement | null> {
+  const { dpi: sourceDpi, hasBleed } = guessBucketDpiFromHeight(img.height);
+
+  if (!hasBleed) {
+    return null;
+  }
+
+  const dims = pixelDPIMap.get(sourceDpi);
+  if (!dims) {
+    return null;
+  }
+
+  const MPC_BLEED_MM = 3;
+  const desiredBleedMm = desiredBleedPx / DPMM(targetDpi);
+
+  if (desiredBleedMm <= MPC_BLEED_MM) {
+    const trimAmountMm = MPC_BLEED_MM - desiredBleedMm;
+    const trimPx = Math.round(trimAmountMm * DPMM(sourceDpi));
+
+    if (trimPx > 0) {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width - trimPx * 2;
+      canvas.height = img.height - trimPx * 2;
+
+      if (canvas.width <= 0 || canvas.height <= 0) {
+        return null;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+
+      ctx.drawImage(img, trimPx, trimPx, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+
+      const trimmed = new Image();
+      trimmed.src = canvas.toDataURL("image/png");
+      await new Promise((r) => (trimmed.onload = r));
+      return trimmed;
+    }
+
+    return img;
+  }
+
+  return null;
+}
+
 async function buildCardWithBleed(
   src: string,
   bleedPx: number,
@@ -250,10 +299,39 @@ async function buildCardWithBleed(
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
-  const baseImg =
-    opts.isUserUpload && opts.hasBakedBleed
-      ? await trimExistingBleedIfAny(src)
-      : await loadImage(src);
+  let baseImg = await loadImage(src);
+
+  if (opts.hasBakedBleed && bleedPx > 0) {
+    const smartTrimmed = await smartTrimMpcBleed(baseImg, bleedPx, dpi);
+    if (smartTrimmed) {
+      const scaledCanvas = document.createElement("canvas");
+      scaledCanvas.width = finalW;
+      scaledCanvas.height = finalH;
+      const scaledCtx = scaledCanvas.getContext("2d")!;
+
+      const expectedWidth = MM_TO_PX(CARD_W_MM) + bleedPx * 2;
+      const expectedHeight = MM_TO_PX(CARD_H_MM) + bleedPx * 2;
+
+      const scaleX = expectedWidth / smartTrimmed.width;
+      const scaleY = expectedHeight / smartTrimmed.height;
+      const scale = Math.max(scaleX, scaleY);
+
+      const scaledW = Math.round(smartTrimmed.width * scale);
+      const scaledH = Math.round(smartTrimmed.height * scale);
+      const offsetX = Math.round((scaledW - expectedWidth) / 2);
+      const offsetY = Math.round((scaledH - expectedHeight) / 2);
+
+      scaledCtx.imageSmoothingEnabled = true;
+      scaledCtx.imageSmoothingQuality = "high";
+      scaledCtx.drawImage(smartTrimmed, -offsetX, -offsetY, scaledW, scaledH);
+
+      return scaledCanvas;
+    }
+  }
+
+  if (opts.isUserUpload && opts.hasBakedBleed) {
+    baseImg = await trimExistingBleedIfAny(src);
+  }
 
   const aspect = baseImg.width / baseImg.height;
   const targetAspect = contentW / contentH;
