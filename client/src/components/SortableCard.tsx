@@ -51,8 +51,8 @@ export default function SortableCard({
       key={`${card.uuid}-${index}`}
       className="bg-black relative group"
       style={style}
-      onClick={() => {
-        openArtworkModal({ card, index: globalIndex });
+      onClick={(e) => {
+        openArtworkModal({ card, index: globalIndex, autoFetchPrints: e.shiftKey });
       }}
     >
       <img

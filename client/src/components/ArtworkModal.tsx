@@ -8,7 +8,7 @@ import {
   ModalHeader,
   TextInput,
 } from "flowbite-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { API_BASE } from "../constants";
 import { pngToNormal, getLocalBleedImageUrl } from "../helpers/ImageHelper";
 import { useArtworkModalStore } from "../store";
@@ -23,6 +23,7 @@ export function ArtworkModal() {
   const isModalOpen = useArtworkModalStore((state) => state.open);
   const modalCard = useArtworkModalStore((state) => state.card);
   const modalIndex = useArtworkModalStore((state) => state.index);
+  const autoFetchPrints = useArtworkModalStore((state) => state.autoFetchPrints);
   const closeArtworkModal = useArtworkModalStore((state) => state.closeModal);
   const updateArtworkCard = useArtworkModalStore((state) => state.updateCard);
 
@@ -60,6 +61,13 @@ export function ArtworkModal() {
       setIsGettingMore(false);
     }
   }
+
+  // Auto-fetch all prints when Shift-clicked
+  useEffect(() => {
+    if (isModalOpen && autoFetchPrints && modalCard) {
+      getMoreCards();
+    }
+  }, [isModalOpen, autoFetchPrints]);
 
   return (
     <Modal
