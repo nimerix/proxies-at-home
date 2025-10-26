@@ -62,7 +62,12 @@ export function ArtworkModal() {
   }
 
   return (
-    <Modal show={isModalOpen} onClose={() => closeArtworkModal()} size="4xl">
+    <Modal
+      show={isModalOpen}
+      onClose={() => closeArtworkModal()}
+      size="4xl"
+      dismissible
+    >
       <ModalHeader>Select Artwork</ModalHeader>
       <ModalBody>
         <div className="mb-4">
