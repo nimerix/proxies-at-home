@@ -1,6 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useArtworkModalStore, useSettingsStore } from "../store";
+import { useCardsStore } from "../store/cards";
 import type { CardOption } from "../types/Card";
 
 type SortableCardProps = {
@@ -36,6 +37,7 @@ export default function SortableCard({
     useSortable({ id: card.uuid });
 
   const openArtworkModal = useArtworkModalStore((state) => state.openModal);
+  const duplicateCardAt = useCardsStore((state) => state.duplicateCardAt);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -52,7 +54,12 @@ export default function SortableCard({
       className="bg-black relative group"
       style={style}
       onClick={(e) => {
-        openArtworkModal({ card, index: globalIndex, autoFetchPrints: e.shiftKey });
+        if (e.ctrlKey || e.metaKey) {
+          e.stopPropagation();
+          duplicateCardAt(globalIndex);
+        } else {
+          openArtworkModal({ card, index: globalIndex, autoFetchPrints: e.shiftKey });
+        }
       }}
     >
       <img

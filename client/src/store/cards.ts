@@ -44,6 +44,7 @@ type Store = {
   appendUploadedFiles: (newFiles: Record<string, File>) => void;
 
   removeCardAt: (pos: number) => void;
+  duplicateCardAt: (pos: number) => void;
   clearVolatileForCard: (uuid: string) => void;
 };
 
@@ -178,6 +179,74 @@ export const useCardsStore = create<Store>()(
             };
           }
           return { cards };
+        }),
+
+      duplicateCardAt: (pos) =>
+        set((state) => {
+          const cards = [...state.cards];
+          const cardToDuplicate = cards[pos];
+          if (!cardToDuplicate) return {};
+
+          const newUuid = crypto.randomUUID();
+          const duplicatedCard: CardOption = {
+            ...cardToDuplicate,
+            uuid: newUuid,
+          };
+
+          // Insert the duplicate right after the original
+          cards.splice(pos + 1, 0, duplicatedCard);
+
+          // Copy over all associated data with the new UUID
+          const oldUuid = cardToDuplicate.uuid;
+          const {
+            selectedImages,
+            originalSelectedImages,
+            uploadedImages,
+            uploadedOriginalImages,
+            uploadedFiles,
+            cachedImageUrls,
+          } = state;
+
+          const updates: any = { cards };
+
+          if (selectedImages[oldUuid]) {
+            updates.selectedImages = {
+              ...selectedImages,
+              [newUuid]: selectedImages[oldUuid],
+            };
+          }
+          if (originalSelectedImages[oldUuid]) {
+            updates.originalSelectedImages = {
+              ...originalSelectedImages,
+              [newUuid]: originalSelectedImages[oldUuid],
+            };
+          }
+          if (uploadedImages[oldUuid]) {
+            updates.uploadedImages = {
+              ...uploadedImages,
+              [newUuid]: uploadedImages[oldUuid],
+            };
+          }
+          if (uploadedOriginalImages[oldUuid]) {
+            updates.uploadedOriginalImages = {
+              ...uploadedOriginalImages,
+              [newUuid]: uploadedOriginalImages[oldUuid],
+            };
+          }
+          if (uploadedFiles[oldUuid]) {
+            updates.uploadedFiles = {
+              ...uploadedFiles,
+              [newUuid]: uploadedFiles[oldUuid],
+            };
+          }
+          if (cachedImageUrls[oldUuid]) {
+            updates.cachedImageUrls = {
+              ...cachedImageUrls,
+              [newUuid]: cachedImageUrls[oldUuid],
+            };
+          }
+
+          return updates;
         }),
 
       clearVolatileForCard: (uuid) =>

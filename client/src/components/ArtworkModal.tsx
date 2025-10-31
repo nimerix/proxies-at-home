@@ -161,8 +161,9 @@ export function ArtworkModal() {
                         ? "border-green-500"
                         : "border-transparent"
                       }`}
-                    onClick={async () => {
-                      if (applyToAll) {
+                    onClick={async (e) => {
+                      // Apply to all if checkbox is checked OR Shift is held
+                      if (applyToAll || e.shiftKey) {
                         const newOriginalSelectedImages: Record<
                           string,
                           string

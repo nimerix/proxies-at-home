@@ -734,10 +734,13 @@ export async function exportProxyPagesToPdf({
       }
     }
 
-    const pageImg = canvas.toDataURL("image/jpeg", 0.95);
+    // Adjust JPEG quality based on DPI to prevent string length errors
+    // Higher DPI needs lower quality to keep file size manageable
+    const jpegQuality = exportDpi >= 1200 ? 0.96 : exportDpi >= 900 ? 0.97 : 1.0;
+
+    const pageImg = canvas.toDataURL("image/jpeg", jpegQuality);
     if (pageIndex > 0) pdf.addPage();
     pdf.addImage(pageImg, "JPEG", 0, 0, pdfWidth, pdfHeight);
   }
-
   pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
