@@ -7,7 +7,10 @@ import {
 } from "@/helpers/CardInfoHelper";
 import {
   addBleedEdgeSmartly,
-  getLocalBleedImageUrl
+  computeCardPreviewPixels,
+  createPreviewDataUrl,
+  getLocalBleedImageUrl,
+  makeUploadedFileToken,
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -56,21 +59,34 @@ export function UploadSection() {
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
   );
+  const appendUploadedFiles = useCardsStore((state) => state.appendUploadedFiles);
+  const setUploadedFiles = useCardsStore((state) => state.setUploadedFiles);
 
   const globalLanguage = useCardsStore((s) => s.globalLanguage ?? "en");
   const setGlobalLanguage = useCardsStore((s) => s.setGlobalLanguage ?? (() => { }));
 
-  async function processToWithBleed(
-    srcBase64: string,
+  async function buildPreviewFromFile(
+    file: File,
     opts: { hasBakedBleed: boolean }
   ) {
-    const withBleedBase64 = await addBleedEdgeSmartly(srcBase64, bleedEdgeWidth, {
-      unit: "mm",
-      bleedEdgeWidth,
-      hasBakedBleed: opts.hasBakedBleed,
-    });
-
-    return { originalBase64: srcBase64, withBleedBase64 };
+    const tempUrl = URL.createObjectURL(file);
+    try {
+      const processed = await addBleedEdgeSmartly(tempUrl, bleedEdgeWidth, {
+        unit: "mm",
+        bleedEdgeWidth,
+        hasBakedBleed: opts.hasBakedBleed,
+      });
+      const { width, height } = computeCardPreviewPixels(bleedEdgeWidth);
+      return await createPreviewDataUrl(processed, {
+        maxWidth: width,
+        maxHeight: height,
+        mimeType: "image/jpeg",
+        quality: 0.82,
+        background: "#FFFFFF",
+      });
+    } finally {
+      URL.revokeObjectURL(tempUrl);
+    }
   }
 
   async function addUploadedFiles(
@@ -94,26 +110,18 @@ export function UploadSection() {
 
     const originalsUpdate: Record<string, string> = {};
     const processedUpdate: Record<string, string> = {};
+    const uploadedFilesUpdate: Record<string, File> = {};
 
     await Promise.all(
       fileArray.map(async (file, i) => {
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
-
-        const { originalBase64, withBleedBase64 } = await processToWithBleed(
-          base64,
-          opts
-        );
-
         const id = newCards[i].uuid;
-        originalsUpdate[id] = originalBase64;
-        processedUpdate[id] = withBleedBase64;
+        uploadedFilesUpdate[id] = file;
+        originalsUpdate[id] = makeUploadedFileToken(id);
+        processedUpdate[id] = await buildPreviewFromFile(file, opts);
       })
     );
 
+    appendUploadedFiles(uploadedFilesUpdate);
     appendOriginalSelectedImages(originalsUpdate);
     appendSelectedImages(processedUpdate);
   }
@@ -158,26 +166,20 @@ export function UploadSection() {
 
       const originalsUpdate: Record<string, string> = {};
       const processedUpdate: Record<string, string> = {};
+      const uploadedFilesUpdate: Record<string, File> = {};
 
       await Promise.all(
         fileArray.map(async (file, i) => {
-          const base64 = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.readAsDataURL(file);
-          });
-
-          const { originalBase64, withBleedBase64 } = await processToWithBleed(
-            base64,
-            { hasBakedBleed: false }
-          );
-
           const id = newCards[i].uuid;
-          originalsUpdate[id] = originalBase64;
-          processedUpdate[id] = withBleedBase64;
+          uploadedFilesUpdate[id] = file;
+          originalsUpdate[id] = makeUploadedFileToken(id);
+          processedUpdate[id] = await buildPreviewFromFile(file, {
+            hasBakedBleed: false,
+          });
         })
       );
 
+      appendUploadedFiles(uploadedFilesUpdate);
       appendOriginalSelectedImages(originalsUpdate);
       appendSelectedImages(processedUpdate);
     } finally {
@@ -311,6 +313,7 @@ export function UploadSection() {
       setLoadingTask(null);
 
       const processed: Record<string, string> = {};
+      const previewDims = computeCardPreviewPixels(bleedEdgeWidth);
       for (const [uuid, url] of Object.entries(newOriginals)) {
         try {
           const proxiedUrl = getLocalBleedImageUrl(url);
@@ -319,7 +322,13 @@ export function UploadSection() {
             bleedEdgeWidth,
             hasBakedBleed: false,
           });
-          processed[uuid] = bleedImage;
+          processed[uuid] = await createPreviewDataUrl(bleedImage, {
+            maxWidth: previewDims.width,
+            maxHeight: previewDims.height,
+            mimeType: "image/jpeg",
+            quality: 0.82,
+            background: "#FFFFFF",
+          });
         } catch (e) {
           console.warn(`[Bleed] Failed for ${uuid}:`, e);
         }
@@ -342,6 +351,7 @@ export function UploadSection() {
       setCards([]);
       setSelectedImages({});
       setOriginalSelectedImages({});
+      setUploadedFiles({});
 
       try {
         await axios.delete(`${API_BASE}/api/cards/images`, { timeout: 15000 });

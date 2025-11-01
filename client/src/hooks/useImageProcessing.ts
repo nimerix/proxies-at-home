@@ -1,7 +1,11 @@
 import { useRef, useState } from "react";
 import {
   addBleedEdgeSmartly,
+  computeCardPreviewPixels,
+  createPreviewDataUrl,
   getLocalBleedImageUrl,
+  isUploadedFileToken,
+  makeUploadedFileToken,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
 import { useCardsStore } from "../store";
@@ -18,6 +22,7 @@ export function useImageProcessing({
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
+  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
   const appendSelectedImages = useCardsStore(
     (state) => state.appendSelectedImages
   );
@@ -30,9 +35,14 @@ export function useImageProcessing({
   >({});
   const inFlight = useRef<Record<string, Promise<void>>>({});
 
-  function getOriginalSrcForCard(card: CardOption): string | undefined {
-    const o = originalSelectedImages[card.uuid];
-    if (o) return o;
+  function getOriginalSrcForCard(card: CardOption): string | File | undefined {
+    const stored = originalSelectedImages[card.uuid];
+    if (stored) {
+      if (isUploadedFileToken(stored)) {
+        return uploadedFiles[card.uuid];
+      }
+      return stored;
+    }
     if (card.imageUrls?.length) {
       return getLocalBleedImageUrl(card.imageUrls[0]);
     }
@@ -47,26 +57,52 @@ export function useImageProcessing({
     if (existing) return existing;
 
     const p = (async () => {
-      const src = getOriginalSrcForCard(card);
-      if (!src) return;
+      const source = getOriginalSrcForCard(card);
+      if (!source) return;
 
       setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
+      let revokeUrl: string | null = null;
       try {
-        const srcToProcess = /^data:image\//i.test(src) ? src : await urlToDataUrl(src);
-        const withBleed = await addBleedEdgeSmartly(srcToProcess, bleedEdgeWidth, {
+        let resolvedSrc: string;
+
+        if (source instanceof File) {
+          resolvedSrc = URL.createObjectURL(source);
+          revokeUrl = resolvedSrc;
+        } else if (/^(data:|blob:)/i.test(source)) {
+          resolvedSrc = source;
+        } else {
+          resolvedSrc = await urlToDataUrl(source);
+        }
+
+        const withBleed = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
           unit,
           bleedEdgeWidth,
           hasBakedBleed: card.hasBakedBleed,
         });
-        appendSelectedImages({ [uuid]: withBleed });
+        const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
+        const preview = await createPreviewDataUrl(withBleed, {
+          maxWidth: previewWidth,
+          maxHeight: previewHeight,
+          mimeType: "image/jpeg",
+          quality: 0.82,
+          background: "#FFFFFF",
+        });
+
+        appendSelectedImages({ [uuid]: preview });
+
         if (!originalSelectedImages[uuid]) {
-          appendOriginalSelectedImages({ [uuid]: src });
+          if (source instanceof File) {
+            appendOriginalSelectedImages({ [uuid]: makeUploadedFileToken(uuid) });
+          } else {
+            appendOriginalSelectedImages({ [uuid]: source });
+          }
         }
         setLoadingMap((m) => ({ ...m, [uuid]: "idle" }));
       } catch (e) {
         console.error("ensureProcessed error for", card.name, e);
         setLoadingMap((m) => ({ ...m, [uuid]: "error" }));
       } finally {
+        if (revokeUrl) URL.revokeObjectURL(revokeUrl);
         delete inFlight.current[uuid];
       }
     })();
@@ -80,28 +116,47 @@ export function useImageProcessing({
     newBleedWidth: number
   ) {
     const updated: Record<string, string> = {};
+    const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth);
     
     const promises = cards.map(async (card) => {
       const uuid = card.uuid;
       const original = originalSelectedImages[uuid];
       
       if (!original) return;
-      
-      if (card.isUserUpload) {
-        const srcToProcess = /^data:image\//i.test(original) ? original : await urlToDataUrl(original);
-        updated[uuid] = await addBleedEdgeSmartly(srcToProcess, newBleedWidth, {
+
+      let resolvedSrc: string | undefined;
+      let revokeUrl: string | null = null;
+
+      if (isUploadedFileToken(original)) {
+        const file = uploadedFiles[uuid];
+        if (!file) return;
+        resolvedSrc = URL.createObjectURL(file);
+        revokeUrl = resolvedSrc;
+      } else if (/^(data:|blob:)/i.test(original)) {
+        resolvedSrc = original;
+      } else if (card.isUserUpload) {
+        resolvedSrc = await urlToDataUrl(original);
+      } else {
+        resolvedSrc = getLocalBleedImageUrl(original);
+      }
+
+      if (!resolvedSrc) return;
+
+      try {
+        const processed = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
           unit,
           bleedEdgeWidth: newBleedWidth,
           hasBakedBleed: card.hasBakedBleed,
         });
-      } else {
-        // Scryfall Image -> proxy the URL and add bleed
-        const proxiedUrl = getLocalBleedImageUrl(original);
-        updated[uuid] = await addBleedEdgeSmartly(proxiedUrl, newBleedWidth, {
-          unit,
-          bleedEdgeWidth: newBleedWidth,
-          hasBakedBleed: false,
+        updated[uuid] = await createPreviewDataUrl(processed, {
+          maxWidth: previewWidth,
+          maxHeight: previewHeight,
+          mimeType: "image/jpeg",
+          quality: 0.82,
+          background: "#FFFFFF",
         });
+      } finally {
+        if (revokeUrl) URL.revokeObjectURL(revokeUrl);
       }
     });
 

@@ -3,7 +3,14 @@ import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import { saveAs } from "file-saver";
 import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
-import { createDpiHelpers, getPatchNearCorner, guessBucketDpiFromHeight, DPMM, canvasToBlob } from "./ImageHelper";
+import {
+  createDpiHelpers,
+  getPatchNearCorner,
+  guessBucketDpiFromHeight,
+  DPMM,
+  canvasToBlob,
+  isUploadedFileToken,
+} from "./ImageHelper";
 
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
@@ -751,6 +758,7 @@ export async function exportProxyPagesToPdf({
   cards,
   originalSelectedImages,
   cachedImageUrls,
+  uploadedFiles,
   bleedEdge,
   bleedEdgeWidthMm,
   guideColor,
@@ -770,6 +778,7 @@ export async function exportProxyPagesToPdf({
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
   cachedImageUrls?: Record<string, string>;
+  uploadedFiles?: Record<string, File>;
   bleedEdge: boolean;
   bleedEdgeWidthMm: number;
   guideColor: string;
@@ -843,30 +852,49 @@ export async function exportProxyPagesToPdf({
         card.imageUrls?.[0] ||
         "";
 
+      let uploadedUrlToRevoke: string | null = null;
+
+      if (isUploadedFileToken(src)) {
+        const file = uploadedFiles?.[card.uuid];
+        if (!file) {
+          console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
+          continue;
+        }
+        const objectUrl = URL.createObjectURL(file);
+        uploadedUrlToRevoke = objectUrl;
+        src = objectUrl;
+      }
+
       if (!card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
         src = getLocalBleedImageUrl(preferPng(src));
       }
 
-      const cardCanvas = await buildCardWithBleed(
-        src,
-        bleedEdge ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
-        {
-          isUserUpload: !!card.isUserUpload,
-          hasBakedBleed: !!card.hasBakedBleed,
-        },
-        exportDpi
-      );
+      try {
+        const cardCanvas = await buildCardWithBleed(
+          src,
+          bleedEdge ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
+          {
+            isUserUpload: !!card.isUserUpload,
+            hasBakedBleed: !!card.hasBakedBleed,
+          },
+          exportDpi
+        );
 
-      const blob = await canvasToBlob(cardCanvas, "image/jpeg", jpegQuality);
-      const cardBytes = await blob.arrayBuffer();
-      const cardImage = await pdfDoc.embedJpg(cardBytes);
+        const blob = await canvasToBlob(cardCanvas, "image/jpeg", jpegQuality);
+        const cardBytes = await blob.arrayBuffer();
+        const cardImage = await pdfDoc.embedJpg(cardBytes);
 
-      page.drawImage(cardImage, {
-        x: mmToPt(cardXmm),
-        y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
-        width: mmToPt(cardWidthMm),
-        height: mmToPt(cardHeightMm),
-      });
+        page.drawImage(cardImage, {
+          x: mmToPt(cardXmm),
+          y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
+          width: mmToPt(cardWidthMm),
+          height: mmToPt(cardHeightMm),
+        });
+      } finally {
+        if (uploadedUrlToRevoke) {
+          URL.revokeObjectURL(uploadedUrlToRevoke);
+        }
+      }
 
       if (bleedEdge && guideWidthMm > 0) {
         drawCornerGuidesPdf(page, {

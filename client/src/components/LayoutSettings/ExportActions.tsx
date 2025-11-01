@@ -14,6 +14,7 @@ export function ExportActions() {
     (state) => state.originalSelectedImages
   );
   const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls); // <-- NEW
+  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
 
   const pageOrientation = useSettingsStore((state) => state.pageOrientation);
   const pageSizePreset = useSettingsStore((state) => state.pageSizePreset);
@@ -51,6 +52,7 @@ export function ExportActions() {
         cards,
         originalSelectedImages,
         cachedImageUrls,
+  uploadedFiles,
         bleedEdge,
         bleedEdgeWidthMm: bleedEdgeWidth,
         guideColor,
@@ -86,6 +88,7 @@ export function ExportActions() {
           ExportImagesZip({
             cards,
             originalSelectedImages,
+            uploadedFiles,
             fileBaseName: "card_images",
             // If your zip helper later supports it, you can pass cachedImageUrls here too.
           })

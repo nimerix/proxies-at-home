@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import type { CardOption } from "../types/Card";
 import { API_BASE } from "@/constants";
+import { isUploadedFileToken } from "./ImageHelper";
 
 function sanitizeFilename(name: string): string {
   return (
@@ -34,6 +35,7 @@ type ExportOpts = {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
   cachedImageUrls?: Record<string, string>;   // <-- NEW
+  uploadedFiles?: Record<string, File>;
   fileBaseName?: string; // default: card_images_YYYY-MM-DD
   concurrency?: number;  // default: 6
 };
@@ -43,6 +45,7 @@ export async function ExportImagesZip(opts: ExportOpts) {
     cards,
     originalSelectedImages,
     cachedImageUrls,
+    uploadedFiles,
     fileBaseName,
     concurrency = 6,
   } = opts;
@@ -53,19 +56,34 @@ export async function ExportImagesZip(opts: ExportOpts) {
   // Build a work list that resolves the best URL for each card
   const tasks = cards.map((c, i) => {
     // Choose the best source (cached > originalSelected > first imageUrl)
-    let url =
+    const rawSource =
       (cachedImageUrls && cachedImageUrls[c.uuid]) ||
       originalSelectedImages[c.uuid] ||
       c.imageUrls?.[0] ||
       "";
 
-    if (!url) {
-      return async () => null; // empty slot
-    }
+    let source:
+      | { kind: "file"; file: File }
+      | { kind: "url"; url: string }
+      | null = null;
 
-    // If it’s not a user upload and not cached, run it through the proxy
-    if (!c.isUserUpload && !(cachedImageUrls && cachedImageUrls[c.uuid])) {
-      url = getLocalBleedImageUrl(preferPng(url));
+    if (isUploadedFileToken(rawSource)) {
+      const file = uploadedFiles?.[c.uuid];
+      if (!file) {
+        console.warn(`[Export skipped] Missing uploaded file for card ${c.name}`);
+        return async () => null;
+      }
+      source = { kind: "file", file };
+    } else {
+      let url = rawSource;
+      if (!url) {
+        return async () => null;
+      }
+
+      if (!c.isUserUpload && !(cachedImageUrls && cachedImageUrls[c.uuid])) {
+        url = getLocalBleedImageUrl(preferPng(url));
+      }
+      source = { kind: "url", url };
     }
 
     const baseName = sanitizeFilename(c.name || `Card ${i + 1}`);
@@ -73,12 +91,19 @@ export async function ExportImagesZip(opts: ExportOpts) {
 
     return async () => {
       try {
-        const res = await fetch(url, { mode: "cors", credentials: "omit" });
-        if (!res.ok) {
-          console.warn(`[Export skipped] Could not fetch: ${url}`);
+        let blob: Blob;
+        if (source?.kind === "file") {
+          blob = source.file;
+        } else if (source?.kind === "url") {
+          const res = await fetch(source.url, { mode: "cors", credentials: "omit" });
+          if (!res.ok) {
+            console.warn(`[Export skipped] Could not fetch: ${source.url}`);
+            return null;
+          }
+          blob = await res.blob();
+        } else {
           return null;
         }
-        const blob = await res.blob();
 
         // de-dupe filenames per printed order
         const count = (usedNames.get(baseName) ?? 0) + 1;
@@ -87,15 +112,20 @@ export async function ExportImagesZip(opts: ExportOpts) {
 
         // Try to keep the right extension if we know it; default to .png
         const ext =
-          blob.type === "image/jpeg" ? "jpg" :
-            blob.type === "image/webp" ? "webp" :
-              "png";
+          blob.type === "image/jpeg"
+            ? "jpg"
+            : blob.type === "image/webp"
+              ? "webp"
+              : blob.type === "image/png"
+                ? "png"
+                : "png";
 
         const filename = `${idx} - ${baseName}${suffix}.${ext}`;
         zip.file(filename, blob);
         return true;
       } catch (err) {
-        console.warn(`[Export skipped] Error fetching ${url}`, err);
+        const descriptor = source?.kind === "url" ? source.url : "uploaded file";
+        console.warn(`[Export skipped] Error fetching ${descriptor}`, err);
         return null;
       }
     };

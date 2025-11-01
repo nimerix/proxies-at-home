@@ -1,11 +1,110 @@
-import { API_BASE, 
-  DPI_MM_RECIP, 
-  pixelDPIMap} from "../constants";
+import {
+  API_BASE,
+  CARD_H_MM,
+  CARD_W_MM,
+  DPI_MM_RECIP,
+  pixelDPIMap,
+} from "../constants";
 
 const DPI = 300;
 const IN = (inches: number) => Math.round(inches * DPI);
 
 export const DPMM = (dpi: number) => dpi * DPI_MM_RECIP;
+
+const UPLOADED_FILE_TOKEN_PREFIX = "uploaded-file://" as const;
+
+export type UploadedFileToken = `${typeof UPLOADED_FILE_TOKEN_PREFIX}${string}`;
+
+export const PREVIEW_CARD_DPI = 200;
+
+export const makeUploadedFileToken = (uuid: string): UploadedFileToken =>
+  `${UPLOADED_FILE_TOKEN_PREFIX}${uuid}`;
+
+export const isUploadedFileToken = (
+  value?: string | null
+): value is UploadedFileToken =>
+  typeof value === "string" && value.startsWith(UPLOADED_FILE_TOKEN_PREFIX);
+
+type PreviewOptions = {
+  maxWidth: number;
+  maxHeight: number;
+  mimeType?: string;
+  quality?: number;
+  background?: string | null;
+};
+
+export function computeCardPreviewPixels(
+  bleedEdgeWidthMm: number,
+  dpi: number = PREVIEW_CARD_DPI
+) {
+  const pxPerMm = DPMM(dpi);
+  const widthMm = CARD_W_MM + bleedEdgeWidthMm * 2;
+  const heightMm = CARD_H_MM + bleedEdgeWidthMm * 2;
+  return {
+    width: Math.max(1, Math.round(widthMm * pxPerMm)),
+    height: Math.max(1, Math.round(heightMm * pxPerMm)),
+  };
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    // Only set crossOrigin for remote URLs to avoid tainting canvas
+    if (/^https?:/i.test(src)) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    img.src = src;
+  });
+}
+
+async function blobToDataUrl(blob: Blob) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function createPreviewDataUrl(
+  src: string,
+  { maxWidth, maxHeight, mimeType = "image/jpeg", quality = 0.82, background = "#FFFFFF" }: PreviewOptions
+) {
+  try {
+    const img = await loadImageElement(src);
+    const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
+    const targetWidth = Math.max(1, Math.round(img.width * scale));
+    const targetHeight = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return src;
+
+    if (background) {
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
+    } else {
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    try {
+      return canvas.toDataURL(mimeType, quality);
+    } catch {
+      return canvas.toDataURL();
+    }
+  } catch (err) {
+    console.warn("createPreviewDataUrl failed, returning original src", err);
+    return src;
+  }
+}
 
 export function guessBucketDpiFromHeight(h: number) {
   const epsilonMM = 0.1;
@@ -27,7 +126,7 @@ export const createDpiHelpers = (dpi: number) => ({
 
 export function toProxied(url: string) {
   if (!url) return url;
-  if (url.startsWith("data:")) return url;
+  if (url.startsWith("data:") || url.startsWith("blob:") || isUploadedFileToken(url)) return url;
   const prefix = `${API_BASE}/api/cards/images/proxy?url=`;
   if (url.startsWith(prefix)) return url;
   return `${prefix}${encodeURIComponent(url)}`;
@@ -42,6 +141,15 @@ export function getLocalBleedImageUrl(originalUrl: string): string {
 }
 
 export async function urlToDataUrl(url: string): Promise<string> {
+  if (isUploadedFileToken(url)) {
+    throw new Error("Uploaded file tokens must be resolved to File objects before conversion");
+  }
+  if (url.startsWith("blob:")) {
+    const blobResp = await fetch(url);
+    if (!blobResp.ok) throw new Error(`Failed to fetch blob image: ${blobResp.status}`);
+    const blob = await blobResp.blob();
+    return blobToDataUrl(blob);
+  }
   const resp = await fetch(toProxied(url));
   if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status}`);
   const blob = await resp.blob();
@@ -89,7 +197,7 @@ export function trimBleedEdge(src: string): Promise<string> {
     const img = new Image();
     const canvas = document.createElement("canvas");
 
-    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 10000);
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 50000);
     if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 
     img.onload = async () => {
@@ -236,7 +344,7 @@ export async function addBleedEdgeSmartly(
 async function smartTrimToDesiredBleed(src: string, desiredBleedMm: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 10000);
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 50000);
     if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 
     img.onload = async () => {
@@ -323,7 +431,7 @@ export async function addBleedEdge(
     const img = new Image();
     const temp = document.createElement("canvas");
 
-    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 15000);
+    const timeoutId = setTimeout(() => reject(new Error("Image processing timeout")), 150000);
 
     if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
 

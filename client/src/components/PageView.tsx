@@ -17,7 +17,11 @@ import fullLogo from "../assets/fullLogo.png";
 import CardCellLazy from "../components/CardCellLazy";
 import EdgeCutLines from "../components/FullPageGuides";
 import SortableCard from "../components/SortableCard";
-import { getBleedInPixels } from "../helpers/ImageHelper";
+import {
+  getBleedInPixels,
+  isUploadedFileToken,
+  makeUploadedFileToken,
+} from "../helpers/ImageHelper";
 import { useImageProcessing } from "../hooks/useImageProcessing";
 import {
   useArtworkModalStore,
@@ -59,6 +63,8 @@ export function PageView() {
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
   );
+  const appendUploadedFiles = useCardsStore((state) => state.appendUploadedFiles);
+  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
 
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
@@ -89,22 +95,37 @@ export function PageView() {
 
   function duplicateCard(index: number) {
     const cardToCopy = cards[index];
-    const newCard = { ...cardToCopy, uuid: crypto.randomUUID() };
+    if (!cardToCopy) return;
+
+    const newUuid = crypto.randomUUID();
+    const newCard = { ...cardToCopy, uuid: newUuid };
 
     const newCards = [...cards];
     newCards.splice(index + 1, 0, newCard);
     setCards(newCards);
 
     const original = originalSelectedImages[cardToCopy.uuid];
+    if (original) {
+      appendOriginalSelectedImages({
+        [newUuid]: isUploadedFileToken(original)
+          ? makeUploadedFileToken(newUuid)
+          : original,
+      });
+    }
+
     const processed = selectedImages[cardToCopy.uuid];
+    if (processed) {
+      appendSelectedImages({
+        [newUuid]: processed,
+      });
+    }
 
-    appendOriginalSelectedImages({
-      [newCard.uuid]: original,
-    });
-
-    appendSelectedImages({
-      [newCard.uuid]: processed,
-    });
+    if (original && isUploadedFileToken(original)) {
+      const file = uploadedFiles[cardToCopy.uuid];
+      if (file) {
+        appendUploadedFiles({ [newUuid]: file });
+      }
+    }
   }
 
   function deleteCard(index: number) {

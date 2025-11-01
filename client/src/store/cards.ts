@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { isUploadedFileToken, makeUploadedFileToken } from "../helpers/ImageHelper";
 import type { CardOption } from "../types/Card";
 
 type Store = {
@@ -216,9 +217,12 @@ export const useCardsStore = create<Store>()(
             };
           }
           if (originalSelectedImages[oldUuid]) {
+            const originalValue = originalSelectedImages[oldUuid];
             updates.originalSelectedImages = {
               ...originalSelectedImages,
-              [newUuid]: originalSelectedImages[oldUuid],
+              [newUuid]: isUploadedFileToken(originalValue)
+                ? makeUploadedFileToken(newUuid)
+                : originalValue,
             };
           }
           if (uploadedImages[oldUuid]) {
