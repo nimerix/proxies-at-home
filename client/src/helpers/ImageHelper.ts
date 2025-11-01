@@ -423,76 +423,31 @@ export async function addBleedEdge(
         const scaledUrl = await canvasToObjectUrl(temp, "image/png");
         const scaledImg = new Image();
         scaledImg.onload = async () => {
-          // place core image
-          ctx.drawImage(scaledImg, bleed, bleed);
-
           if (isMostlyBlack) {
-            // sample a small slice for solid-ish edges
-            const slice = Math.max(8, Math.min(bleed, 64));
-            // L
-            ctx.drawImage(scaledImg, 0, 0, slice, targetCardHeight, 0, bleed, bleed, targetCardHeight);
-            // R
+            // Fill entire canvas with black
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, finalWidth, finalHeight);
+
+            // Clip the card image inward by 30px and draw it in the center
+            const insetPx = 30;
+            const clippedWidth = targetCardWidth - insetPx * 2;
+            const clippedHeight = targetCardHeight - insetPx * 2;
+
             ctx.drawImage(
               scaledImg,
-              targetCardWidth - slice,
-              0,
-              slice,
-              targetCardHeight,
-              targetCardWidth + bleed,
-              bleed,
-              bleed,
-              targetCardHeight
-            );
-            // T
-            ctx.drawImage(scaledImg, 0, 0, targetCardWidth, slice, bleed, 0, targetCardWidth, bleed);
-            // B
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - slice,
-              targetCardWidth,
-              slice,
-              bleed,
-              targetCardHeight + bleed,
-              targetCardWidth,
-              bleed
-            );
-            // corners
-            ctx.drawImage(scaledImg, 0, 0, slice, slice, 0, 0, bleed, bleed);
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - slice,
-              0,
-              slice,
-              slice,
-              targetCardWidth + bleed,
-              0,
-              bleed,
-              bleed
-            );
-            ctx.drawImage(
-              scaledImg,
-              0,
-              targetCardHeight - slice,
-              slice,
-              slice,
-              0,
-              targetCardHeight + bleed,
-              bleed,
-              bleed
-            );
-            ctx.drawImage(
-              scaledImg,
-              targetCardWidth - slice,
-              targetCardHeight - slice,
-              slice,
-              slice,
-              targetCardWidth + bleed,
-              targetCardHeight + bleed,
-              bleed,
-              bleed
+              insetPx,
+              insetPx,
+              clippedWidth,
+              clippedHeight,
+              bleed + insetPx,
+              bleed + insetPx,
+              clippedWidth,
+              clippedHeight
             );
           } else {
+            // place core image
+            ctx.drawImage(scaledImg, bleed, bleed);
+
             // mirrored edges
             ctx.save(); ctx.scale(-1, 1);
             ctx.drawImage(scaledImg, 0, 0, bleed, targetCardHeight, -bleed, bleed, bleed, targetCardHeight);
