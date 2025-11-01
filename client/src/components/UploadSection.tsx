@@ -263,7 +263,7 @@ export function UploadSection() {
             cardArt: "art",
             language: globalLanguage,
           },
-          { timeout: 20000 }
+          { timeout: 80000 }
         );
       } catch (e: any) {
         console.error("[FetchCards] POST failed:", e);

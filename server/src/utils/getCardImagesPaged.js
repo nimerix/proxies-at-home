@@ -1,11 +1,20 @@
 const axios = require("axios");
+const { queryLocalDbForPngs } = require("./localScryfallDb");
 
 const SCRYFALL_API = "https://api.scryfall.com/cards/search";
+
+// Use local database instead of API calls
+// Set via environment variable: USE_LOCAL_DB=true
+const USE_LOCAL_DB = process.env.USE_LOCAL_DB === "true";
 
 // Optional: a polite UA helps if you get rate-limited
 const AX = axios.create({
   headers: { "User-Agent": "Proxxied/1.0 (contact: your-email@example.com)" },
 });
+
+if (USE_LOCAL_DB) {
+  console.log("[Scryfall] Using local database instead of API");
+}
 
 /**
  * Core: given a CardInfo { name, set?, number?, language? }, return PNG urls.
@@ -67,6 +76,17 @@ function escapeColon(s) {
 
 /** Run a Scryfall search and collect PNGs (handles DFC). Paginates. */
 async function fetchPngsByQuery(query) {
+  // Use local database if enabled
+  if (USE_LOCAL_DB) {
+    try {
+      return await queryLocalDbForPngs(query);
+    } catch (err) {
+      console.warn("[LocalDB] Query failed, falling back to API:", query, err?.message);
+      // Fall through to API call
+    }
+  }
+
+  // Use Scryfall API
   const encodedUrl = `${SCRYFALL_API}?q=${encodeURIComponent(query)}`;
   const pngs = [];
   let next = encodedUrl;
