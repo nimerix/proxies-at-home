@@ -6,7 +6,9 @@ import {
   getLocalBleedImageUrl,
   isUploadedFileToken,
   makeUploadedFileToken,
+  processWithConcurrency,
   revokeIfBlobUrl,
+  resolveImageProcessingConcurrency,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
 import { useCardsStore } from "../store";
@@ -123,8 +125,11 @@ export function useImageProcessing({
   ) {
     const updated: Record<string, string> = {};
     const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth);
-    
-    const promises = cards.map(async (card) => {
+    const concurrency = resolveImageProcessingConcurrency();
+
+    await processWithConcurrency(
+      cards,
+      async (card) => {
       const uuid = card.uuid;
       const original = originalSelectedImages[uuid];
       
@@ -149,26 +154,28 @@ export function useImageProcessing({
       if (!resolvedSrc) return;
 
       let processedUrl: string | null = null;
-      try {
-        processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
-          unit,
-          bleedEdgeWidth: newBleedWidth,
-          hasBakedBleed: card.hasBakedBleed,
-        });
-        updated[uuid] = await createPreviewDataUrl(processedUrl, {
-          maxWidth: previewWidth,
-          maxHeight: previewHeight,
-          mimeType: "image/jpeg",
-          quality: 0.82,
-          background: "#FFFFFF",
-        });
-      } finally {
-        revokeIfBlobUrl(processedUrl);
-        if (revokeUrl) URL.revokeObjectURL(revokeUrl);
-      }
-    });
-
-    await Promise.allSettled(promises);
+        try {
+          processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
+            unit,
+            bleedEdgeWidth: newBleedWidth,
+            hasBakedBleed: card.hasBakedBleed,
+          });
+          updated[uuid] = await createPreviewDataUrl(processedUrl, {
+            maxWidth: previewWidth,
+            maxHeight: previewHeight,
+            mimeType: "image/jpeg",
+            quality: 0.82,
+            background: "#FFFFFF",
+          });
+        } catch (err) {
+          console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
+        } finally {
+          revokeIfBlobUrl(processedUrl);
+          if (revokeUrl) URL.revokeObjectURL(revokeUrl);
+        }
+      },
+      concurrency
+    );
     
     if (Object.keys(updated).length > 0) {
       appendSelectedImages(updated);

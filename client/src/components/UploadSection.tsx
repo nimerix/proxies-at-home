@@ -10,8 +10,10 @@ import {
   computeCardPreviewPixels,
   createPreviewDataUrl,
   getLocalBleedImageUrl,
+  processWithConcurrency,
   makeUploadedFileToken,
   revokeIfBlobUrl,
+  resolveImageProcessingConcurrency,
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -40,40 +42,6 @@ async function readText(file: File): Promise<string> {
     r.onloadend = () => resolve(String(r.result || ""));
     r.readAsText(file);
   });
-}
-
-function resolvePreviewConcurrency() {
-  if (typeof navigator !== "undefined" && typeof navigator.hardwareConcurrency === "number") {
-    const halved = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
-    return Math.min(4, halved);
-  }
-  return 2;
-}
-
-async function processWithConcurrency<T>(
-  items: T[],
-  limit: number,
-  worker: (item: T, index: number) => Promise<void>
-) {
-  if (!items.length) return;
-  const maxWorkers = Math.max(1, limit);
-  let nextIndex = 0;
-
-  const createRunner = async () => {
-    while (true) {
-      const current = nextIndex++;
-      if (current >= items.length) return;
-      await worker(items[current], current);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-  };
-
-  const runners = Array.from(
-    { length: Math.min(maxWorkers, items.length) },
-    () => createRunner()
-  );
-
-  await Promise.all(runners);
 }
 
 export function UploadSection() {
@@ -149,13 +117,17 @@ export function UploadSection() {
     const processedUpdate: Record<string, string> = {};
     const uploadedFilesUpdate: Record<string, File> = {};
 
-    const concurrency = resolvePreviewConcurrency();
-    await processWithConcurrency(fileArray, concurrency, async (file, i) => {
-      const id = newCards[i].uuid;
-      uploadedFilesUpdate[id] = file;
-      originalsUpdate[id] = makeUploadedFileToken(id);
-      processedUpdate[id] = await buildPreviewFromFile(file, opts);
-    });
+    const concurrency = resolveImageProcessingConcurrency();
+    await processWithConcurrency(
+      fileArray,
+      async (file: File, i: number) => {
+        const id = newCards[i].uuid;
+        uploadedFilesUpdate[id] = file;
+        originalsUpdate[id] = makeUploadedFileToken(id);
+        processedUpdate[id] = await buildPreviewFromFile(file, opts);
+      },
+      concurrency
+    );
 
     appendUploadedFiles(uploadedFilesUpdate);
     appendOriginalSelectedImages(originalsUpdate);
@@ -204,15 +176,19 @@ export function UploadSection() {
       const processedUpdate: Record<string, string> = {};
       const uploadedFilesUpdate: Record<string, File> = {};
 
-      const concurrency = resolvePreviewConcurrency();
-      await processWithConcurrency(fileArray, concurrency, async (file, i) => {
-        const id = newCards[i].uuid;
-        uploadedFilesUpdate[id] = file;
-        originalsUpdate[id] = makeUploadedFileToken(id);
-        processedUpdate[id] = await buildPreviewFromFile(file, {
-          hasBakedBleed: false,
-        });
-      });
+      const concurrency = resolveImageProcessingConcurrency();
+      await processWithConcurrency(
+        fileArray,
+        async (file: File, i: number) => {
+          const id = newCards[i].uuid;
+          uploadedFilesUpdate[id] = file;
+          originalsUpdate[id] = makeUploadedFileToken(id);
+          processedUpdate[id] = await buildPreviewFromFile(file, {
+            hasBakedBleed: false,
+          });
+        },
+        concurrency
+      );
 
       appendUploadedFiles(uploadedFilesUpdate);
       appendOriginalSelectedImages(originalsUpdate);

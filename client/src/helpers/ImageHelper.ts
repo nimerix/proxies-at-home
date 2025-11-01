@@ -68,6 +68,44 @@ async function blobToDataUrl(blob: Blob) {
   });
 }
 
+const HARD_MAX_CONCURRENCY = 4;
+
+export function resolveImageProcessingConcurrency(maxOverride?: number) {
+  if (typeof maxOverride === "number" && maxOverride > 0) {
+    return Math.max(1, Math.min(HARD_MAX_CONCURRENCY, Math.floor(maxOverride)));
+  }
+  if (
+    typeof navigator !== "undefined" &&
+    typeof navigator.hardwareConcurrency === "number"
+  ) {
+    const halved = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
+    return Math.min(HARD_MAX_CONCURRENCY, halved);
+  }
+  return 2;
+}
+
+export async function processWithConcurrency<T>(
+  items: readonly T[],
+  worker: (item: T, index: number) => Promise<void>,
+  limit?: number
+) {
+  if (!items.length) return;
+  const maxWorkers = Math.max(1, limit ?? resolveImageProcessingConcurrency());
+  let nextIndex = 0;
+
+  const run = async () => {
+    while (true) {
+      const current = nextIndex++;
+      if (current >= items.length) return;
+      await worker(items[current], current);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  };
+
+  const runners = Array.from({ length: Math.min(maxWorkers, items.length) }, run);
+  await Promise.all(runners);
+}
+
 export function revokeIfBlobUrl(value?: string | null) {
   if (!value || !value.startsWith("blob:")) return;
   try {
