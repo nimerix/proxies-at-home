@@ -6,6 +6,7 @@ import {
   getLocalBleedImageUrl,
   isUploadedFileToken,
   makeUploadedFileToken,
+  revokeIfBlobUrl,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
 import { useCardsStore } from "../store";
@@ -74,21 +75,26 @@ export function useImageProcessing({
           resolvedSrc = await urlToDataUrl(source);
         }
 
-        const withBleed = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
-          unit,
-          bleedEdgeWidth,
-          hasBakedBleed: card.hasBakedBleed,
-        });
-        const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
-        const preview = await createPreviewDataUrl(withBleed, {
-          maxWidth: previewWidth,
-          maxHeight: previewHeight,
-          mimeType: "image/jpeg",
-          quality: 0.82,
-          background: "#FFFFFF",
-        });
+        let processedUrl: string | null = null;
+        try {
+          processedUrl = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
+            unit,
+            bleedEdgeWidth,
+            hasBakedBleed: card.hasBakedBleed,
+          });
+          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
+          const preview = await createPreviewDataUrl(processedUrl, {
+            maxWidth: previewWidth,
+            maxHeight: previewHeight,
+            mimeType: "image/jpeg",
+            quality: 0.82,
+            background: "#FFFFFF",
+          });
 
-        appendSelectedImages({ [uuid]: preview });
+          appendSelectedImages({ [uuid]: preview });
+        } finally {
+          revokeIfBlobUrl(processedUrl);
+        }
 
         if (!originalSelectedImages[uuid]) {
           if (source instanceof File) {
@@ -142,13 +148,14 @@ export function useImageProcessing({
 
       if (!resolvedSrc) return;
 
+      let processedUrl: string | null = null;
       try {
-        const processed = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
+        processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
           unit,
           bleedEdgeWidth: newBleedWidth,
           hasBakedBleed: card.hasBakedBleed,
         });
-        updated[uuid] = await createPreviewDataUrl(processed, {
+        updated[uuid] = await createPreviewDataUrl(processedUrl, {
           maxWidth: previewWidth,
           maxHeight: previewHeight,
           mimeType: "image/jpeg",
@@ -156,6 +163,7 @@ export function useImageProcessing({
           background: "#FFFFFF",
         });
       } finally {
+        revokeIfBlobUrl(processedUrl);
         if (revokeUrl) URL.revokeObjectURL(revokeUrl);
       }
     });

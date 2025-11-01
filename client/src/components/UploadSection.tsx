@@ -11,6 +11,7 @@ import {
   createPreviewDataUrl,
   getLocalBleedImageUrl,
   makeUploadedFileToken,
+  revokeIfBlobUrl,
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -39,6 +40,40 @@ async function readText(file: File): Promise<string> {
     r.onloadend = () => resolve(String(r.result || ""));
     r.readAsText(file);
   });
+}
+
+function resolvePreviewConcurrency() {
+  if (typeof navigator !== "undefined" && typeof navigator.hardwareConcurrency === "number") {
+    const halved = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
+    return Math.min(4, halved);
+  }
+  return 2;
+}
+
+async function processWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>
+) {
+  if (!items.length) return;
+  const maxWorkers = Math.max(1, limit);
+  let nextIndex = 0;
+
+  const createRunner = async () => {
+    while (true) {
+      const current = nextIndex++;
+      if (current >= items.length) return;
+      await worker(items[current], current);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  };
+
+  const runners = Array.from(
+    { length: Math.min(maxWorkers, items.length) },
+    () => createRunner()
+  );
+
+  await Promise.all(runners);
 }
 
 export function UploadSection() {
@@ -70,14 +105,15 @@ export function UploadSection() {
     opts: { hasBakedBleed: boolean }
   ) {
     const tempUrl = URL.createObjectURL(file);
+    let processedUrl: string | null = null;
     try {
-      const processed = await addBleedEdgeSmartly(tempUrl, bleedEdgeWidth, {
+      processedUrl = await addBleedEdgeSmartly(tempUrl, bleedEdgeWidth, {
         unit: "mm",
         bleedEdgeWidth,
         hasBakedBleed: opts.hasBakedBleed,
       });
       const { width, height } = computeCardPreviewPixels(bleedEdgeWidth);
-      return await createPreviewDataUrl(processed, {
+      return await createPreviewDataUrl(processedUrl, {
         maxWidth: width,
         maxHeight: height,
         mimeType: "image/jpeg",
@@ -86,6 +122,7 @@ export function UploadSection() {
       });
     } finally {
       URL.revokeObjectURL(tempUrl);
+      revokeIfBlobUrl(processedUrl);
     }
   }
 
@@ -112,14 +149,13 @@ export function UploadSection() {
     const processedUpdate: Record<string, string> = {};
     const uploadedFilesUpdate: Record<string, File> = {};
 
-    await Promise.all(
-      fileArray.map(async (file, i) => {
-        const id = newCards[i].uuid;
-        uploadedFilesUpdate[id] = file;
-        originalsUpdate[id] = makeUploadedFileToken(id);
-        processedUpdate[id] = await buildPreviewFromFile(file, opts);
-      })
-    );
+    const concurrency = resolvePreviewConcurrency();
+    await processWithConcurrency(fileArray, concurrency, async (file, i) => {
+      const id = newCards[i].uuid;
+      uploadedFilesUpdate[id] = file;
+      originalsUpdate[id] = makeUploadedFileToken(id);
+      processedUpdate[id] = await buildPreviewFromFile(file, opts);
+    });
 
     appendUploadedFiles(uploadedFilesUpdate);
     appendOriginalSelectedImages(originalsUpdate);
@@ -168,16 +204,15 @@ export function UploadSection() {
       const processedUpdate: Record<string, string> = {};
       const uploadedFilesUpdate: Record<string, File> = {};
 
-      await Promise.all(
-        fileArray.map(async (file, i) => {
-          const id = newCards[i].uuid;
-          uploadedFilesUpdate[id] = file;
-          originalsUpdate[id] = makeUploadedFileToken(id);
-          processedUpdate[id] = await buildPreviewFromFile(file, {
-            hasBakedBleed: false,
-          });
-        })
-      );
+      const concurrency = resolvePreviewConcurrency();
+      await processWithConcurrency(fileArray, concurrency, async (file, i) => {
+        const id = newCards[i].uuid;
+        uploadedFilesUpdate[id] = file;
+        originalsUpdate[id] = makeUploadedFileToken(id);
+        processedUpdate[id] = await buildPreviewFromFile(file, {
+          hasBakedBleed: false,
+        });
+      });
 
       appendUploadedFiles(uploadedFilesUpdate);
       appendOriginalSelectedImages(originalsUpdate);
@@ -315,14 +350,15 @@ export function UploadSection() {
       const processed: Record<string, string> = {};
       const previewDims = computeCardPreviewPixels(bleedEdgeWidth);
       for (const [uuid, url] of Object.entries(newOriginals)) {
+        let bleedImageUrl: string | null = null;
         try {
           const proxiedUrl = getLocalBleedImageUrl(url);
-          const bleedImage = await addBleedEdgeSmartly(proxiedUrl, bleedEdgeWidth, {
+          bleedImageUrl = await addBleedEdgeSmartly(proxiedUrl, bleedEdgeWidth, {
             unit: "mm",
             bleedEdgeWidth,
             hasBakedBleed: false,
           });
-          processed[uuid] = await createPreviewDataUrl(bleedImage, {
+          processed[uuid] = await createPreviewDataUrl(bleedImageUrl, {
             maxWidth: previewDims.width,
             maxHeight: previewDims.height,
             mimeType: "image/jpeg",
@@ -331,6 +367,8 @@ export function UploadSection() {
           });
         } catch (e) {
           console.warn(`[Bleed] Failed for ${uuid}:`, e);
+        } finally {
+          revokeIfBlobUrl(bleedImageUrl);
         }
       }
       if (Object.keys(processed).length) appendSelectedImages(processed);

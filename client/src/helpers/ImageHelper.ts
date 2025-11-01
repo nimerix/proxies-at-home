@@ -68,6 +68,15 @@ async function blobToDataUrl(blob: Blob) {
   });
 }
 
+export function revokeIfBlobUrl(value?: string | null) {
+  if (!value || !value.startsWith("blob:")) return;
+  try {
+    URL.revokeObjectURL(value);
+  } catch {
+    /* noop */
+  }
+}
+
 export async function createPreviewDataUrl(
   src: string,
   { maxWidth, maxHeight, mimeType = "image/jpeg", quality = 0.82, background = "#FFFFFF" }: PreviewOptions
