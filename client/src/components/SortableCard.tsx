@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useArtworkModalStore, useSettingsStore } from "../store";
@@ -33,6 +34,10 @@ export default function SortableCard({
   const bleedEdge = useSettingsStore((state) => state.bleedEdge);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const guideColor = useSettingsStore((state) => state.guideColor);
+  const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
+  const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
+  const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
+
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: card.uuid });
 
@@ -45,6 +50,69 @@ export default function SortableCard({
     width: `${totalCardWidth}mm`,
     height: `${totalCardHeight}mm`,
   };
+
+  const cornerStyles = useMemo(() => {
+    const CORNER_RADIUS_MM = 2.5;
+    const dxdy = Math.abs(cornerGuideOffsetMm) / Math.SQRT2;
+    const validCornerPosition =
+      cornerGuideOffsetMm <= 0 &&
+      cornerGuideOffsetMm >= -(bleedEdgeWidth / Math.SQRT2 + guideWidth / 2);
+    const archRadius =
+      cornerGuideOffsetMm > 0
+        ? CORNER_RADIUS_MM + guideWidth
+        : CORNER_RADIUS_MM + guideWidth + Math.abs(cornerGuideOffsetMm);
+    const arcPos = bleedEdgeWidth + cornerGuideOffsetMm - guideWidth / 2;
+    const arcBorder = `${guideWidth}mm solid ${guideColor}`;
+    const arcBaseStyle = {
+      width: `${CORNER_RADIUS_MM - dxdy}mm`,
+      height: `${CORNER_RADIUS_MM - dxdy}mm`,
+      position: "absolute" as const,
+    };
+
+    return {
+      validCornerPosition,
+      arcLeftUpper: {
+        ...arcBaseStyle,
+        top: `${arcPos}mm`,
+        left: `${arcPos}mm`,
+        borderTop: arcBorder,
+        borderLeft: arcBorder,
+        borderTopLeftRadius: `${archRadius}mm`,
+        borderBottom: "none",
+        borderRight: "none",
+      },
+      arcRightLower: {
+        ...arcBaseStyle,
+        bottom: `${arcPos}mm`,
+        right: `${arcPos}mm`,
+        borderBottom: arcBorder,
+        borderRight: arcBorder,
+        borderBottomRightRadius: `${archRadius}mm`,
+        borderTop: "none",
+        borderLeft: "none",
+      },
+      arcLeftLower: {
+        ...arcBaseStyle,
+        bottom: `${arcPos}mm`,
+        left: `${arcPos}mm`,
+        borderBottom: arcBorder,
+        borderLeft: arcBorder,
+        borderBottomLeftRadius: `${archRadius}mm`,
+        borderTop: "none",
+        borderRight: "none",
+      },
+      arcRightUpper: {
+        ...arcBaseStyle,
+        top: `${arcPos}mm`,
+        right: `${arcPos}mm`,
+        borderTop: arcBorder,
+        borderRight: arcBorder,
+        borderTopRightRadius: `${archRadius}mm`,
+        borderBottom: "none",
+        borderLeft: "none",
+      },
+    };
+  }, [cornerGuideOffsetMm, bleedEdgeWidth, guideWidth, guideColor]);
 
   return (
     <div
@@ -84,8 +152,16 @@ export default function SortableCard({
       >
         ⠿
       </div>
-
-      {bleedEdge && (
+      
+      {bleedEdge && roundedCornerGuides && cornerStyles.validCornerPosition && (
+        <>
+          <div style={cornerStyles.arcLeftUpper} />
+          <div style={cornerStyles.arcRightUpper} />
+          <div style={cornerStyles.arcLeftLower} />
+          <div style={cornerStyles.arcRightLower} />
+        </>
+      )}
+      {bleedEdge && !roundedCornerGuides && (
         <>
           <div
             style={{
