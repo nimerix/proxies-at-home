@@ -58,7 +58,7 @@ export function pngToNormal(pngUrl: string) {
   }
 }
 
-async function canvasToBlob(
+export async function canvasToBlob(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   type = "image/png",
   quality?: number

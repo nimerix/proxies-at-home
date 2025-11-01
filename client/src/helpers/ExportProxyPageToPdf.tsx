@@ -1,10 +1,10 @@
 import { API_BASE, CARD_H_MM, CARD_W_MM, pixelDPIMap } from "@/constants";
 import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
-import jsPDF from "jspdf";
-import { createDpiHelpers, getPatchNearCorner, guessBucketDpiFromHeight, DPMM } from "./ImageHelper";
+import { saveAs } from "file-saver";
+import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
+import { createDpiHelpers, getPatchNearCorner, guessBucketDpiFromHeight, DPMM, canvasToBlob } from "./ImageHelper";
 
-const PDF_PAGE_COLOR = "#FFFFFF";
 const NEAR_BLACK = 16;
 const NEAR_WHITE = 239;
 
@@ -12,10 +12,6 @@ const NEAR_WHITE = 239;
 function getLocalBleedImageUrl(originalUrl: string) {
   return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
 }
-
-const JSPDF_SUPPORTED = new Set([
-  "letter", "legal", "tabloid", "a4", "a3", "a2", "a1",
-]);
 
 const ALPHA_EMPTY = 10; // treat <=10 alpha as transparent-ish
 
@@ -74,18 +70,6 @@ function detectFlatBorderColor(
   if (black / total >= 0.9) return "black";
   if (white / total >= 0.9) return "white";
   return null;
-}
-
-function resolveJsPdfFormat(opts: {
-  preset: LayoutPreset;
-  unit: "mm" | "in";
-  width: number;
-  height: number;
-}): string | [number, number] {
-  const { preset, unit, width, height } = opts;
-  if (JSPDF_SUPPORTED.has(preset.toLowerCase())) return preset.toLowerCase();
-  const toMm = (n: number) => (unit === "in" ? n * 25.4 : n);
-  return [toMm(width), toMm(height)];
 }
 
 function preferPng(url: string) {
@@ -186,56 +170,6 @@ function blackenAllNearBlackPixels(
     }
   }
   ctx.putImageData(imageData, 0, 0);
-}
-
-function drawEdgeStubs(
-  ctx: CanvasRenderingContext2D,
-  pageW: number,
-  pageH: number,
-  startX: number,
-  startY: number,
-  columns: number,
-  rows: number,
-  contentW: number,
-  contentH: number,
-  cardW: number,
-  cardH: number,
-  bleedPx: number,
-  guideWidthPx: number,
-  spacingPx = 0
-) {
-  const xCuts: number[] = [];
-  for (let c = 0; c < columns; c++) {
-    const cellLeft = startX + c * (cardW + spacingPx);
-    xCuts.push(cellLeft + bleedPx);
-    xCuts.push(cellLeft + bleedPx + contentW);
-  }
-
-  const yCuts: number[] = [];
-  for (let r = 0; r < rows; r++) {
-    const cellTop = startY + r * (cardH + spacingPx);
-    yCuts.push(cellTop + bleedPx);
-    yCuts.push(cellTop + bleedPx + contentH);
-  }
-
-  const topStubH = startY + bleedPx;
-  const botStubH = startY + bleedPx;
-  const leftStubW = startX + bleedPx;
-  const rightStubW = startX + bleedPx;
-
-  ctx.save();
-  ctx.fillStyle = "#000000";
-
-  for (const x of xCuts) {
-    ctx.fillRect(x, 0, guideWidthPx, topStubH);
-    ctx.fillRect(x, pageH - botStubH, guideWidthPx, botStubH);
-  }
-  for (const y of yCuts) {
-    ctx.fillRect(0, y, leftStubW, guideWidthPx);
-    ctx.fillRect(pageW - rightStubW, y, rightStubW, guideWidthPx);
-  }
-
-  ctx.restore();
 }
 
 async function smartTrimMpcBleed(
@@ -526,75 +460,291 @@ function scaleGuideWidthForDPI(
   return Math.round((screenPx / screenPPI) * targetDPI);
 }
 
-function drawCornerGuides(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  contentW: number,
-  contentH: number,
-  bleedPx: number,
-  guideColor: string,
-  guideWidthPx: number,
-  dpi: number,
-  useRoundedCorners: boolean = false,
-  cornerOffsetMm: number = 0
+const MM_PER_INCH = 25.4;
+const POINTS_PER_INCH = 72;
+
+const mmToPt = (mm: number) => (mm / MM_PER_INCH) * POINTS_PER_INCH;
+
+function toPdfPoint(pageHeightMm: number, point: { x: number; y: number }) {
+  return {
+    x: mmToPt(point.x),
+    y: mmToPt(pageHeightMm - point.y),
+  };
+}
+
+function drawRectTopLeft(
+  page: PDFPage,
+  pageHeightMm: number,
+  xMm: number,
+  yMm: number,
+  widthMm: number,
+  heightMm: number,
+  color: ReturnType<typeof rgb>
 ) {
-  const { MM_TO_PX } = createDpiHelpers(dpi);
-  const guideLenPx = MM_TO_PX(2);
-  const gx = x + bleedPx;
-  const gy = y + bleedPx;
+  if (widthMm <= 0 || heightMm <= 0) return;
+  const xPt = mmToPt(xMm);
+  const yPt = mmToPt(pageHeightMm - yMm - heightMm);
+  page.drawRectangle({
+    x: xPt,
+    y: yPt,
+    width: mmToPt(widthMm),
+    height: mmToPt(heightMm),
+    color,
+  });
+}
 
-  ctx.save();
+function parseHexColor(value: string) {
+  const normalized = value.trim().replace(/^#/, "");
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : normalized.padEnd(6, "0");
+  const parsed = Number.parseInt(expanded.slice(0, 6), 16);
+  if (Number.isNaN(parsed)) {
+    return rgb(0, 0, 0);
+  }
+  const r = (parsed >> 16) & 0xff;
+  const g = (parsed >> 8) & 0xff;
+  const b = parsed & 0xff;
+  return rgb(r / 255, g / 255, b / 255);
+}
 
-  if (useRoundedCorners) {
-    const cornerRadiusPx = MM_TO_PX(2.5);
-    const offsetPx = MM_TO_PX(cornerOffsetMm);
+function drawRoundedCornerGuide(
+  page: PDFPage,
+  pageHeightMm: number,
+  center: { x: number; y: number },
+  radiusMm: number,
+  startAngle: number,
+  endAngle: number,
+  color: ReturnType<typeof rgb>,
+  guideWidthMm: number
+) {
+  if (guideWidthMm <= 0 || radiusMm <= 0) return;
+  const segments = Math.max(8, Math.ceil(radiusMm * 3));
+  let prev = {
+    x: center.x + radiusMm * Math.cos(startAngle),
+    y: center.y + radiusMm * Math.sin(startAngle),
+  };
 
-    // Offset moves the arc center diagonally (inward for negative, outward for positive)
-    // For a corner arc, we need to move along the diagonal (45 degrees from the corner)
-    const diagonalOffset = offsetPx * Math.SQRT2; // offset along the 45° diagonal
+  for (let i = 1; i <= segments; i++) {
+    const theta = startAngle + ((endAngle - startAngle) * i) / segments;
+    const next = {
+      x: center.x + radiusMm * Math.cos(theta),
+      y: center.y + radiusMm * Math.sin(theta),
+    };
+    const startPt = toPdfPoint(pageHeightMm, prev);
+    const endPt = toPdfPoint(pageHeightMm, next);
+    page.drawLine({
+      start: startPt,
+      end: endPt,
+      thickness: mmToPt(guideWidthMm),
+      color,
+    });
+    prev = next;
+  }
+}
 
-    ctx.strokeStyle = guideColor;
-    ctx.lineWidth = guideWidthPx;
-    ctx.lineCap = "butt";
+function drawCornerGuidesPdf(
+  page: PDFPage,
+  options: {
+    xMm: number;
+    yMm: number;
+    contentWidthMm: number;
+    contentHeightMm: number;
+    bleedMm: number;
+    guideColor: ReturnType<typeof rgb>;
+    guideWidthMm: number;
+    pageHeightMm: number;
+    rounded: boolean;
+    cornerOffsetMm: number;
+  }
+) {
+  const {
+    xMm,
+    yMm,
+    contentWidthMm,
+    contentHeightMm,
+    bleedMm,
+    guideColor,
+    guideWidthMm,
+    pageHeightMm,
+    rounded,
+    cornerOffsetMm,
+  } = options;
 
-    // Top-Left corner - move center down-right for positive offset (outward)
-    ctx.beginPath();
-    ctx.arc(gx + cornerRadiusPx + diagonalOffset, gy + cornerRadiusPx + diagonalOffset, cornerRadiusPx, Math.PI, Math.PI * 1.5);
-    ctx.stroke();
+  if (guideWidthMm <= 0) return;
 
-    // Top-Right corner - move center down-left for positive offset (outward)
-    ctx.beginPath();
-    ctx.arc(gx + contentW - cornerRadiusPx - diagonalOffset, gy + cornerRadiusPx + diagonalOffset, cornerRadiusPx, Math.PI * 1.5, Math.PI * 2);
-    ctx.stroke();
+  const guideLenMm = 2;
+  const gx = xMm + bleedMm;
+  const gy = yMm + bleedMm;
 
-    // Bottom-Left corner - move center up-right for positive offset (outward)
-    ctx.beginPath();
-    ctx.arc(gx + cornerRadiusPx + diagonalOffset, gy + contentH - cornerRadiusPx - diagonalOffset, cornerRadiusPx, Math.PI * 0.5, Math.PI);
-    ctx.stroke();
-
-    // Bottom-Right corner - move center up-left for positive offset (outward)
-    ctx.beginPath();
-    ctx.arc(gx + contentW - cornerRadiusPx - diagonalOffset, gy + contentH - cornerRadiusPx - diagonalOffset, cornerRadiusPx, 0, Math.PI * 0.5);
-    ctx.stroke();
-  } else {
-    ctx.fillStyle = guideColor;
-
-    // TL
-    ctx.fillRect(gx, gy, guideWidthPx, guideLenPx);
-    ctx.fillRect(gx, gy, guideLenPx, guideWidthPx);
-    // TR
-    ctx.fillRect(gx + contentW, gy, guideWidthPx, guideLenPx);
-    ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy, guideLenPx, guideWidthPx);
-    // BL
-    ctx.fillRect(gx, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-    ctx.fillRect(gx, gy + contentH, guideLenPx, guideWidthPx);
-    // BR
-    ctx.fillRect(gx + contentW, gy + contentH - guideLenPx + guideWidthPx, guideWidthPx, guideLenPx);
-    ctx.fillRect(gx + contentW - guideLenPx + guideWidthPx, gy + contentH, guideLenPx, guideWidthPx);
+  if (!rounded) {
+    // Top-left
+    drawRectTopLeft(page, pageHeightMm, gx, gy, guideWidthMm, guideLenMm, guideColor);
+    drawRectTopLeft(page, pageHeightMm, gx, gy, guideLenMm, guideWidthMm, guideColor);
+    // Top-right
+    drawRectTopLeft(page, pageHeightMm, gx + contentWidthMm, gy, guideWidthMm, guideLenMm, guideColor);
+    drawRectTopLeft(
+      page,
+      pageHeightMm,
+      gx + contentWidthMm - guideLenMm + guideWidthMm,
+      gy,
+      guideLenMm,
+      guideWidthMm,
+      guideColor
+    );
+    // Bottom-left
+    drawRectTopLeft(
+      page,
+      pageHeightMm,
+      gx,
+      gy + contentHeightMm - guideLenMm + guideWidthMm,
+      guideWidthMm,
+      guideLenMm,
+      guideColor
+    );
+    drawRectTopLeft(page, pageHeightMm, gx, gy + contentHeightMm, guideLenMm, guideWidthMm, guideColor);
+    // Bottom-right
+    drawRectTopLeft(
+      page,
+      pageHeightMm,
+      gx + contentWidthMm,
+      gy + contentHeightMm - guideLenMm + guideWidthMm,
+      guideWidthMm,
+      guideLenMm,
+      guideColor
+    );
+    drawRectTopLeft(
+      page,
+      pageHeightMm,
+      gx + contentWidthMm - guideLenMm + guideWidthMm,
+      gy + contentHeightMm,
+      guideLenMm,
+      guideWidthMm,
+      guideColor
+    );
+    return;
   }
 
-  ctx.restore();
+  const cornerRadiusMm = 2.5;
+  const diagonalOffsetMm = cornerOffsetMm * Math.SQRT2;
+
+  const corners = [
+    {
+      center: {
+        x: gx + cornerRadiusMm + diagonalOffsetMm,
+        y: gy + cornerRadiusMm + diagonalOffsetMm,
+      },
+      start: Math.PI,
+      end: Math.PI * 1.5,
+    },
+    {
+      center: {
+        x: gx + contentWidthMm - cornerRadiusMm - diagonalOffsetMm,
+        y: gy + cornerRadiusMm + diagonalOffsetMm,
+      },
+      start: Math.PI * 1.5,
+      end: Math.PI * 2,
+    },
+    {
+      center: {
+        x: gx + cornerRadiusMm + diagonalOffsetMm,
+        y: gy + contentHeightMm - cornerRadiusMm - diagonalOffsetMm,
+      },
+      start: Math.PI * 0.5,
+      end: Math.PI,
+    },
+    {
+      center: {
+        x: gx + contentWidthMm - cornerRadiusMm - diagonalOffsetMm,
+        y: gy + contentHeightMm - cornerRadiusMm - diagonalOffsetMm,
+      },
+      start: 0,
+      end: Math.PI * 0.5,
+    },
+  ];
+
+  for (const { center, start, end } of corners) {
+    drawRoundedCornerGuide(page, pageHeightMm, center, cornerRadiusMm, start, end, guideColor, guideWidthMm);
+  }
+}
+
+function drawEdgeStubsPdf(
+  page: PDFPage,
+  options: {
+    pageWidthMm: number;
+    pageHeightMm: number;
+    startXmm: number;
+    startYmm: number;
+    columns: number;
+    rows: number;
+    contentWidthMm: number;
+    contentHeightMm: number;
+    cardWidthMm: number;
+    cardHeightMm: number;
+    bleedMm: number;
+    guideWidthMm: number;
+    spacingMm: number;
+  }
+) {
+  const {
+    pageWidthMm,
+    pageHeightMm,
+    startXmm,
+    startYmm,
+    columns,
+    rows,
+    contentWidthMm,
+    contentHeightMm,
+    cardWidthMm,
+    cardHeightMm,
+    bleedMm,
+    guideWidthMm,
+    spacingMm,
+  } = options;
+
+  if (guideWidthMm <= 0) return;
+
+  const xCuts: number[] = [];
+  for (let col = 0; col < columns; col++) {
+    const cellLeft = startXmm + col * (cardWidthMm + spacingMm);
+    xCuts.push(cellLeft + bleedMm);
+    xCuts.push(cellLeft + bleedMm + contentWidthMm);
+  }
+
+  const yCuts: number[] = [];
+  for (let row = 0; row < rows; row++) {
+    const cellTop = startYmm + row * (cardHeightMm + spacingMm);
+    yCuts.push(cellTop + bleedMm);
+    yCuts.push(cellTop + bleedMm + contentHeightMm);
+  }
+
+  const topStubMm = startYmm + bleedMm;
+  const bottomStubMm = startYmm + bleedMm;
+  const leftStubMm = startXmm + bleedMm;
+  const rightStubMm = startXmm + bleedMm;
+  const stubColor = rgb(0, 0, 0);
+
+  for (const xCut of xCuts) {
+    drawRectTopLeft(page, pageHeightMm, xCut, 0, guideWidthMm, topStubMm, stubColor);
+    drawRectTopLeft(page, pageHeightMm, xCut, pageHeightMm - bottomStubMm, guideWidthMm, bottomStubMm, stubColor);
+  }
+
+  for (const yCut of yCuts) {
+    drawRectTopLeft(page, pageHeightMm, 0, yCut, leftStubMm, guideWidthMm, stubColor);
+    drawRectTopLeft(
+      page,
+      pageHeightMm,
+      pageWidthMm - rightStubMm,
+      yCut,
+      rightStubMm,
+      guideWidthMm,
+      stubColor
+    );
+  }
 }
 
 export async function exportProxyPagesToPdf({
@@ -606,8 +756,8 @@ export async function exportProxyPagesToPdf({
   guideColor,
   guideWidthPx,
   pageSizeUnit,
-  pageOrientation,
-  pageSizePreset,
+  pageOrientation: _pageOrientation,
+  pageSizePreset: _pageSizePreset,
   pageWidth,
   pageHeight,
   columns,
@@ -638,63 +788,54 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
-  const { IN_TO_PX, MM_TO_PX } = createDpiHelpers(exportDpi);
+  const bleedMm = bleedEdge ? bleedEdgeWidthMm : 0;
+  const contentWidthMm = CARD_W_MM;
+  const contentHeightMm = CARD_H_MM;
+  const cardWidthMm = contentWidthMm + bleedMm * 2;
+  const cardHeightMm = contentHeightMm + bleedMm * 2;
+  const spacingMm = cardSpacingMm || 0;
 
-  const pageWidthPx = pageSizeUnit === "in" ? IN_TO_PX(pageWidth) : MM_TO_PX(pageWidth);
-  const pageHeightPx = pageSizeUnit === "in" ? IN_TO_PX(pageHeight) : MM_TO_PX(pageHeight);
+  const pageWidthMm = pageSizeUnit === "in" ? pageWidth * MM_PER_INCH : pageWidth;
+  const pageHeightMm = pageSizeUnit === "in" ? pageHeight * MM_PER_INCH : pageHeight;
 
-  const contentWidthInPx = MM_TO_PX(CARD_W_MM);
-  const contentHeightInPx = MM_TO_PX(CARD_H_MM);
-  const bleedPx = bleedEdge ? MM_TO_PX(bleedEdgeWidthMm) : 0;
-  const cardWidthPx = contentWidthInPx + 2 * bleedPx;
-  const cardHeightPx = contentHeightInPx + 2 * bleedPx;
-
-  const spacingPx = MM_TO_PX(cardSpacingMm || 0);
-
-  // Grid + centering
   const perPage = Math.max(1, columns * rows);
-  const gridWidthPx = columns * cardWidthPx + Math.max(0, columns - 1) * spacingPx;
-  const gridHeightPx = rows * cardHeightPx + Math.max(0, rows - 1) * spacingPx;
-  const startX = Math.round((pageWidthPx - gridWidthPx) / 2);
-  const startY = Math.round((pageHeightPx - gridHeightPx) / 2);
+  const gridWidthMm = columns * cardWidthMm + Math.max(0, columns - 1) * spacingMm;
+  const gridHeightMm = rows * cardHeightMm + Math.max(0, rows - 1) * spacingMm;
+  const startXmm = Math.max(0, (pageWidthMm - gridWidthMm) / 2);
+  const startYmm = Math.max(0, (pageHeightMm - gridHeightMm) / 2);
 
   const pages: CardOption[][] = [];
-  for (let i = 0; i < cards.length; i += perPage) pages.push(cards.slice(i, i + perPage));
+  for (let i = 0; i < cards.length; i += perPage) {
+    pages.push(cards.slice(i, i + perPage));
+  }
   if (pages.length === 0) pages.push([]);
 
-  const format = resolveJsPdfFormat({
-    preset: pageSizePreset,
-    unit: pageSizeUnit,
-    width: pageWidth,
-    height: pageHeight,
-  });
+  const guideWidthPxScaled = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
+  const guideWidthMm = guideWidthPxScaled > 0 ? guideWidthPxScaled / DPMM(exportDpi) : 0;
+  const guideColorRgb = parseHexColor(guideColor);
 
-  const pdf = new jsPDF({
-    orientation: pageOrientation,
-    unit: "mm",
-    format,
-    compress: true,
-  });
+  const jpegQuality = exportDpi >= 1200 ? 0.96 : exportDpi >= 900 ? 0.97 : 1.0;
+  const pageSize: [number, number] = [mmToPt(pageWidthMm), mmToPt(pageHeightMm)];
 
-  const pdfWidth = pageSizeUnit === "in" ? pageWidth * 25.4 : pageWidth;
-  const pdfHeight = pageSizeUnit === "in" ? pageHeight * 25.4 : pageHeight;
+  const pdfDoc = await PDFDocument.create();
 
-  for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-    const pageCards = pages[pageIndex];
-
-    const canvas = document.createElement("canvas");
-    canvas.width = pageWidthPx;
-    canvas.height = pageHeightPx;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = PDF_PAGE_COLOR;
-    ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
+  for (const pageCards of pages) {
+    const page = pdfDoc.addPage(pageSize);
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: pageSize[0],
+      height: pageSize[1],
+      color: rgb(1, 1, 1),
+    });
 
     for (let idx = 0; idx < pageCards.length; idx++) {
       const card = pageCards[idx];
       const col = idx % columns;
       const row = Math.floor(idx / columns);
-      const x = startX + col * (cardWidthPx + spacingPx); // NEW
-      const y = startY + row * (cardHeightPx + spacingPx);
+
+      const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
+      const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
 
       let src =
         (cachedImageUrls && cachedImageUrls[card.uuid]) ||
@@ -706,41 +847,64 @@ export async function exportProxyPagesToPdf({
         src = getLocalBleedImageUrl(preferPng(src));
       }
 
-      const cardCanvas = await buildCardWithBleed(src, bleedPx, {
-        isUserUpload: !!card.isUserUpload,
-        hasBakedBleed: !!card.hasBakedBleed,
-      }, exportDpi);
-      ctx.drawImage(cardCanvas, x, y);
+      const cardCanvas = await buildCardWithBleed(
+        src,
+        bleedEdge ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
+        {
+          isUserUpload: !!card.isUserUpload,
+          hasBakedBleed: !!card.hasBakedBleed,
+        },
+        exportDpi
+      );
 
-      if (bleedEdge) {
-        const scaledGuideWidth = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
-        drawCornerGuides(ctx, x, y, contentWidthInPx, contentHeightInPx, bleedPx, guideColor, scaledGuideWidth, exportDpi, roundedCornerGuides, cornerGuideOffsetMm);
-        drawEdgeStubs(
-          ctx,
-          pageWidthPx,
-          pageHeightPx,
-          startX,
-          startY,
-          columns,
-          rows,
-          contentWidthInPx,
-          contentHeightInPx,
-          cardWidthPx,
-          cardHeightPx,
-          bleedPx,
-          scaledGuideWidth,
-          spacingPx
-        );
+      const blob = await canvasToBlob(cardCanvas, "image/jpeg", jpegQuality);
+      const cardBytes = await blob.arrayBuffer();
+      const cardImage = await pdfDoc.embedJpg(cardBytes);
+
+      page.drawImage(cardImage, {
+        x: mmToPt(cardXmm),
+        y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
+        width: mmToPt(cardWidthMm),
+        height: mmToPt(cardHeightMm),
+      });
+
+      if (bleedEdge && guideWidthMm > 0) {
+        drawCornerGuidesPdf(page, {
+          xMm: cardXmm,
+          yMm: cardYmm,
+          contentWidthMm,
+          contentHeightMm,
+          bleedMm,
+          guideColor: guideColorRgb,
+          guideWidthMm,
+          pageHeightMm,
+          rounded: roundedCornerGuides,
+          cornerOffsetMm: cornerGuideOffsetMm,
+        });
       }
     }
 
-    // Adjust JPEG quality based on DPI to prevent string length errors
-    // Higher DPI needs lower quality to keep file size manageable
-    const jpegQuality = exportDpi >= 1200 ? 0.96 : exportDpi >= 900 ? 0.97 : 1.0;
-
-    const pageImg = canvas.toDataURL("image/jpeg", jpegQuality);
-    if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageImg, "JPEG", 0, 0, pdfWidth, pdfHeight);
+    if (bleedEdge && guideWidthMm > 0) {
+      drawEdgeStubsPdf(page, {
+        pageWidthMm,
+        pageHeightMm,
+        startXmm,
+        startYmm,
+        columns,
+        rows,
+        contentWidthMm,
+        contentHeightMm,
+        cardWidthMm,
+        cardHeightMm,
+        bleedMm,
+        guideWidthMm,
+        spacingMm,
+      });
+    }
   }
-  pdf.save(`proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
+  const pdfBuffer = Uint8Array.from(pdfBytes).buffer;
+  const blob = new Blob([pdfBuffer], { type: "application/pdf" });
+  saveAs(blob, `proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
