@@ -73,6 +73,7 @@ async function fetchPngsByQuery(query) {
 
   try {
     while (next) {
+      await new Promise(resolve => setTimeout(resolve, 100));
       const resp = await AX.get(next);
       const { data, has_more, next_page } = resp.data;
 
