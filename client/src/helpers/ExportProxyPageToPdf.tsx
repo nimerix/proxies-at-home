@@ -786,6 +786,7 @@ export async function exportProxyPagesToPdf({
   cornerGuideOffsetMm = 0,
   useBatching = false,
   pagesPerBatch = 20,
+  onProgress,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -808,8 +809,21 @@ export async function exportProxyPagesToPdf({
   cornerGuideOffsetMm?: number;
   useBatching?: boolean;
   pagesPerBatch?: number;
+  onProgress?: (progress: number) => void;
 }) {
   if (!cards.length) return;
+
+  onProgress?.(0);
+
+  const totalCardsCount = cards.length;
+  let processedCards = 0;
+
+  const reportProgress = () => {
+    if (!totalCardsCount) return;
+    const ratio = processedCards / totalCardsCount;
+    const percent = Math.min(99, Math.round(ratio * 100));
+    onProgress?.(percent);
+  };
 
   const bleedMm = useCornerGuides ? bleedEdgeWidthMm : 0;
   const contentWidthMm = CARD_W_MM;
@@ -876,6 +890,8 @@ export async function exportProxyPagesToPdf({
           const file = uploadedFiles?.[card.uuid];
           if (!file) {
             console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
+            processedCards += 1;
+            reportProgress();
             continue;
           }
           const objectUrl = URL.createObjectURL(file);
@@ -928,6 +944,9 @@ export async function exportProxyPagesToPdf({
             cornerOffsetMm: cornerGuideOffsetMm,
           });
         }
+
+        processedCards += 1;
+        reportProgress();
       }
 
       if (useCornerGuides && guideWidthMm > 0) {
@@ -963,4 +982,6 @@ export async function exportProxyPagesToPdf({
     const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
     saveAs(blob, `proxxies_${dateSlug}${fileSuffix}.pdf`);
   }
+
+  onProgress?.(100);
 }

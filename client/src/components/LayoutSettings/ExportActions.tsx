@@ -8,6 +8,7 @@ import { Button, Spinner } from "flowbite-react";
 
 export function ExportActions() {
   const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
+  const setLoadingProgress = useLoadingStore((state) => state.setLoadingProgress);
 
   const cards = useCardsStore((state) => state.cards);
   const originalSelectedImages = useCardsStore(
@@ -52,6 +53,7 @@ export function ExportActions() {
     if (isProcessing) return;
 
     setLoadingTask("Generating PDF");
+    setLoadingProgress(0);
     try {
       await exportProxyPagesToPdf({
         cards,
@@ -75,6 +77,7 @@ export function ExportActions() {
         cornerGuideOffsetMm,
         useBatching: useExportBatching,
         pagesPerBatch: exportBatchSize,
+        onProgress: (value) => setLoadingProgress(value),
       });
     } catch (err) {
       console.error("Export failed:", err);
