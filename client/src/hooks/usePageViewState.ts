@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, useCardsStore, useArtworkModalStore } from "../store";
 

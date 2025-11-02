@@ -29,8 +29,8 @@ export function guessBucketDpiFromHeight(h: number) {
 }
 
 export const createDpiHelpers = (dpi: number) => ({
-  IN: (inches: number) => Math.round(inches * dpi),
-  MM: (mm: number) => Math.round(mm * DPMM(dpi)),
+  IN_TO_PX: (inches: number) => Math.round(inches * dpi),
+  MM_TO_PX: (mm: number) => Math.round(mm * DPMM(dpi)),
 });
 
 export function getBleedInPixels(bleedEdgeWidth: number, unit: string): number {

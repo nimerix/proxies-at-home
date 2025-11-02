@@ -1,4 +1,5 @@
 import { API_BASE } from "../constants";
+import { ImageLoadError, NetworkError } from "../types/errors";
 
 const UPLOADED_FILE_TOKEN_PREFIX = "uploaded-file://" as const;
 
@@ -22,9 +23,11 @@ export function revokeIfBlobUrl(value?: string | null) {
 }
 
 export function toProxied(url: string) {
-  const encoded = encodeURIComponent(url);
-  const proxyUrl = `${API_BASE}/images/proxy?url=${encoded}`;
-  return proxyUrl;
+  if (!url) return url;
+  if (url.startsWith("data:") || url.startsWith("blob:") || isUploadedFileToken(url)) return url;
+  const prefix = `${API_BASE}/api/cards/images/proxy?url=`;
+  if (url.startsWith(prefix)) return url;
+  return `${prefix}${encodeURIComponent(url)}`;
 }
 
 export function getLocalBleedImageUrl(originalUrl: string): string {
@@ -33,12 +36,21 @@ export function getLocalBleedImageUrl(originalUrl: string): string {
 
 export async function urlToDataUrl(url: string): Promise<string> {
   const proxied = toProxied(url);
-  const response = await fetch(proxied);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.statusText}`);
+  try {
+    const response = await fetch(proxied);
+    if (!response.ok) {
+      throw new NetworkError(
+        `Failed to fetch image: ${response.statusText}`,
+        proxied,
+        response.status
+      );
+    }
+    const blob = await response.blob();
+    return await blobToDataUrl(blob);
+  } catch (error) {
+    if (error instanceof NetworkError) throw error;
+    throw new NetworkError(`Network error fetching image: ${(error as Error).message}`, proxied);
   }
-  const blob = await response.blob();
-  return await blobToDataUrl(blob);
 }
 
 export function pngToNormal(pngUrl: string) {
@@ -65,7 +77,36 @@ export function loadImageElement(src: string) {
       img.crossOrigin = "anonymous";
     }
     img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
+    img.onerror = () => reject(new ImageLoadError(`Failed to load image`, src));
+    img.src = src;
+  });
+}
+
+/**
+ * Enhanced image loader that fetches HTTP(S) URLs to blob first to avoid CORS tainting.
+ * Useful for PDF generation and other scenarios requiring canvas pixel manipulation.
+ */
+export async function loadImageWithBlobFetch(src: string): Promise<HTMLImageElement> {
+  // If it's an http(s) URL, fetch to a blob first to avoid tainting
+  if (/^https?:\/\//i.test(src)) {
+    try {
+      const resp = await fetch(src, { mode: "cors", credentials: "omit" });
+      if (!resp.ok) {
+        throw new NetworkError(`Failed to fetch image: ${resp.status}`, src, resp.status);
+      }
+      const blob = await resp.blob();
+      src = URL.createObjectURL(blob);
+    } catch (error) {
+      if (error instanceof NetworkError) throw error;
+      throw new NetworkError(`Network error fetching image: ${(error as Error).message}`, src);
+    }
+  }
+
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new ImageLoadError(`Failed to load image`, src));
     img.src = src;
   });
 }

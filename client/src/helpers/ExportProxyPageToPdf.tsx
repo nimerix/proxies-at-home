@@ -11,6 +11,7 @@ import {
   DPMM,
   canvasToBlob,
   isUploadedFileToken,
+  loadImageWithBlobFetch,
 } from "./ImageHelper";
 
 const NEAR_BLACK = 16;
@@ -107,26 +108,8 @@ function calibratedBleedTrimPxForHeight(h: number) {
   return 156;
 }
 
-async function loadImage(src: string): Promise<HTMLImageElement> {
-  // If it’s an http(s) URL, fetch to a blob first to avoid tainting
-  if (/^https?:\/\//i.test(src)) {
-    const resp = await fetch(src, { mode: "cors", credentials: "omit" });
-    if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status}`);
-    const blob = await resp.blob();
-    src = URL.createObjectURL(blob);
-  }
-
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = src;
-  });
-}
-
 async function trimExistingBleedIfAny(src: string, bleedTrimPx?: number) {
-  const img = await loadImage(src);
+  const img = await loadImageWithBlobFetch(src);
   const trim = bleedTrimPx ?? calibratedBleedTrimPxForHeight(img.height);
 
   const w = img.width - trim * 2;
@@ -241,7 +224,7 @@ async function buildCardWithBleed(
   const finalW = contentW + bleedPx * 2;
   const finalH = contentH + bleedPx * 2;
 
-  let baseImg = await loadImage(src);
+  let baseImg = await loadImageWithBlobFetch(src);
 
   if (opts.hasBakedBleed && bleedPx > 0) {
     const smartTrimmed = await smartTrimMpcBleed(baseImg, bleedPx, dpi);
