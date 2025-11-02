@@ -33,26 +33,16 @@ export function useImageProcessing({
     (state) => state.appendOriginalSelectedImages
   );
   const setIsProcessing = useSettingsStore((state) => state.setIsProcessing);
+  const setProcessingProgress = useSettingsStore(
+    (state) => state.setProcessingProgress
+  );
 
   const [loadingMap, setLoadingMap] = useState<
     Record<string, "idle" | "loading" | "error">
   >({});
   const inFlight = useRef<Record<string, Promise<void>>>({});
-  const activeReprocessJobs = useRef(0);
-
-  const beginReprocessJob = () => {
-    if (activeReprocessJobs.current === 0) {
-      setIsProcessing(true);
-    }
-    activeReprocessJobs.current += 1;
-  };
-
-  const endReprocessJob = () => {
-    activeReprocessJobs.current = Math.max(0, activeReprocessJobs.current - 1);
-    if (activeReprocessJobs.current === 0) {
-      setIsProcessing(false);
-    }
-  };
+  const jobTokenCounter = useRef(0);
+  const activeJobToken = useRef<number | null>(null);
 
   function getOriginalSrcForCard(card: CardOption): string | File | undefined {
     const stored = originalSelectedImages[card.uuid];
@@ -139,70 +129,95 @@ export function useImageProcessing({
     cards: CardOption[],
     newBleedWidth: number
   ) {
-    if (!cards.length) return;
+    const totalCards = cards.length;
+    if (totalCards === 0) {
+      return;
+    }
 
-    beginReprocessJob();
+    const token = ++jobTokenCounter.current;
+    activeJobToken.current = token;
+    setIsProcessing(true);
+    setProcessingProgress(0);
 
+    let completed = 0;
     const updated: Record<string, string> = {};
     const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth);
     const concurrency = resolveImageProcessingConcurrency();
+
+    const reportProgress = () => {
+      if (activeJobToken.current !== token) return;
+      completed += 1;
+      const percentage = Math.min(100, Math.round((completed / totalCards) * 100));
+      setProcessingProgress(percentage);
+    };
 
     try {
       await processWithConcurrency(
         cards,
         async (card) => {
-      const uuid = card.uuid;
-      const original = originalSelectedImages[uuid];
-      
-      if (!original) return;
+          const uuid = card.uuid;
+          const original = originalSelectedImages[uuid];
 
-      let resolvedSrc: string | undefined;
-      let revokeUrl: string | null = null;
+          let resolvedSrc: string | undefined;
+          let revokeUrl: string | null = null;
 
-      if (isUploadedFileToken(original)) {
-        const file = uploadedFiles[uuid];
-        if (!file) return;
-        resolvedSrc = URL.createObjectURL(file);
-        revokeUrl = resolvedSrc;
-      } else if (/^(data:|blob:)/i.test(original)) {
-        resolvedSrc = original;
-      } else if (card.isUserUpload) {
-        resolvedSrc = await urlToDataUrl(original);
-      } else {
-        resolvedSrc = getLocalBleedImageUrl(original);
+          try {
+            if (!original) {
+              return;
+            }
+
+            if (isUploadedFileToken(original)) {
+              const file = uploadedFiles[uuid];
+              if (!file) return;
+              resolvedSrc = URL.createObjectURL(file);
+              revokeUrl = resolvedSrc;
+            } else if (/^(data:|blob:)/i.test(original)) {
+              resolvedSrc = original;
+            } else if (card.isUserUpload) {
+              resolvedSrc = await urlToDataUrl(original);
+            } else {
+              resolvedSrc = getLocalBleedImageUrl(original);
+            }
+
+            if (!resolvedSrc) return;
+
+            let processedUrl: string | null = null;
+            try {
+              processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
+                unit,
+                bleedEdgeWidth: newBleedWidth,
+                hasBakedBleed: card.hasBakedBleed,
+              });
+              updated[uuid] = await createPreviewDataUrl(processedUrl, {
+                maxWidth: previewWidth,
+                maxHeight: previewHeight,
+                mimeType: "image/jpeg",
+                quality: 0.82,
+                background: "#FFFFFF",
+              });
+            } catch (err) {
+              console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
+            } finally {
+              revokeIfBlobUrl(processedUrl);
+            }
+          } finally {
+            if (revokeUrl) URL.revokeObjectURL(revokeUrl);
+            reportProgress();
+          }
+        },
+        concurrency
+      );
+
+      if (activeJobToken.current === token && Object.keys(updated).length > 0) {
+        appendSelectedImages(updated);
       }
-
-      if (!resolvedSrc) return;
-
-      let processedUrl: string | null = null;
-        try {
-          processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
-            unit,
-            bleedEdgeWidth: newBleedWidth,
-            hasBakedBleed: card.hasBakedBleed,
-          });
-          updated[uuid] = await createPreviewDataUrl(processedUrl, {
-            maxWidth: previewWidth,
-            maxHeight: previewHeight,
-            mimeType: "image/jpeg",
-            quality: 0.82,
-            background: "#FFFFFF",
-          });
-        } catch (err) {
-          console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
-        } finally {
-          revokeIfBlobUrl(processedUrl);
-          if (revokeUrl) URL.revokeObjectURL(revokeUrl);
-        }
-      },
-      concurrency
-    );
-        if (Object.keys(updated).length > 0) {
-          appendSelectedImages(updated);
-        }
-      } finally {
-        endReprocessJob();
+    } finally {
+      if (activeJobToken.current === token) {
+        setIsProcessing(false);
+        setProcessingProgress(0);
+        activeJobToken.current = null;
       }
+    }
   }
 
   return { loadingMap, ensureProcessed, reprocessSelectedImages };

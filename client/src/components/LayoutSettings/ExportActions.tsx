@@ -34,6 +34,7 @@ export function ExportActions() {
   const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
   const useExportBatching = useSettingsStore((state) => state.useExportBatching);
   const exportBatchSize = useSettingsStore((state) => state.exportBatchSize);
+  const processingProgress = useSettingsStore((state) => state.processingProgress);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -85,15 +86,16 @@ export function ExportActions() {
   return (
     <div className="flex flex-col gap-2">
       <Button color="green" onClick={handleExport} disabled={!cards.length || isProcessing}>
-        {isProcessing && (
-          <Spinner size="md" color="purple"/>
-        )}
         {isProcessing ? (
-         <span className="pl-3">Processing...</span>
-         ) : (
-         <span className="">Export to PDF</span>)
-         }
-        
+          <span className="flex items-center gap-2">
+            <Spinner size="md" color="purple" />
+            <span className="whitespace-nowrap">
+              Processing {processingProgress}%
+            </span>
+          </span>
+        ) : (
+          <span>Export to PDF</span>
+        )}
       </Button>
 
       <Button

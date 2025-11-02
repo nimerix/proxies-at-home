@@ -36,6 +36,8 @@ type Store = {
   setUseExportBatching: (value: boolean) => void;
   exportBatchSize: number;
   setExportBatchSize: (size: number) => void;
+  processingProgress: number;
+  setProcessingProgress: (value: number) => void;
   roundedCornerGuides: boolean;
   setRoundedCornerGuides: (value: boolean) => void;
   cornerGuideOffsetMm: number;
@@ -61,6 +63,7 @@ const defaultPageSettings = {
   exportDpi: 600,
   useExportBatching: false,
   exportBatchSize: 20,
+  processingProgress: 0,
   roundedCornerGuides: false,
   cornerGuideOffsetMm: -0.5,
   isProcessing: false,
@@ -118,6 +121,8 @@ export const useSettingsStore = create<Store>()(
       setExportDpi: (dpi) => set({ exportDpi: dpi }),
       setUseExportBatching: (value) => set({ useExportBatching: value }),
       setExportBatchSize: (size) => set({ exportBatchSize: size }),
+      setProcessingProgress: (value) =>
+        set({ processingProgress: Math.max(0, Math.min(100, value)) }),
       setRoundedCornerGuides: (value) => set({ roundedCornerGuides: value }),
       setCornerGuideOffsetMm: (mm) => set({ cornerGuideOffsetMm: mm }),
       resetSettings: () => set({ ...defaultPageSettings }),
