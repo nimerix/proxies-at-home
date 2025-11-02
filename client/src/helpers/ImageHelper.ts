@@ -68,7 +68,7 @@ async function blobToDataUrl(blob: Blob) {
   });
 }
 
-const HARD_MAX_CONCURRENCY = 4;
+const HARD_MAX_CONCURRENCY = 8;
 
 export function resolveImageProcessingConcurrency(maxOverride?: number) {
   if (typeof maxOverride === "number" && maxOverride > 0) {
@@ -78,8 +78,9 @@ export function resolveImageProcessingConcurrency(maxOverride?: number) {
     typeof navigator !== "undefined" &&
     typeof navigator.hardwareConcurrency === "number"
   ) {
-    const halved = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
-    return Math.min(HARD_MAX_CONCURRENCY, halved);
+    // const halved = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
+    // return Math.min(HARD_MAX_CONCURRENCY, halved);
+    return Math.min(HARD_MAX_CONCURRENCY, navigator.hardwareConcurrency);
   }
   return 2;
 }

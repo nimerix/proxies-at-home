@@ -50,6 +50,7 @@ export function UploadSection() {
   const cards = useCardsStore((state) => state.cards);
 
   const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
+  const setLoadingProgress = useLoadingStore((state) => state.setLoadingProgress);
   const appendCards = useCardsStore((state) => state.appendCards);
   const setCards = useCardsStore((state) => state.setCards);
   const setSelectedImages = useCardsStore((state) => state.setSelectedImages);
@@ -101,6 +102,10 @@ export function UploadSection() {
     const fileArray = Array.from(files);
     const startIndex = cards.length;
 
+    if (fileArray.length > 0) {
+      setLoadingProgress(0);
+    }
+
     const newCards: CardOption[] = fileArray.map((file, i) => ({
       name:
         inferCardNameFromFilename(file.name) ||
@@ -117,6 +122,8 @@ export function UploadSection() {
     const processedUpdate: Record<string, string> = {};
     const uploadedFilesUpdate: Record<string, File> = {};
 
+    let processedCount = 0;
+    const totalFiles = fileArray.length;
     const concurrency = resolveImageProcessingConcurrency();
     await processWithConcurrency(
       fileArray,
@@ -124,7 +131,16 @@ export function UploadSection() {
         const id = newCards[i].uuid;
         uploadedFilesUpdate[id] = file;
         originalsUpdate[id] = makeUploadedFileToken(id);
-        processedUpdate[id] = await buildPreviewFromFile(file, opts);
+        try {
+          processedUpdate[id] = await buildPreviewFromFile(file, opts);
+        } catch (err) {
+          console.warn(`[Upload] Failed to process ${file.name}:`, err);
+        } finally {
+          if (totalFiles > 0) {
+            processedCount += 1;
+            setLoadingProgress((processedCount / totalFiles) * 100);
+          }
+        }
       },
       concurrency
     );
@@ -132,6 +148,10 @@ export function UploadSection() {
     appendUploadedFiles(uploadedFilesUpdate);
     appendOriginalSelectedImages(originalsUpdate);
     appendSelectedImages(processedUpdate);
+
+    if (fileArray.length > 0) {
+      setLoadingProgress(100);
+    }
   }
 
   const handleUploadMpcFill = async (
@@ -157,42 +177,9 @@ export function UploadSection() {
     setLoadingTask("Uploading Images");
     try {
       const files = e.target.files;
-      if (!files || !files.length) return;
-
-      const fileArray = Array.from(files);
-      const startIndex = cards.length;
-
-      const newCards: CardOption[] = fileArray.map((_, i) => ({
-        name: `Custom Art ${startIndex + i + 1}`,
-        imageUrls: [],
-        uuid: crypto.randomUUID(),
-        isUserUpload: true,
-        hasBakedBleed: false,
-      }));
-
-      appendCards(newCards);
-
-      const originalsUpdate: Record<string, string> = {};
-      const processedUpdate: Record<string, string> = {};
-      const uploadedFilesUpdate: Record<string, File> = {};
-
-      const concurrency = resolveImageProcessingConcurrency();
-      await processWithConcurrency(
-        fileArray,
-        async (file: File, i: number) => {
-          const id = newCards[i].uuid;
-          uploadedFilesUpdate[id] = file;
-          originalsUpdate[id] = makeUploadedFileToken(id);
-          processedUpdate[id] = await buildPreviewFromFile(file, {
-            hasBakedBleed: false,
-          });
-        },
-        concurrency
-      );
-
-      appendUploadedFiles(uploadedFilesUpdate);
-      appendOriginalSelectedImages(originalsUpdate);
-      appendSelectedImages(processedUpdate);
+      if (files && files.length) {
+        await addUploadedFiles(files, { hasBakedBleed: false });
+      }
     } finally {
       if (e.target) e.target.value = "";
       setLoadingTask(null);
@@ -321,10 +308,15 @@ export function UploadSection() {
       }
       appendOriginalSelectedImages(newOriginals);
 
-      setLoadingTask(null);
-
       const processed: Record<string, string> = {};
       const previewDims = computeCardPreviewPixels(bleedEdgeWidth);
+      const totalPreviews = Object.keys(newOriginals).length;
+      let completed = 0;
+      if (totalPreviews > 0) {
+        setLoadingTask("Processing Images");
+        setLoadingProgress(0);
+      }
+
       for (const [uuid, url] of Object.entries(newOriginals)) {
         let bleedImageUrl: string | null = null;
         try {
@@ -345,7 +337,14 @@ export function UploadSection() {
           console.warn(`[Bleed] Failed for ${uuid}:`, e);
         } finally {
           revokeIfBlobUrl(bleedImageUrl);
+          if (totalPreviews > 0) {
+            completed += 1;
+            setLoadingProgress((completed / totalPreviews) * 100);
+          }
         }
+      }
+      if (totalPreviews > 0) {
+        setLoadingProgress(100);
       }
       if (Object.keys(processed).length) appendSelectedImages(processed);
 
