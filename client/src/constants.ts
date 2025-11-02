@@ -19,6 +19,8 @@ export const IN_TO_MM = 25.4;
 export const CARD_H_MM_WITH_MPC_BLEED = 94; // 3mm bleed top/bottom
 export const CARD_W_MM_WITH_MPC_BLEED = 69; // 3mm bleed left/right
 
+export const BATCH_PDF_MAX_SIZE = 20;
+
 export const DPI_MM_RECIP = 0.03937008;
 
 export const LANGUAGE_OPTIONS = [

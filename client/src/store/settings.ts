@@ -32,6 +32,10 @@ type Store = {
   setCardSpacingMm: (mm: number) => void;
   exportDpi: ExportDpi;
   setExportDpi: (dpi: ExportDpi) => void;
+  useExportBatching: boolean;
+  setUseExportBatching: (value: boolean) => void;
+  exportBatchSize: number;
+  setExportBatchSize: (size: number) => void;
   roundedCornerGuides: boolean;
   setRoundedCornerGuides: (value: boolean) => void;
   cornerGuideOffsetMm: number;
@@ -53,6 +57,8 @@ const defaultPageSettings = {
   cardSpacingMm: 0,
   zoom: 1,
   exportDpi: 600,
+  useExportBatching: false,
+  exportBatchSize: 20,
   roundedCornerGuides: false,
   cornerGuideOffsetMm: -0.5,
 } as Store;
@@ -107,6 +113,8 @@ export const useSettingsStore = create<Store>()(
       setZoom: (value) => set({ zoom: value }),
       setCardSpacingMm: (mm) => set({ cardSpacingMm: Math.max(0, mm) }),
       setExportDpi: (dpi) => set({ exportDpi: dpi }),
+      setUseExportBatching: (value) => set({ useExportBatching: value }),
+      setExportBatchSize: (size) => set({ exportBatchSize: size }),
       setRoundedCornerGuides: (value) => set({ roundedCornerGuides: value }),
       setCornerGuideOffsetMm: (mm) => set({ cornerGuideOffsetMm: mm }),
       resetSettings: () => set({ ...defaultPageSettings }),

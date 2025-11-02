@@ -30,3 +30,11 @@ export function InToMm(inches: number) {
 export function MmToIn(mm: number) {
   return mm / IN_TO_MM;
 }
+
+export function ClampNumber(
+  value: number,
+  min: number,
+  max: number
+): number {
+  return Math.min(Math.max(value, min), max);
+} 

@@ -1,13 +1,14 @@
 import { useImageProcessing } from "@/hooks/useImageProcessing";
 import { useCardsStore, useSettingsStore } from "@/store";
 import type { ExportDpi } from "@/store/settings";
-import { Button, Checkbox, HelperText, HR, Label, Select, TextInput, Accordion, AccordionPanel, AccordionContent, AccordionTitle, Tooltip } from "flowbite-react";
+import { Button, Checkbox, HelperText, HR, Label, Select, TextInput, Accordion, AccordionPanel, AccordionContent, AccordionTitle, Tooltip, RangeSlider } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { use, useCallback, useEffect, useMemo, useRef } from "react";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
-import { CARD_H_MM, CARD_W_MM, IN_TO_MM } from "@/constants";
+import { BATCH_PDF_MAX_SIZE, CARD_H_MM, CARD_W_MM, IN_TO_MM } from "@/constants";
 import { GridControls } from "./LayoutSettings/GridControl";
+import { ClampNumber } from "@/helpers/SizeHelpers";
 
 export function PageSettingsControls() {
   const cards = useCardsStore((state) => state.cards);
@@ -41,6 +42,10 @@ export function PageSettingsControls() {
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const setCardSpacingMm = useSettingsStore((s) => s.setCardSpacingMm);
   const setExportDpi = useSettingsStore((s) => s.setExportDpi);
+  const useExportBatching = useSettingsStore((s) => s.useExportBatching);
+  const setUseExportBatching = useSettingsStore((s) => s.setUseExportBatching);
+  const exportBatchSize = useSettingsStore((s) => s.exportBatchSize);
+  const setExportBatchSize = useSettingsStore((s) => s.setExportBatchSize);
   const setRoundedCornerGuides = useSettingsStore((s) => s.setRoundedCornerGuides);
   const setCornerGuideOffsetMm = useSettingsStore((s) => s.setCornerGuideOffsetMm);
 
@@ -294,7 +299,61 @@ export function PageSettingsControls() {
                     Higher DPI produces better quality but larger file sizes.
                   </HelperText>
                 </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="export-batching"
+                    checked={useExportBatching}
+                    onChange={(e) => setUseExportBatching(e.target.checked)}
+                  />
+                  <Tooltip
+                    content="Export multiple PDFs in batches to reduce memory usage"
+                    placement="left"
+                    style="dark">
+                    <Label disabled={!useExportBatching} htmlFor="export-batching">Export Batching</Label>
+                  </Tooltip>
+
+                </div>
+
+                <div>
+                  <Label disabled={!useExportBatching}>Batch Size (pages)</Label>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="flex items-center">
+                      <TextInput
+                        className="w-full"
+                        type="number"
+                        disabled={!useExportBatching}
+
+                        value={exportBatchSize}
+                        step="1"
+                        min="1"
+                        max={BATCH_PDF_MAX_SIZE}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          if (!isNaN(val)) setExportBatchSize(ClampNumber(val, 1, BATCH_PDF_MAX_SIZE));
+                        }}
+                      />
+                    </div>
+                    <div className="col-span-3 mt-2">
+                      <RangeSlider
+                        min={1}
+                        max={BATCH_PDF_MAX_SIZE}
+                        step={1}
+                        sizing="lg"
+                        disabled={!useExportBatching}
+                        value={exportBatchSize}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          if (!isNaN(val)) setExportBatchSize(ClampNumber(val, 1, BATCH_PDF_MAX_SIZE));
+                        }}
+                      />
+                    </div>
+                    
+                  </div>
+
+                </div>
               </div>
+
             </AccordionContent>
           </AccordionPanel>
         </Accordion>
