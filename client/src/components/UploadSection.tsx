@@ -34,7 +34,7 @@ import {
   Textarea,
 } from "flowbite-react";
 import { ExternalLink } from "lucide-react";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 
 async function readText(file: File): Promise<string> {
   return new Promise((resolve) => {
@@ -68,6 +68,24 @@ export function UploadSection() {
 
   const globalLanguage = useCardsStore((s) => s.globalLanguage ?? "en");
   const setGlobalLanguage = useCardsStore((s) => s.setGlobalLanguage ?? (() => { }));
+  const columns = useSettingsStore((state) => state.columns);
+  const rows = useSettingsStore((state) => state.rows);
+  const useExportBatching = useSettingsStore((state) => state.useExportBatching);
+  const setUseExportBatching = useSettingsStore((state) => state.setUseExportBatching);
+
+  const maybeEnableBatching = useCallback(
+    (totalCards: number) => {
+      const perPage = Math.max(1, columns * rows || 0);
+      if (perPage <= 0) return;
+      const totalPages = Math.ceil(totalCards / perPage);
+      if (totalPages > 20) {
+        if (!useExportBatching) {
+          setUseExportBatching(true);
+        }
+      }
+    },
+    [columns, rows, useExportBatching, setUseExportBatching]
+  );
 
   async function buildPreviewFromFile(
     file: File,
@@ -152,6 +170,8 @@ export function UploadSection() {
     if (fileArray.length > 0) {
       setLoadingProgress(100);
     }
+
+    maybeEnableBatching(cards.length + newCards.length);
   }
 
   const handleUploadMpcFill = async (
@@ -196,7 +216,7 @@ export function UploadSection() {
       const items =
         schemaItems && schemaItems.length ? schemaItems : parseMpcText(raw);
 
-      const newCards: CardOption[] = [];
+  const newCards: CardOption[] = [];
       const newOriginals: Record<string, string> = {};
 
       for (const it of items) {
@@ -224,6 +244,7 @@ export function UploadSection() {
       }
 
       appendCards(newCards);
+  maybeEnableBatching(cards.length + newCards.length);
       if (Object.keys(newOriginals).length) {
         appendOriginalSelectedImages(newOriginals);
       }
@@ -298,7 +319,8 @@ export function UploadSection() {
         } as CardOption;
       });
 
-      appendCards(expandedCards);
+  appendCards(expandedCards);
+  maybeEnableBatching(cards.length + expandedCards.length);
 
       const newOriginals: Record<string, string> = {};
       for (const card of expandedCards) {
