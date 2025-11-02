@@ -24,7 +24,7 @@ export function ExportActions() {
   const columns = useSettingsStore((state) => state.columns);
   const rows = useSettingsStore((state) => state.rows);
   const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
-  const bleedEdge = useSettingsStore((state) => state.bleedEdge);
+  const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
   const guideColor = useSettingsStore((state) => state.guideColor);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
@@ -53,7 +53,7 @@ export function ExportActions() {
         originalSelectedImages,
         cachedImageUrls,
   uploadedFiles,
-        bleedEdge,
+        useCornerGuides,
         bleedEdgeWidthMm: bleedEdgeWidth,
         guideColor,
         guideWidthPx: guideWidth,

@@ -16,7 +16,7 @@ const EdgeCutLines = ({
   baseCardHeightMm,
   bleedEdgeWidthMm,
 }: Props) => {
-  const bleedEdge = useSettingsStore((state) => state.bleedEdge);
+  const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
   const pageWidth = useSettingsStore((state) => state.pageWidth);
@@ -25,7 +25,7 @@ const EdgeCutLines = ({
   const rows = useSettingsStore((state) => state.rows);
   const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
 
-  if (!bleedEdge) return null;
+  if (!useCornerGuides) return null;
 
   const pageWidthMm = pageSizeUnit === "mm" ? pageWidth : pageWidth * 25.4;
   const pageHeightMm = pageSizeUnit === "mm" ? pageHeight : pageHeight * 25.4;

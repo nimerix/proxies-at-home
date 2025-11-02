@@ -15,6 +15,7 @@ export const apiUrl = (path: string) => {
 
 export const CARD_H_MM = 88;
 export const CARD_W_MM = 63;
+export const IN_TO_MM = 25.4;
 export const CARD_H_MM_WITH_MPC_BLEED = 94; // 3mm bleed top/bottom
 export const CARD_W_MM_WITH_MPC_BLEED = 69; // 3mm bleed left/right
 

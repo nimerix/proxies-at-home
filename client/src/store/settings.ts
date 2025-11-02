@@ -19,8 +19,8 @@ type Store = {
   setRows: (value: number) => void;
   bleedEdgeWidth: number;
   setBleedEdgeWidth: (value: number) => void;
-  bleedEdge: boolean;
-  setBleedEdge: (value: boolean) => void;
+  useCornerGuides: boolean;
+  setUseCornerGuides: (value: boolean) => void;
   guideColor: string;
   setGuideColor: (value: string) => void;
   guideWidth: number;
@@ -47,7 +47,7 @@ const defaultPageSettings = {
   columns: 3,
   rows: 3,
   bleedEdgeWidth: 1,
-  bleedEdge: true,
+  useCornerGuides: true,
   guideColor: "#39FF14",
   guideWidth: 0.5,
   cardSpacingMm: 0,
@@ -101,7 +101,7 @@ export const useSettingsStore = create<Store>()(
       setColumns: (columns) => set({ columns }),
       setRows: (rows) => set({ rows }),
       setBleedEdgeWidth: (value) => set({ bleedEdgeWidth: value }),
-      setBleedEdge: (value) => set({ bleedEdge: value }),
+      setUseCornerGuides: (value) => set({ useCornerGuides: value }),
       setGuideColor: (value) => set({ guideColor: value }),
       setGuideWidth: (value) => set({ guideWidth: value }),
       setZoom: (value) => set({ zoom: value }),

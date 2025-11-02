@@ -759,7 +759,7 @@ export async function exportProxyPagesToPdf({
   originalSelectedImages,
   cachedImageUrls,
   uploadedFiles,
-  bleedEdge,
+  useCornerGuides,
   bleedEdgeWidthMm,
   guideColor,
   guideWidthPx,
@@ -779,7 +779,7 @@ export async function exportProxyPagesToPdf({
   originalSelectedImages: Record<string, string>;
   cachedImageUrls?: Record<string, string>;
   uploadedFiles?: Record<string, File>;
-  bleedEdge: boolean;
+  useCornerGuides: boolean;
   bleedEdgeWidthMm: number;
   guideColor: string;
   guideWidthPx: number;
@@ -797,7 +797,7 @@ export async function exportProxyPagesToPdf({
 }) {
   if (!cards.length) return;
 
-  const bleedMm = bleedEdge ? bleedEdgeWidthMm : 0;
+  const bleedMm = useCornerGuides ? bleedEdgeWidthMm : 0;
   const contentWidthMm = CARD_W_MM;
   const contentHeightMm = CARD_H_MM;
   const cardWidthMm = contentWidthMm + bleedMm * 2;
@@ -872,7 +872,7 @@ export async function exportProxyPagesToPdf({
       try {
         const cardCanvas = await buildCardWithBleed(
           src,
-          bleedEdge ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
+          useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
           {
             isUserUpload: !!card.isUserUpload,
             hasBakedBleed: !!card.hasBakedBleed,
@@ -896,7 +896,7 @@ export async function exportProxyPagesToPdf({
         }
       }
 
-      if (bleedEdge && guideWidthMm > 0) {
+      if (useCornerGuides && guideWidthMm > 0) {
         drawCornerGuidesPdf(page, {
           xMm: cardXmm,
           yMm: cardYmm,
@@ -912,7 +912,7 @@ export async function exportProxyPagesToPdf({
       }
     }
 
-    if (bleedEdge && guideWidthMm > 0) {
+    if (useCornerGuides && guideWidthMm > 0) {
       drawEdgeStubsPdf(page, {
         pageWidthMm,
         pageHeightMm,

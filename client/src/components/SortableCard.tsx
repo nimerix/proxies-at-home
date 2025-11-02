@@ -31,7 +31,7 @@ export default function SortableCard({
   guideOffset,
   setContextMenu,
 }: SortableCardProps) {
-  const bleedEdge = useSettingsStore((state) => state.bleedEdge);
+  const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
   const guideColor = useSettingsStore((state) => state.guideColor);
   const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
@@ -153,7 +153,7 @@ export default function SortableCard({
         ⠿
       </div>
       
-      {bleedEdge && roundedCornerGuides && cornerStyles.validCornerPosition && (
+      {useCornerGuides && roundedCornerGuides && cornerStyles.validCornerPosition && (
         <>
           <div style={cornerStyles.arcLeftUpper} />
           <div style={cornerStyles.arcRightUpper} />
@@ -161,7 +161,7 @@ export default function SortableCard({
           <div style={cornerStyles.arcRightLower} />
         </>
       )}
-      {bleedEdge && !roundedCornerGuides && (
+      {useCornerGuides && !roundedCornerGuides && (
         <>
           <div
             style={{
