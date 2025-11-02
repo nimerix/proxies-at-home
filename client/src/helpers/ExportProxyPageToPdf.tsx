@@ -754,6 +754,16 @@ function drawEdgeStubsPdf(
   }
 }
 
+function chunkPages<T>(items: readonly T[], size: number): T[][] {
+  const chunkSize = Math.max(1, size | 0);
+  if (items.length <= chunkSize) return [Array.from(items)];
+  const result: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    result.push(items.slice(i, i + chunkSize));
+  }
+  return result;
+}
+
 export async function exportProxyPagesToPdf({
   cards,
   originalSelectedImages,
@@ -773,7 +783,9 @@ export async function exportProxyPagesToPdf({
   cardSpacingMm,
   exportDpi = 600,
   roundedCornerGuides = false,
-  cornerGuideOffsetMm = 0
+  cornerGuideOffsetMm = 0,
+  useBatching = false,
+  pagesPerBatch = 20,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -794,6 +806,8 @@ export async function exportProxyPagesToPdf({
   exportDpi?: number;
   roundedCornerGuides?: boolean;
   cornerGuideOffsetMm?: number;
+  useBatching?: boolean;
+  pagesPerBatch?: number;
 }) {
   if (!cards.length) return;
 
@@ -817,7 +831,6 @@ export async function exportProxyPagesToPdf({
   for (let i = 0; i < cards.length; i += perPage) {
     pages.push(cards.slice(i, i + perPage));
   }
-  if (pages.length === 0) pages.push([]);
 
   const guideWidthPxScaled = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
   const guideWidthMm = guideWidthPxScaled > 0 ? guideWidthPxScaled / DPMM(exportDpi) : 0;
@@ -825,114 +838,129 @@ export async function exportProxyPagesToPdf({
 
   const jpegQuality = exportDpi >= 1200 ? 0.96 : exportDpi >= 900 ? 0.97 : 1.0;
   const pageSize: [number, number] = [mmToPt(pageWidthMm), mmToPt(pageHeightMm)];
+  const effectivePagesPerBatch = useBatching ? Math.max(1, pagesPerBatch | 0) : pages.length || 1;
+  const batches = useBatching ? chunkPages(pages, effectivePagesPerBatch) : [pages];
+  const totalBatches = batches.length;
+  const dateSlug = new Date().toISOString().slice(0, 10);
 
-  const pdfDoc = await PDFDocument.create();
+  const renderBatch = async (batchPages: CardOption[][]) => {
+    const pdfDoc = await PDFDocument.create();
 
-  for (const pageCards of pages) {
-    const page = pdfDoc.addPage(pageSize);
-    page.drawRectangle({
-      x: 0,
-      y: 0,
-      width: pageSize[0],
-      height: pageSize[1],
-      color: rgb(1, 1, 1),
-    });
+    for (const pageCards of batchPages) {
+      const page = pdfDoc.addPage(pageSize);
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: pageSize[0],
+        height: pageSize[1],
+        color: rgb(1, 1, 1),
+      });
 
-    for (let idx = 0; idx < pageCards.length; idx++) {
-      const card = pageCards[idx];
-      const col = idx % columns;
-      const row = Math.floor(idx / columns);
+      for (let idx = 0; idx < pageCards.length; idx++) {
+        const card = pageCards[idx];
+        const col = idx % columns;
+        const row = Math.floor(idx / columns);
 
-      const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
-      const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
+        const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
+        const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
 
-      let src =
-        (cachedImageUrls && cachedImageUrls[card.uuid]) ||
-        originalSelectedImages[card.uuid] ||
-        card.imageUrls?.[0] ||
-        "";
+        let src =
+          (cachedImageUrls && cachedImageUrls[card.uuid]) ||
+          originalSelectedImages[card.uuid] ||
+          card.imageUrls?.[0] ||
+          "";
 
-      let uploadedUrlToRevoke: string | null = null;
+        let uploadedUrlToRevoke: string | null = null;
 
-      if (isUploadedFileToken(src)) {
-        const file = uploadedFiles?.[card.uuid];
-        if (!file) {
-          console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
-          continue;
+        if (isUploadedFileToken(src)) {
+          const file = uploadedFiles?.[card.uuid];
+          if (!file) {
+            console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
+            continue;
+          }
+          const objectUrl = URL.createObjectURL(file);
+          uploadedUrlToRevoke = objectUrl;
+          src = objectUrl;
         }
-        const objectUrl = URL.createObjectURL(file);
-        uploadedUrlToRevoke = objectUrl;
-        src = objectUrl;
-      }
 
-      if (!card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
-        src = getLocalBleedImageUrl(preferPng(src));
-      }
+        if (!card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
+          src = getLocalBleedImageUrl(preferPng(src));
+        }
 
-      try {
-        const cardCanvas = await buildCardWithBleed(
-          src,
-          useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
-          {
-            isUserUpload: !!card.isUserUpload,
-            hasBakedBleed: !!card.hasBakedBleed,
-          },
-          exportDpi
-        );
+        try {
+          const cardCanvas = await buildCardWithBleed(
+            src,
+            useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
+            {
+              isUserUpload: !!card.isUserUpload,
+              hasBakedBleed: !!card.hasBakedBleed,
+            },
+            exportDpi
+          );
 
-        const blob = await canvasToBlob(cardCanvas, "image/jpeg", jpegQuality);
-        const cardBytes = await blob.arrayBuffer();
-        const cardImage = await pdfDoc.embedJpg(cardBytes);
+          const blob = await canvasToBlob(cardCanvas, "image/jpeg", jpegQuality);
+          const cardBytes = await blob.arrayBuffer();
+          const cardImage = await pdfDoc.embedJpg(cardBytes);
 
-        page.drawImage(cardImage, {
-          x: mmToPt(cardXmm),
-          y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
-          width: mmToPt(cardWidthMm),
-          height: mmToPt(cardHeightMm),
-        });
-      } finally {
-        if (uploadedUrlToRevoke) {
-          URL.revokeObjectURL(uploadedUrlToRevoke);
+          page.drawImage(cardImage, {
+            x: mmToPt(cardXmm),
+            y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
+            width: mmToPt(cardWidthMm),
+            height: mmToPt(cardHeightMm),
+          });
+        } finally {
+          if (uploadedUrlToRevoke) {
+            URL.revokeObjectURL(uploadedUrlToRevoke);
+          }
+        }
+
+        if (useCornerGuides && guideWidthMm > 0) {
+          drawCornerGuidesPdf(page, {
+            xMm: cardXmm,
+            yMm: cardYmm,
+            contentWidthMm,
+            contentHeightMm,
+            bleedMm,
+            guideColor: guideColorRgb,
+            guideWidthMm,
+            pageHeightMm,
+            rounded: roundedCornerGuides,
+            cornerOffsetMm: cornerGuideOffsetMm,
+          });
         }
       }
 
       if (useCornerGuides && guideWidthMm > 0) {
-        drawCornerGuidesPdf(page, {
-          xMm: cardXmm,
-          yMm: cardYmm,
+        drawEdgeStubsPdf(page, {
+          pageWidthMm,
+          pageHeightMm,
+          startXmm,
+          startYmm,
+          columns,
+          rows,
           contentWidthMm,
           contentHeightMm,
+          cardWidthMm,
+          cardHeightMm,
           bleedMm,
-          guideColor: guideColorRgb,
           guideWidthMm,
-          pageHeightMm,
-          rounded: roundedCornerGuides,
-          cornerOffsetMm: cornerGuideOffsetMm,
+          spacingMm,
         });
       }
     }
 
-    if (useCornerGuides && guideWidthMm > 0) {
-      drawEdgeStubsPdf(page, {
-        pageWidthMm,
-        pageHeightMm,
-        startXmm,
-        startYmm,
-        columns,
-        rows,
-        contentWidthMm,
-        contentHeightMm,
-        cardWidthMm,
-        cardHeightMm,
-        bleedMm,
-        guideWidthMm,
-        spacingMm,
-      });
-    }
-  }
+    return pdfDoc.save({ useObjectStreams: true });
+  };
 
-  const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
-  const pdfBuffer = Uint8Array.from(pdfBytes).buffer;
-  const blob = new Blob([pdfBuffer], { type: "application/pdf" });
-  saveAs(blob, `proxxies_${new Date().toISOString().slice(0, 10)}.pdf`);
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    const batchPages = batches[batchIndex];
+    const pdfBytes = await renderBatch(batchPages);
+    const fileSuffix =
+      totalBatches > 1
+        ? `_part-${String(batchIndex + 1).padStart(2, "0")}-of-${String(totalBatches).padStart(2, "0")}`
+        : "";
+    const bytesCopy = pdfBytes.slice();
+    const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
+    saveAs(blob, `proxxies_${dateSlug}${fileSuffix}.pdf`);
+  }
 }

@@ -1,7 +1,6 @@
 import { Label, TextInput } from "flowbite-react";
 import { useSettingsStore } from "@/store";
 import { useMemo } from "react";
-import { CARD_W_MM, IN_TO_MM } from "@/constants";
 import { CardDimensionsInMm, PageDimensionsInMm } from "@/helpers/SizeHelpers";
 
 

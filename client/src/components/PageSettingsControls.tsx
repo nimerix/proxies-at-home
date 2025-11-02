@@ -3,7 +3,7 @@ import { useCardsStore, useSettingsStore } from "@/store";
 import type { ExportDpi } from "@/store/settings";
 import { Button, Checkbox, HelperText, HR, Label, Select, TextInput, Accordion, AccordionPanel, AccordionContent, AccordionTitle, Tooltip, RangeSlider } from "flowbite-react";
 import { ZoomIn, ZoomOut } from "lucide-react";
-import { use, useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ExportActions } from "./LayoutSettings/ExportActions";
 import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
 import { BATCH_PDF_MAX_SIZE, CARD_H_MM, CARD_W_MM, IN_TO_MM } from "@/constants";
@@ -32,8 +32,6 @@ export function PageSettingsControls() {
   const roundedCornerGuides = useSettingsStore((s) => s.roundedCornerGuides);
   const cornerGuideOffsetMm = useSettingsStore((s) => s.cornerGuideOffsetMm);
 
-  const setColumns = useSettingsStore((state) => state.setColumns);
-  const setRows = useSettingsStore((state) => state.setRows);
   const setBleedEdgeWidth = useSettingsStore((state) => state.setBleedEdgeWidth);
   const setUseCornerGuides = useSettingsStore((state) => state.setUseCornerGuides);
   const setGuideColor = useSettingsStore((state) => state.setGuideColor);

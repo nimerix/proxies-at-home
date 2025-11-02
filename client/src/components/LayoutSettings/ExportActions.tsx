@@ -31,6 +31,8 @@ export function ExportActions() {
   const exportDpi = useSettingsStore((state) => state.exportDpi);
   const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
   const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
+  const useExportBatching = useSettingsStore((state) => state.useExportBatching);
+  const exportBatchSize = useSettingsStore((state) => state.exportBatchSize);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -52,7 +54,7 @@ export function ExportActions() {
         cards,
         originalSelectedImages,
         cachedImageUrls,
-  uploadedFiles,
+        uploadedFiles,
         useCornerGuides,
         bleedEdgeWidthMm: bleedEdgeWidth,
         guideColor,
@@ -68,6 +70,8 @@ export function ExportActions() {
         exportDpi,
         roundedCornerGuides,
         cornerGuideOffsetMm,
+        useBatching: useExportBatching,
+        pagesPerBatch: exportBatchSize,
       });
     } catch (err) {
       console.error("Export failed:", err);
