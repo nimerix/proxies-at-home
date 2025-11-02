@@ -809,21 +809,14 @@ export async function exportProxyPagesToPdf({
   cornerGuideOffsetMm?: number;
   useBatching?: boolean;
   pagesPerBatch?: number;
-  onProgress?: (progress: number) => void;
+  onProgress?: (progress: {
+    overall: number | null;
+    pageProgress: number | null;
+    currentPage: number | null;
+    totalPages: number | null;
+  }) => void;
 }) {
   if (!cards.length) return;
-
-  onProgress?.(0);
-
-  const totalCardsCount = cards.length;
-  let processedCards = 0;
-
-  const reportProgress = () => {
-    if (!totalCardsCount) return;
-    const ratio = processedCards / totalCardsCount;
-    const percent = Math.min(99, Math.round(ratio * 100));
-    onProgress?.(percent);
-  };
 
   const bleedMm = useCornerGuides ? bleedEdgeWidthMm : 0;
   const contentWidthMm = CARD_W_MM;
@@ -857,10 +850,50 @@ export async function exportProxyPagesToPdf({
   const totalBatches = batches.length;
   const dateSlug = new Date().toISOString().slice(0, 10);
 
+  const totalPagesCount = pages.length;
+  const totalCardsCount = cards.length;
+  let processedCards = 0;
+  let currentPageIndex = 0;
+  let processedCardsOnPage = 0;
+  let currentPageCardCount = pages[0]?.length ?? 0;
+
+  const emitProgress = () => {
+    const overallPercent = totalCardsCount
+      ? Math.round((processedCards / totalCardsCount) * 100)
+      : null;
+    const normalizedOverall = overallPercent === null
+      ? null
+      : processedCards >= totalCardsCount
+        ? 100
+        : Math.min(99, Math.max(0, overallPercent));
+
+    const pagePercent = currentPageCardCount
+      ? Math.round((processedCardsOnPage / currentPageCardCount) * 100)
+      : totalPagesCount > 0
+        ? 100
+        : null;
+    const normalizedPage = pagePercent == null
+      ? null
+      : Math.max(0, Math.min(100, pagePercent));
+
+    onProgress?.({
+      overall: normalizedOverall,
+      pageProgress: normalizedPage,
+      currentPage: totalPagesCount > 0 ? Math.min(totalPagesCount, currentPageIndex + 1) : null,
+      totalPages: totalPagesCount > 0 ? totalPagesCount : null,
+    });
+  };
+
+  emitProgress();
+
   const renderBatch = async (batchPages: CardOption[][]) => {
     const pdfDoc = await PDFDocument.create();
 
     for (const pageCards of batchPages) {
+        currentPageCardCount = pageCards.length;
+        processedCardsOnPage = 0;
+        emitProgress();
+
       const page = pdfDoc.addPage(pageSize);
       page.drawRectangle({
         x: 0,
@@ -891,7 +924,8 @@ export async function exportProxyPagesToPdf({
           if (!file) {
             console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
             processedCards += 1;
-            reportProgress();
+            processedCardsOnPage += 1;
+            emitProgress();
             continue;
           }
           const objectUrl = URL.createObjectURL(file);
@@ -946,7 +980,8 @@ export async function exportProxyPagesToPdf({
         }
 
         processedCards += 1;
-        reportProgress();
+        processedCardsOnPage += 1;
+        emitProgress();
       }
 
       if (useCornerGuides && guideWidthMm > 0) {
@@ -966,6 +1001,8 @@ export async function exportProxyPagesToPdf({
           spacingMm,
         });
       }
+
+      currentPageIndex += 1;
     }
 
     return pdfDoc.save({ useObjectStreams: true });
@@ -983,5 +1020,10 @@ export async function exportProxyPagesToPdf({
     saveAs(blob, `proxxies_${dateSlug}${fileSuffix}.pdf`);
   }
 
-  onProgress?.(100);
+  onProgress?.({
+    overall: 100,
+    pageProgress: 100,
+    currentPage: totalPagesCount > 0 ? totalPagesCount : null,
+    totalPages: totalPagesCount > 0 ? totalPagesCount : null,
+  });
 }
