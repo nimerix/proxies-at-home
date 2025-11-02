@@ -88,7 +88,8 @@ export function resolveImageProcessingConcurrency(maxOverride?: number) {
 export async function processWithConcurrency<T>(
   items: readonly T[],
   worker: (item: T, index: number) => Promise<void>,
-  limit?: number
+  limit?: number,
+  signal?: AbortSignal
 ) {
   if (!items.length) return;
   const maxWorkers = Math.max(1, limit ?? resolveImageProcessingConcurrency());
@@ -96,9 +97,11 @@ export async function processWithConcurrency<T>(
 
   const run = async () => {
     while (true) {
+      if (signal?.aborted) return;
       const current = nextIndex++;
       if (current >= items.length) return;
       await worker(items[current], current);
+      if (signal?.aborted) return;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   };

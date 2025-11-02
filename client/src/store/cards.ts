@@ -47,6 +47,7 @@ type Store = {
   removeCardAt: (pos: number) => void;
   duplicateCardAt: (pos: number) => void;
   clearVolatileForCard: (uuid: string) => void;
+  removeCardsByUuid: (uuids: string[]) => void;
 };
 
 export const useCardsStore = create<Store>()(
@@ -277,6 +278,35 @@ export const useCardsStore = create<Store>()(
             uploadedOriginalImages: { ...uploadedOriginalImages },
             uploadedFiles: { ...uploadedFiles },
             cachedImageUrls: { ...cachedImageUrls },
+          };
+        }),
+
+      removeCardsByUuid: (uuids) =>
+        set((state) => {
+          if (!uuids?.length) return {};
+          const removeSet = new Set(uuids);
+          const cards = state.cards.filter((card) => !removeSet.has(card.uuid));
+          if (cards.length === state.cards.length) {
+            return {};
+          }
+
+          const strip = (map: Record<string, any>) => {
+            if (!map) return map;
+            const clone = { ...map };
+            for (const id of removeSet) {
+              delete clone[id];
+            }
+            return clone;
+          };
+
+          return {
+            cards,
+            selectedImages: strip(state.selectedImages),
+            originalSelectedImages: strip(state.originalSelectedImages),
+            uploadedImages: strip(state.uploadedImages),
+            uploadedOriginalImages: strip(state.uploadedOriginalImages),
+            uploadedFiles: strip(state.uploadedFiles),
+            cachedImageUrls: strip(state.cachedImageUrls),
           };
         }),
     }),

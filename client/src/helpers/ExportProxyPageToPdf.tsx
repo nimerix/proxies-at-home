@@ -1,4 +1,5 @@
 import { API_BASE, CARD_H_MM, CARD_W_MM, pixelDPIMap } from "@/constants";
+import type { LoadingProgressState } from "@/store/loading";
 import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import { saveAs } from "file-saver";
@@ -787,6 +788,7 @@ export async function exportProxyPagesToPdf({
   useBatching = false,
   pagesPerBatch = 20,
   onProgress,
+  abortSignal,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -809,14 +811,18 @@ export async function exportProxyPagesToPdf({
   cornerGuideOffsetMm?: number;
   useBatching?: boolean;
   pagesPerBatch?: number;
-  onProgress?: (progress: {
-    overall: number | null;
-    pageProgress: number | null;
-    currentPage: number | null;
-    totalPages: number | null;
-  }) => void;
+  onProgress?: (progress: LoadingProgressState) => void;
+  abortSignal?: AbortSignal;
 }) {
   if (!cards.length) return;
+
+  const throwIfAborted = () => {
+    if (abortSignal?.aborted) {
+      throw new DOMException("Export cancelled", "AbortError");
+    }
+  };
+
+  throwIfAborted();
 
   const bleedMm = useCornerGuides ? bleedEdgeWidthMm : 0;
   const contentWidthMm = CARD_W_MM;
@@ -858,6 +864,8 @@ export async function exportProxyPagesToPdf({
   let currentPageCardCount = pages[0]?.length ?? 0;
 
   const emitProgress = () => {
+    throwIfAborted();
+
     const overallPercent = totalCardsCount
       ? Math.round((processedCards / totalCardsCount) * 100)
       : null;
@@ -887,12 +895,14 @@ export async function exportProxyPagesToPdf({
   emitProgress();
 
   const renderBatch = async (batchPages: CardOption[][]) => {
+    throwIfAborted();
     const pdfDoc = await PDFDocument.create();
 
     for (const pageCards of batchPages) {
-        currentPageCardCount = pageCards.length;
-        processedCardsOnPage = 0;
-        emitProgress();
+      throwIfAborted();
+      currentPageCardCount = pageCards.length;
+      processedCardsOnPage = 0;
+      emitProgress();
 
       const page = pdfDoc.addPage(pageSize);
       page.drawRectangle({
@@ -904,6 +914,7 @@ export async function exportProxyPagesToPdf({
       });
 
       for (let idx = 0; idx < pageCards.length; idx++) {
+        throwIfAborted();
         const card = pageCards[idx];
         const col = idx % columns;
         const row = Math.floor(idx / columns);
@@ -938,6 +949,7 @@ export async function exportProxyPagesToPdf({
         }
 
         try {
+          throwIfAborted();
           const cardCanvas = await buildCardWithBleed(
             src,
             useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
@@ -1011,6 +1023,7 @@ export async function exportProxyPagesToPdf({
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
     const batchPages = batches[batchIndex];
     const pdfBytes = await renderBatch(batchPages);
+    throwIfAborted();
     const fileSuffix =
       totalBatches > 1
         ? `_part-${String(batchIndex + 1).padStart(2, "0")}-of-${String(totalBatches).padStart(2, "0")}`

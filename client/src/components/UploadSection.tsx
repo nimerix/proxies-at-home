@@ -65,6 +65,7 @@ export function UploadSection() {
   );
   const appendUploadedFiles = useCardsStore((state) => state.appendUploadedFiles);
   const setUploadedFiles = useCardsStore((state) => state.setUploadedFiles);
+  const removeCardsByUuid = useCardsStore((state) => state.removeCardsByUuid);
 
   const globalLanguage = useCardsStore((s) => s.globalLanguage ?? "en");
   const setGlobalLanguage = useCardsStore((s) => s.setGlobalLanguage ?? (() => { }));
@@ -115,8 +116,11 @@ export function UploadSection() {
 
   async function addUploadedFiles(
     files: FileList,
-    opts: { hasBakedBleed: boolean }
+    opts: { hasBakedBleed: boolean; signal?: AbortSignal }
   ) {
+    if (opts.signal?.aborted) {
+      throw new DOMException("Upload cancelled", "AbortError");
+    }
     const fileArray = Array.from(files);
     const startIndex = cards.length;
 
@@ -136,6 +140,7 @@ export function UploadSection() {
 
     appendCards(newCards);
 
+    const newCardIds = newCards.map((card) => card.uuid);
     const originalsUpdate: Record<string, string> = {};
     const processedUpdate: Record<string, string> = {};
     const uploadedFilesUpdate: Record<string, File> = {};
@@ -143,50 +148,83 @@ export function UploadSection() {
     let processedCount = 0;
     const totalFiles = fileArray.length;
     const concurrency = resolveImageProcessingConcurrency();
-    await processWithConcurrency(
-      fileArray,
-      async (file: File, i: number) => {
-        const id = newCards[i].uuid;
-        uploadedFilesUpdate[id] = file;
-        originalsUpdate[id] = makeUploadedFileToken(id);
-        try {
-          processedUpdate[id] = await buildPreviewFromFile(file, opts);
-        } catch (err) {
-          console.warn(`[Upload] Failed to process ${file.name}:`, err);
-        } finally {
-          if (totalFiles > 0) {
-            processedCount += 1;
-            setLoadingProgress((processedCount / totalFiles) * 100);
+    let committed = false;
+
+    try {
+      await processWithConcurrency(
+        fileArray,
+        async (file: File, i: number) => {
+          if (opts.signal?.aborted) {
+            return;
           }
-        }
-      },
-      concurrency
-    );
 
-    appendUploadedFiles(uploadedFilesUpdate);
-    appendOriginalSelectedImages(originalsUpdate);
-    appendSelectedImages(processedUpdate);
+          const id = newCards[i].uuid;
+          uploadedFilesUpdate[id] = file;
+          originalsUpdate[id] = makeUploadedFileToken(id);
+          try {
+            processedUpdate[id] = await buildPreviewFromFile(file, opts);
+          } catch (err) {
+            console.warn(`[Upload] Failed to process ${file.name}:`, err);
+          } finally {
+            if (totalFiles > 0) {
+              processedCount += 1;
+              setLoadingProgress((processedCount / totalFiles) * 100);
+            }
+          }
+        },
+        concurrency,
+        opts.signal
+      );
 
-    if (fileArray.length > 0) {
-      setLoadingProgress(100);
+      if (opts.signal?.aborted) {
+        throw new DOMException("Upload cancelled", "AbortError");
+      }
+
+      appendUploadedFiles(uploadedFilesUpdate);
+      appendOriginalSelectedImages(originalsUpdate);
+      appendSelectedImages(processedUpdate);
+
+      if (fileArray.length > 0) {
+        setLoadingProgress(100);
+      }
+
+      maybeEnableBatching(cards.length + newCards.length);
+      committed = true;
+    } finally {
+      if (!committed && newCardIds.length) {
+        removeCardsByUuid(newCardIds);
+      }
     }
-
-    maybeEnableBatching(cards.length + newCards.length);
   }
 
   const handleUploadMpcFill = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setLoadingTask("Uploading Images");
+    const files = e.target.files;
+    if (!files || !files.length) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const cancelHandler = () => controller.abort();
+    setLoadingTask("Uploading Images", {
+      onCancel: cancelHandler,
+      cancelLabel: "Cancel upload",
+    });
 
     try {
-      const files = e.target.files;
-      if (files && files.length) {
-        await addUploadedFiles(files, { hasBakedBleed: true });
+      await addUploadedFiles(files, {
+        hasBakedBleed: true,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (controller.signal.aborted || err?.name === "AbortError") {
+        // Swallow cancellation
+      } else {
+        console.error("[Upload MPC Fill] Error", err);
       }
     } finally {
       if (e.target) e.target.value = "";
-
       setLoadingTask(null);
     }
   };
@@ -194,11 +232,27 @@ export function UploadSection() {
   const handleUploadStandard = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setLoadingTask("Uploading Images");
+    const files = e.target.files;
+    if (!files || !files.length) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const cancelHandler = () => controller.abort();
+    setLoadingTask("Uploading Images", {
+      onCancel: cancelHandler,
+      cancelLabel: "Cancel upload",
+    });
     try {
-      const files = e.target.files;
-      if (files && files.length) {
-        await addUploadedFiles(files, { hasBakedBleed: false });
+      await addUploadedFiles(files, {
+        hasBakedBleed: false,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (controller.signal.aborted || err?.name === "AbortError") {
+        // cancellation, ignore
+      } else {
+        console.error("[Upload] Error", err);
       }
     } finally {
       if (e.target) e.target.value = "";
@@ -254,23 +308,35 @@ export function UploadSection() {
   };
 
   const handleSubmit = async () => {
-    setLoadingTask("Fetching cards");
+    const infos = parseDeckToInfos(deckText || "");
+    if (!infos.length) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const cancelHandler = () => controller.abort();
+    setLoadingTask("Fetching cards", {
+      onCancel: cancelHandler,
+      cancelLabel: "Cancel import",
+    });
+
+    const uniqueMap = new Map<string, CardInfo>();
+    for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
+    const uniqueInfos = Array.from(uniqueMap.values());
+    const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
+
+    let appendedCardIds: string[] = [];
 
     try {
-      const infos = parseDeckToInfos(deckText || "");
-      if (!infos.length) {
-        setLoadingTask(null);
-        return;
-      }
-
-      const uniqueMap = new Map<string, CardInfo>();
-      for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
-      const uniqueInfos = Array.from(uniqueMap.values());
-      const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
-
       try {
-        await axios.delete(`${API_BASE}/api/cards/images`, { timeout: 15000 });
+        await axios.delete(`${API_BASE}/api/cards/images`, {
+          timeout: 15000,
+          signal: controller.signal,
+        });
       } catch (e) {
+        if (controller.signal.aborted) {
+          throw new DOMException("Import cancelled", "AbortError");
+        }
         console.warn("[FetchCards] DELETE failed (continuing):", e);
       }
 
@@ -284,15 +350,22 @@ export function UploadSection() {
             cardArt: "art",
             language: globalLanguage,
           },
-          { timeout: 80000 }
+          { timeout: 80000, signal: controller.signal }
         );
       } catch (e: any) {
+        if (controller.signal.aborted || e?.code === "ERR_CANCELED" || e?.name === "CanceledError") {
+          throw new DOMException("Import cancelled", "AbortError");
+        }
         console.error("[FetchCards] POST failed:", e);
         throw new Error(
           e?.response?.data?.error ||
-          e?.message ||
-          "Failed to fetch cards. Check network/CORS."
+            e?.message ||
+            "Failed to fetch cards. Check network/CORS."
         );
+      }
+
+      if (controller.signal.aborted) {
+        throw new DOMException("Import cancelled", "AbortError");
       }
 
       const data = Array.isArray(response?.data) ? response!.data : [];
@@ -319,8 +392,13 @@ export function UploadSection() {
         } as CardOption;
       });
 
-  appendCards(expandedCards);
-  maybeEnableBatching(cards.length + expandedCards.length);
+      appendCards(expandedCards);
+      appendedCardIds = expandedCards.map((card) => card.uuid);
+      maybeEnableBatching(cards.length + expandedCards.length);
+
+      if (controller.signal.aborted) {
+        throw new DOMException("Import cancelled", "AbortError");
+      }
 
       const newOriginals: Record<string, string> = {};
       for (const card of expandedCards) {
@@ -328,18 +406,27 @@ export function UploadSection() {
           newOriginals[card.uuid] = card.imageUrls[0];
         }
       }
-      appendOriginalSelectedImages(newOriginals);
+      if (Object.keys(newOriginals).length) {
+        appendOriginalSelectedImages(newOriginals);
+      }
 
       const processed: Record<string, string> = {};
       const previewDims = computeCardPreviewPixels(bleedEdgeWidth);
       const totalPreviews = Object.keys(newOriginals).length;
       let completed = 0;
       if (totalPreviews > 0) {
-        setLoadingTask("Processing Images");
+        setLoadingTask("Processing Images", {
+          onCancel: cancelHandler,
+          cancelLabel: "Cancel import",
+        });
         setLoadingProgress(0);
       }
 
       for (const [uuid, url] of Object.entries(newOriginals)) {
+        if (controller.signal.aborted) {
+          throw new DOMException("Import cancelled", "AbortError");
+        }
+
         let bleedImageUrl: string | null = null;
         try {
           const proxiedUrl = getLocalBleedImageUrl(url);
@@ -365,6 +452,11 @@ export function UploadSection() {
           }
         }
       }
+
+      if (controller.signal.aborted) {
+        throw new DOMException("Import cancelled", "AbortError");
+      }
+
       if (totalPreviews > 0) {
         setLoadingProgress(100);
       }
@@ -372,8 +464,22 @@ export function UploadSection() {
 
       setDeckText("");
     } catch (err: any) {
+      if (
+        controller.signal.aborted ||
+        err?.name === "AbortError" ||
+        err?.code === "ERR_CANCELED"
+      ) {
+        if (appendedCardIds.length) {
+          removeCardsByUuid(appendedCardIds);
+        }
+        return;
+      }
+
       console.error("[FetchCards] Error:", err);
       alert(err?.message || "Something went wrong while fetching cards.");
+      if (appendedCardIds.length) {
+        removeCardsByUuid(appendedCardIds);
+      }
     } finally {
       setLoadingTask(null);
     }

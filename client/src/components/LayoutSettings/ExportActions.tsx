@@ -52,8 +52,14 @@ export function ExportActions() {
     if (!cards.length) return;
     if (isProcessing) return;
 
-    setLoadingTask("Generating PDF");
-    setLoadingProgress(0);
+    const controller = new AbortController();
+    const cancelHandler = () => controller.abort();
+
+    setLoadingTask("Generating PDF", {
+      onCancel: cancelHandler,
+      cancelLabel: "Cancel export",
+    });
+    setLoadingProgress({ reset: true, overall: 0, pageProgress: null, currentPage: null, totalPages: null });
     try {
       await exportProxyPagesToPdf({
         cards,
@@ -78,9 +84,14 @@ export function ExportActions() {
         useBatching: useExportBatching,
         pagesPerBatch: exportBatchSize,
         onProgress: (value) => setLoadingProgress(value),
+        abortSignal: controller.signal,
       });
     } catch (err) {
-      console.error("Export failed:", err);
+      if (controller.signal.aborted || (err as any)?.name === "AbortError") {
+        // Swallow cancellation
+      } else {
+        console.error("Export failed:", err);
+      }
     } finally {
       setLoadingTask(null);
     }

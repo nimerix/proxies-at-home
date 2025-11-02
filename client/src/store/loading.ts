@@ -20,11 +20,19 @@ type LoadingProgressInput =
   | null
   | (Partial<LoadingProgressState> & { reset?: boolean });
 
+type LoadingTaskOptions = {
+  onCancel?: () => void;
+  cancelLabel?: string;
+};
+
 type Store = {
   loadingTask: LoadingTask;
   loadingProgress: LoadingProgressState | null;
-  setLoadingTask: (loadingTask: LoadingTask) => void;
+  cancelLabel: string | null;
+  cancelAction: (() => void) | null;
+  setLoadingTask: (loadingTask: LoadingTask, options?: LoadingTaskOptions) => void;
   setLoadingProgress: (progress: LoadingProgressInput) => void;
+  requestCancel: () => void;
 };
 
 function clampPercent(value: number | null | undefined) {
@@ -44,10 +52,14 @@ function normalizeProgress(input?: Partial<LoadingProgressState> | null): Loadin
 export const useLoadingStore = create<Store>((set) => ({
   loadingTask: null,
   loadingProgress: null,
-  setLoadingTask: (loadingTask) =>
+  cancelLabel: null,
+  cancelAction: null,
+  setLoadingTask: (loadingTask, options) =>
     set(() => ({
       loadingTask,
       loadingProgress: null,
+      cancelLabel: options?.onCancel ? options?.cancelLabel ?? "Cancel" : null,
+      cancelAction: options?.onCancel ?? null,
     })),
   setLoadingProgress: (progress) =>
     set((state) => {
@@ -68,5 +80,22 @@ export const useLoadingStore = create<Store>((set) => ({
       });
 
       return { loadingProgress: merged };
+    }),
+  requestCancel: () =>
+    set((state) => {
+      const action = state.cancelAction;
+      if (action) {
+        try {
+          action();
+        } catch (err) {
+          console.error("Loading cancel handler threw", err);
+        }
+      }
+      return {
+        loadingTask: null,
+        loadingProgress: null,
+        cancelAction: null,
+        cancelLabel: null,
+      } as any;
     }),
 }));

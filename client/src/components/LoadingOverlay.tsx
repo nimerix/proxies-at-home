@@ -1,9 +1,11 @@
 import type { LoadingProgressState } from "@/store/loading";
-import { Progress } from "flowbite-react";
+import { Button, Progress } from "flowbite-react";
 
 type LoadingOverlayProps = {
   task: string;
   progress: LoadingProgressState | null;
+  cancelLabel?: string | null;
+  onCancel?: (() => void) | null;
 };
 
 function clampPercent(value: number | null | undefined) {
@@ -11,7 +13,7 @@ function clampPercent(value: number | null | undefined) {
   return Math.max(0, Math.min(100, value));
 }
 
-export default function LoadingOverlay({ task, progress }: LoadingOverlayProps) {
+export default function LoadingOverlay({ task, progress, cancelLabel, onCancel }: LoadingOverlayProps) {
   const overallPercent = clampPercent(progress?.overall ?? null);
   const pagePercent = clampPercent(progress?.pageProgress ?? null);
   const showPageBar =
@@ -49,6 +51,14 @@ export default function LoadingOverlay({ task, progress }: LoadingOverlayProps) 
             ) : (
               <Progress progress={pagePercent} color="blue" size="sm" />
             )}
+          </div>
+        )}
+
+        {onCancel && (
+          <div className="pt-2 flex justify-end">
+            <Button color="light" onClick={onCancel}>
+              {cancelLabel ?? "Cancel"}
+            </Button>
           </div>
         )}
       </div>
