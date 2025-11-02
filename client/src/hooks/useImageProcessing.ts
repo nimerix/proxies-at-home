@@ -11,7 +11,7 @@ import {
   resolveImageProcessingConcurrency,
   urlToDataUrl,
 } from "../helpers/ImageHelper";
-import { useCardsStore } from "../store";
+import { useCardsStore, useSettingsStore } from "../store";
 import type { CardOption } from "../types/Card";
 
 export function useImageProcessing({
@@ -32,11 +32,27 @@ export function useImageProcessing({
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
   );
+  const setIsProcessing = useSettingsStore((state) => state.setIsProcessing);
 
   const [loadingMap, setLoadingMap] = useState<
     Record<string, "idle" | "loading" | "error">
   >({});
   const inFlight = useRef<Record<string, Promise<void>>>({});
+  const activeReprocessJobs = useRef(0);
+
+  const beginReprocessJob = () => {
+    if (activeReprocessJobs.current === 0) {
+      setIsProcessing(true);
+    }
+    activeReprocessJobs.current += 1;
+  };
+
+  const endReprocessJob = () => {
+    activeReprocessJobs.current = Math.max(0, activeReprocessJobs.current - 1);
+    if (activeReprocessJobs.current === 0) {
+      setIsProcessing(false);
+    }
+  };
 
   function getOriginalSrcForCard(card: CardOption): string | File | undefined {
     const stored = originalSelectedImages[card.uuid];
@@ -123,13 +139,18 @@ export function useImageProcessing({
     cards: CardOption[],
     newBleedWidth: number
   ) {
+    if (!cards.length) return;
+
+    beginReprocessJob();
+
     const updated: Record<string, string> = {};
     const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth);
     const concurrency = resolveImageProcessingConcurrency();
 
-    await processWithConcurrency(
-      cards,
-      async (card) => {
+    try {
+      await processWithConcurrency(
+        cards,
+        async (card) => {
       const uuid = card.uuid;
       const original = originalSelectedImages[uuid];
       
@@ -176,10 +197,12 @@ export function useImageProcessing({
       },
       concurrency
     );
-    
-    if (Object.keys(updated).length > 0) {
-      appendSelectedImages(updated);
-    }
+        if (Object.keys(updated).length > 0) {
+          appendSelectedImages(updated);
+        }
+      } finally {
+        endReprocessJob();
+      }
   }
 
   return { loadingMap, ensureProcessed, reprocessSelectedImages };
