@@ -40,6 +40,8 @@ type Store = {
   setRoundedCornerGuides: (value: boolean) => void;
   cornerGuideOffsetMm: number;
   setCornerGuideOffsetMm: (mm: number) => void;
+  isProcessing: boolean;
+  setIsProcessing: (value: boolean) => void;
 };
 
 const defaultPageSettings = {
@@ -50,7 +52,7 @@ const defaultPageSettings = {
   pageHeight: 11,
   columns: 3,
   rows: 3,
-  bleedEdgeWidth: 1,
+  bleedEdgeWidth: 2,
   useCornerGuides: true,
   guideColor: "#39FF14",
   guideWidth: 0.5,
@@ -61,6 +63,7 @@ const defaultPageSettings = {
   exportBatchSize: 20,
   roundedCornerGuides: false,
   cornerGuideOffsetMm: -0.5,
+  isProcessing: false,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -118,6 +121,7 @@ export const useSettingsStore = create<Store>()(
       setRoundedCornerGuides: (value) => set({ roundedCornerGuides: value }),
       setCornerGuideOffsetMm: (mm) => set({ cornerGuideOffsetMm: mm }),
       resetSettings: () => set({ ...defaultPageSettings }),
+      setIsProcessing: (value) => set({ isProcessing: value }),
     }),
     {
       name: "proxxied:layout-settings:v1",

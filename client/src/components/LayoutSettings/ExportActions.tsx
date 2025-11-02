@@ -4,7 +4,7 @@ import { exportProxyPagesToPdf } from "@/helpers/ExportProxyPageToPdf";
 import { useCardsStore } from "@/store/cards";
 import { useLoadingStore } from "@/store/loading";
 import { useSettingsStore } from "@/store/settings";
-import { Button } from "flowbite-react";
+import { Button, Spinner } from "flowbite-react";
 
 export function ExportActions() {
   const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
@@ -16,6 +16,7 @@ export function ExportActions() {
   const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls); // <-- NEW
   const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
 
+  const isProcessing = useSettingsStore((state) => state.isProcessing);
   const pageOrientation = useSettingsStore((state) => state.pageOrientation);
   const pageSizePreset = useSettingsStore((state) => state.pageSizePreset);
   const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
@@ -47,6 +48,7 @@ export function ExportActions() {
 
   const handleExport = async () => {
     if (!cards.length) return;
+    if (isProcessing) return;
 
     setLoadingTask("Generating PDF");
     try {
@@ -82,8 +84,16 @@ export function ExportActions() {
 
   return (
     <div className="flex flex-col gap-2">
-      <Button color="green" onClick={handleExport} disabled={!cards.length}>
-        Export to PDF
+      <Button color="green" onClick={handleExport} disabled={!cards.length || isProcessing}>
+        {isProcessing && (
+          <Spinner size="md" color="purple"/>
+        )}
+        {isProcessing ? (
+         <span className="pl-3">Processing...</span>
+         ) : (
+         <span className="">Export to PDF</span>)
+         }
+        
       </Button>
 
       <Button

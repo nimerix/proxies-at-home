@@ -46,7 +46,6 @@ export function PageSettingsControls() {
   const setExportBatchSize = useSettingsStore((s) => s.setExportBatchSize);
   const setRoundedCornerGuides = useSettingsStore((s) => s.setRoundedCornerGuides);
   const setCornerGuideOffsetMm = useSettingsStore((s) => s.setCornerGuideOffsetMm);
-
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
     bleedEdgeWidth,
