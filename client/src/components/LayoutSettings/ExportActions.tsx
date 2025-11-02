@@ -1,6 +1,4 @@
 import { buildDecklist, downloadDecklist } from "@/helpers/DecklistHelper";
-import { ExportImagesZip } from "@/helpers/ExportImagesZip";
-import { exportProxyPagesToPdf } from "@/helpers/ExportProxyPageToPdf";
 import { useCardsStore } from "@/store/cards";
 import { useLoadingStore } from "@/store/loading";
 import { useSettingsStore } from "@/store/settings";
@@ -61,6 +59,7 @@ export function ExportActions() {
     });
     setLoadingProgress({ reset: true, overall: 0, pageProgress: null, currentPage: null, totalPages: null });
     try {
+      const { exportProxyPagesToPdf } = await import("@/helpers/ExportProxyPageToPdf");
       await exportProxyPagesToPdf({
         cards,
         originalSelectedImages,
@@ -83,7 +82,7 @@ export function ExportActions() {
         cornerGuideOffsetMm,
         useBatching: useExportBatching,
         pagesPerBatch: exportBatchSize,
-        onProgress: (value) => setLoadingProgress(value),
+        onProgress: (value: any) => setLoadingProgress(value),
         abortSignal: controller.signal,
       });
     } catch (err) {
@@ -114,15 +113,15 @@ export function ExportActions() {
 
       <Button
         color="indigo"
-        onClick={() =>
+        onClick={async () => {
+          const { ExportImagesZip } = await import("@/helpers/ExportImagesZip");
           ExportImagesZip({
             cards,
             originalSelectedImages,
             uploadedFiles,
             fileBaseName: "card_images",
-            // If your zip helper later supports it, you can pass cachedImageUrls here too.
-          })
-        }
+          });
+        }}
         disabled={!cards.length}
       >
         Export Card Images (.zip)

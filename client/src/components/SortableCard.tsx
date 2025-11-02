@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useArtworkModalStore, useSettingsStore } from "../store";
@@ -21,7 +21,7 @@ type SortableCardProps = {
   }) => void;
 };
 
-export default function SortableCard({
+const SortableCard = memo(function SortableCard({
   card,
   index,
   globalIndex,
@@ -250,4 +250,6 @@ export default function SortableCard({
       )}
     </div>
   );
-}
+});
+
+export default SortableCard;

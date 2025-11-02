@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/sortable";
 import { Button, Label } from "flowbite-react";
 import { Copy, Trash } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import fullLogo from "../assets/fullLogo.png";
 import CardCellLazy from "../components/CardCellLazy";
 import EdgeCutLines from "../components/FullPageGuides";
@@ -23,56 +23,44 @@ import {
   makeUploadedFileToken,
 } from "../helpers/ImageHelper";
 import { useImageProcessing } from "../hooks/useImageProcessing";
-import {
-  useArtworkModalStore,
-  useCardsStore,
-  useSettingsStore,
-} from "../store";
+import { usePageViewState } from "../hooks/usePageViewState";
 import type { CardOption } from "../types/Card";
-import { ArtworkModal } from "./ArtworkModal";
+
+const ArtworkModal = lazy(() => import("./ArtworkModal").then(module => ({ default: module.ArtworkModal })));
 
 const unit = "mm";
 const baseCardWidthMm = 63;
 const baseCardHeightMm = 88;
 
 export function PageView() {
-  const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
-  const pageWidth = useSettingsStore((state) => state.pageWidth);
-  const pageHeight = useSettingsStore((state) => state.pageHeight);
-  const columns = useSettingsStore((state) => state.columns);
-  const rows = useSettingsStore((state) => state.rows);
-  const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
-  const zoom = useSettingsStore((state) => state.zoom);
+  const { settings, cardsState, cardsActions, openArtworkModal } = usePageViewState();
+  const {
+    pageSizeUnit,
+    pageWidth,
+    pageHeight,
+    columns,
+    rows,
+    bleedEdgeWidth,
+    zoom,
+    cardSpacingMm
+  } = settings;
+  const { cards, selectedImages, originalSelectedImages, uploadedFiles } = cardsState;
+  const {
+    setCards,
+    setSelectedImages,
+    setOriginalSelectedImages,
+    appendSelectedImages,
+    appendOriginalSelectedImages,
+    appendUploadedFiles,
+  } = cardsActions;
 
   const pageRef = useRef<HTMLDivElement>(null);
-  const cards = useCardsStore((state) => state.cards);
-  const selectedImages = useCardsStore((state) => state.selectedImages);
-  const originalSelectedImages = useCardsStore(
-    (state) => state.originalSelectedImages
-  );
-  const openArtworkModal = useArtworkModalStore((state) => state.openModal);
-
-  const setCards = useCardsStore((state) => state.setCards);
-  const setSelectedImages = useCardsStore((state) => state.setSelectedImages);
-  const setOriginalSelectedImages = useCardsStore(
-    (state) => state.setOriginalSelectedImages
-  );
-  const appendSelectedImages = useCardsStore(
-    (state) => state.appendSelectedImages
-  );
-  const appendOriginalSelectedImages = useCardsStore(
-    (state) => state.appendOriginalSelectedImages
-  );
-  const appendUploadedFiles = useCardsStore((state) => state.appendUploadedFiles);
-  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
 
   const bleedPixels = getBleedInPixels(bleedEdgeWidth, unit);
   const guideOffset = `${(bleedPixels * (25.4 / 300)).toFixed(3)}mm`;
   const totalCardWidth = baseCardWidthMm + bleedEdgeWidth * 2;
   const totalCardHeight = baseCardHeightMm + bleedEdgeWidth * 2;
   const pageCapacity = columns * rows;
-  // --- near your other settings selectors ---
-  const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm); // NEW
 
   const gridWidthMm =
     totalCardWidth * columns + Math.max(0, columns - 1) * cardSpacingMm;
@@ -93,7 +81,7 @@ export function PageView() {
     return () => window.removeEventListener("click", handler);
   }, []);
 
-  function duplicateCard(index: number) {
+  const duplicateCard = useCallback((index: number) => {
     const cardToCopy = cards[index];
     if (!cardToCopy) return;
 
@@ -126,13 +114,13 @@ export function PageView() {
         appendUploadedFiles({ [newUuid]: file });
       }
     }
-  }
+  }, [cards, setCards, originalSelectedImages, appendOriginalSelectedImages, selectedImages, appendSelectedImages, uploadedFiles, appendUploadedFiles]);
 
-  function deleteCard(index: number) {
+  const deleteCard = useCallback((index: number) => {
     const cardToRemove = cards[index];
     const cardUuid = cardToRemove.uuid;
 
-    const newCards = cards.filter((_, i) => i !== index);
+    const newCards = cards.filter((_: CardOption, i: number) => i !== index);
 
     const { [cardUuid]: _, ...newSelectedImages } = selectedImages;
     const { [cardUuid]: __, ...newOriginalSelectedImages } =
@@ -141,15 +129,15 @@ export function PageView() {
     setCards(newCards);
     setSelectedImages(newSelectedImages);
     setOriginalSelectedImages(newOriginalSelectedImages);
-  }
+  }, [cards, selectedImages, originalSelectedImages, setCards, setSelectedImages, setOriginalSelectedImages]);
 
-  const reorderImageMap = (
+  const reorderImageMap = useCallback((
     cards: CardOption[],
     oldIndex: number,
     newIndex: number,
     map: Record<string, string>
   ) => {
-    const uuids = cards.map((c) => c.uuid);
+    const uuids = cards.map((c: CardOption) => c.uuid);
     const reorderedUuids = arrayMove(uuids, oldIndex, newIndex);
 
     const newMap: Record<string, string> = {};
@@ -160,7 +148,7 @@ export function PageView() {
     });
 
     return newMap;
-  };
+  }, []);
 
   function chunkCards<T>(cards: T[], size: number): T[][] {
     const chunks: T[][] = [];
@@ -233,7 +221,13 @@ export function PageView() {
         )}
 
         <DndContext
-          sensors={useSensors(useSensor(PointerSensor))}
+          sensors={useSensors(
+            useSensor(PointerSensor, {
+              activationConstraint: {
+                distance: 8,
+              },
+            })
+          )}
           collisionDetection={closestCenter}
           onDragEnd={({ active, over }) => {
             if (over && active.id !== over.id) {
@@ -371,7 +365,9 @@ export function PageView() {
         </DndContext>
       </div>
 
-      <ArtworkModal />
+      <Suspense fallback={null}>
+        <ArtworkModal />
+      </Suspense>
     </div>
   );
 }

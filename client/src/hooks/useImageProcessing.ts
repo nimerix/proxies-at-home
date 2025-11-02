@@ -43,6 +43,7 @@ export function useImageProcessing({
   const inFlight = useRef<Record<string, Promise<void>>>({});
   const jobTokenCounter = useRef(0);
   const activeJobToken = useRef<number | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   function getOriginalSrcForCard(card: CardOption): string | File | undefined {
     const stored = originalSelectedImages[card.uuid];
@@ -134,6 +135,14 @@ export function useImageProcessing({
       return;
     }
 
+    // Cancel any existing job
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const token = ++jobTokenCounter.current;
     activeJobToken.current = token;
     setIsProcessing(true);
@@ -155,6 +164,8 @@ export function useImageProcessing({
       await processWithConcurrency(
         cards,
         async (card) => {
+          if (controller.signal.aborted) return;
+
           const uuid = card.uuid;
           const original = originalSelectedImages[uuid];
 
@@ -179,7 +190,7 @@ export function useImageProcessing({
               resolvedSrc = getLocalBleedImageUrl(original);
             }
 
-            if (!resolvedSrc) return;
+            if (!resolvedSrc || controller.signal.aborted) return;
 
             let processedUrl: string | null = null;
             try {
@@ -188,6 +199,9 @@ export function useImageProcessing({
                 bleedEdgeWidth: newBleedWidth,
                 hasBakedBleed: card.hasBakedBleed,
               });
+
+              if (controller.signal.aborted) return;
+
               updated[uuid] = await createPreviewDataUrl(processedUrl, {
                 maxWidth: previewWidth,
                 maxHeight: previewHeight,
@@ -196,7 +210,9 @@ export function useImageProcessing({
                 background: "#FFFFFF",
               });
             } catch (err) {
-              console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
+              if (!controller.signal.aborted) {
+                console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
+              }
             } finally {
               revokeIfBlobUrl(processedUrl);
             }
@@ -205,10 +221,11 @@ export function useImageProcessing({
             reportProgress();
           }
         },
-        concurrency
+        concurrency,
+        controller.signal
       );
 
-      if (activeJobToken.current === token && Object.keys(updated).length > 0) {
+      if (activeJobToken.current === token && Object.keys(updated).length > 0 && !controller.signal.aborted) {
         appendSelectedImages(updated);
       }
     } finally {
@@ -216,6 +233,9 @@ export function useImageProcessing({
         setIsProcessing(false);
         setProcessingProgress(0);
         activeJobToken.current = null;
+      }
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
       }
     }
   }

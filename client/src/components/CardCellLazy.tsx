@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, memo } from "react";
 import { useOnScreen } from "../hooks/useOnScreen";
 import type { CardOption } from "../types/Card";
 
@@ -10,7 +10,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-export default function CardCellLazy({
+const CardCellLazy = memo(function CardCellLazy({
   card,
   state,
   hasImage,
@@ -46,4 +46,6 @@ export default function CardCellLazy({
       </div>
     </div>
   );
-}
+});
+
+export default CardCellLazy;

@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const fsPromises = require("fs").promises;
 const axios = require("axios");
 const multer = require("multer");
 const crypto = require("crypto");
@@ -67,14 +68,18 @@ const limit = pLimit(6); // 6 at a time is a safe default
 const imageRouter = express.Router();
 
 const cacheDir = path.join(__dirname, "..", "cached-images");
-if (!fs.existsSync(cacheDir)) {
-  fs.mkdirSync(cacheDir);
-}
-
 const uploadDir = path.join(__dirname, "..", "uploaded-images");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+
+// Initialize directories asynchronously
+(async () => {
+  try {
+    await fsPromises.mkdir(cacheDir, { recursive: true });
+    await fsPromises.mkdir(uploadDir, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create cache/upload directories:", err);
+  }
+})();
+
 const upload = multer({ dest: uploadDir });
 
 // Make a stable cache filename from the FULL raw URL (path + query)
@@ -169,12 +174,16 @@ imageRouter.get("/proxy", async (req, res) => {
   const localPath = cachePathFromUrl(originalUrl);
 
   try {
-    if (fs.existsSync(localPath)) {
+    // Check if file exists using async access
+    try {
+      await fsPromises.access(localPath);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       return res.sendFile(localPath);
+    } catch {
+      // File doesn't exist, proceed to download
     }
 
-    const response = await getWithRetry(originalUrl, { responseType: "arraybuffer", timeout: 12000 }, 3);
+    const response = await getWithRetry(originalUrl, { responseType: "arraybuffer", timeout: 12000, maxContentLength: 50 * 1024 * 1024 }, 3);
     if (response.status >= 400 || !response.data) {
       return res.status(502).json({ error: "Upstream error", status: response.status });
     }
@@ -184,7 +193,7 @@ imageRouter.get("/proxy", async (req, res) => {
       return res.status(502).json({ error: "Upstream not image", ct });
     }
 
-    fs.writeFileSync(localPath, Buffer.from(response.data));
+    await fsPromises.writeFile(localPath, Buffer.from(response.data));
 
     res.setHeader("Content-Type", ct);
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
@@ -197,13 +206,10 @@ imageRouter.get("/proxy", async (req, res) => {
 
 // -------------------- maintenance & uploads --------------------
 
-imageRouter.delete("/", (req, res) => {
+imageRouter.delete("/", async (req, res) => {
   const started = Date.now();
-  fs.readdir(cacheDir, (err, files) => {
-    if (err) {
-      console.error("Error reading cache directory:", err.message);
-      return res.status(500).json({ error: "Failed to read cache directory" });
-    }
+  try {
+    const files = await fsPromises.readdir(cacheDir);
 
     // Respond right away so the client UI never looks stuck
     res.json({ message: "Cached images clearing started.", count: files.length });
@@ -213,17 +219,25 @@ imageRouter.delete("/", (req, res) => {
       return;
     }
 
-    let remaining = files.length;
-    for (const file of files) {
-      const filePath = path.join(cacheDir, file);
-      fs.unlink(filePath, (unlinkErr) => {
-        if (unlinkErr) console.warn(`Failed to delete ${filePath}:`, unlinkErr.message);
-        if (--remaining === 0) {
-          console.log(`[DELETE /images] removed ${files.length} in ${Date.now() - started}ms`);
+    // Delete files in parallel using Promise.all
+    await Promise.all(
+      files.map(async (file) => {
+        const filePath = path.join(cacheDir, file);
+        try {
+          await fsPromises.unlink(filePath);
+        } catch (unlinkErr) {
+          console.warn(`Failed to delete ${filePath}:`, unlinkErr.message);
         }
-      });
+      })
+    );
+
+    console.log(`[DELETE /images] removed ${files.length} in ${Date.now() - started}ms`);
+  } catch (err) {
+    console.error("Error reading cache directory:", err.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "Failed to read cache directory" });
     }
-  });
+  }
 });
 
 imageRouter.post("/upload", upload.array("images"), (req, res) => {
