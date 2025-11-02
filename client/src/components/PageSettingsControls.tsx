@@ -46,6 +46,10 @@ export function PageSettingsControls() {
   const setExportBatchSize = useSettingsStore((s) => s.setExportBatchSize);
   const setRoundedCornerGuides = useSettingsStore((s) => s.setRoundedCornerGuides);
   const setCornerGuideOffsetMm = useSettingsStore((s) => s.setCornerGuideOffsetMm);
+  const useOriginalCardNames = useSettingsStore((s) => s.useOriginalCardNames);
+  const setUseOriginalCardNames = useSettingsStore((s) => s.setUseOriginalCardNames);
+  const prefixIndexToExportNames = useSettingsStore((s) => s.prefixIndexToExportNames);
+  const setPrefixIndexToExportNames = useSettingsStore((s) => s.setPrefixIndexToExportNames);
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
     bleedEdgeWidth,
@@ -345,9 +349,43 @@ export function PageSettingsControls() {
                         }}
                       />
                     </div>
-                    
+
                   </div>
 
+                </div>
+
+                <HR className="dark:bg-gray-500" />
+
+                <div className="space-y-3">
+                  <Label>Zip Export Naming</Label>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="use-original-card-names"
+                      checked={useOriginalCardNames}
+                      onChange={(e) => setUseOriginalCardNames(e.target.checked)}
+                    />
+                    <Tooltip
+                      content="Use Scryfall naming pattern (series-number-cardname) instead of card name"
+                      placement="left"
+                      style="dark">
+                      <Label htmlFor="use-original-card-names">Use Scryfall Filenames</Label>
+                    </Tooltip>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="prefix-index-to-export-names"
+                      checked={prefixIndexToExportNames}
+                      onChange={(e) => setPrefixIndexToExportNames(e.target.checked)}
+                    />
+                    <Tooltip
+                      content="Add numeric index prefix (001, 002, etc.) to exported filenames"
+                      placement="left"
+                      style="dark">
+                      <Label htmlFor="prefix-index-to-export-names">Add Index Prefix</Label>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
 
