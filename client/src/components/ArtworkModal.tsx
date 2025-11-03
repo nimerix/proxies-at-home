@@ -15,11 +15,18 @@ import { useArtworkModalStore } from "../store";
 import { useCardsStore } from "../store/cards";
 import type { CardOption } from "../types/Card";
 
+interface ScryfallSet {
+  code: string;
+  name: string;
+}
+
 export function ArtworkModal() {
   const [isGettingMore, setIsGettingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [applyToAll, setApplyToAll] = useState(false);
   const [allPrints, setAllPrints] = useState<CardOption[]>([]);
+  const [setFilter, setSetFilter] = useState("");
+  const [availableSets, setAvailableSets] = useState<ScryfallSet[]>([]);
 
   const isModalOpen = useArtworkModalStore((state) => state.open);
   const modalCard = useArtworkModalStore((state) => state.card);
@@ -46,6 +53,35 @@ export function ArtworkModal() {
   const appendCachedImageUrls = useCardsStore(
     (state) => state.appendCachedImageUrls
   );
+
+  // Fetch full set names from Scryfall API
+  async function fetchSetNames(setCodes: string[]): Promise<Map<string, string>> {
+    const setMap = new Map<string, string>();
+
+    try {
+      // Fetch all sets from Scryfall
+      const response = await axios.get("https://api.scryfall.com/sets");
+      const allSets = response.data.data;
+
+      // Build a map of set codes to set names
+      setCodes.forEach(code => {
+        const matchingSet = allSets.find(
+          (s: any) => s.code?.toLowerCase() === code.toLowerCase()
+        );
+        if (matchingSet) {
+          setMap.set(code, matchingSet.name);
+        } else {
+          setMap.set(code, code); // fallback to code if not found
+        }
+      });
+    } catch (error) {
+      console.warn("Failed to fetch set names from Scryfall:", error);
+      // Fallback: use codes as names
+      setCodes.forEach(code => setMap.set(code, code));
+    }
+
+    return setMap;
+  }
 
   async function getMoreCards() {
     if (!modalCard) return;
@@ -94,6 +130,30 @@ export function ArtworkModal() {
     }
   }
 
+  // Extract unique sets from all prints and fetch full names
+  useEffect(() => {
+    if (allPrints.length > 0) {
+      const uniqueSetCodes = new Set<string>();
+
+      allPrints.forEach(print => {
+        if (print.set) {
+          uniqueSetCodes.add(print.set.toUpperCase());
+        }
+      });
+
+      const codes = Array.from(uniqueSetCodes);
+
+      // Fetch set names asynchronously
+      fetchSetNames(codes).then(setNameMap => {
+        const sets: ScryfallSet[] = codes.map(code => ({
+          code: code,
+          name: setNameMap.get(code) || code
+        }));
+        setAvailableSets(sets.sort((a, b) => a.code.localeCompare(b.code)));
+      });
+    }
+  }, [allPrints]);
+
   // Auto-fetch all prints when modal opens (unless card already has multiple images)
   useEffect(() => {
     if (isModalOpen && modalCard) {
@@ -105,8 +165,46 @@ export function ArtworkModal() {
     } else {
       // Clear prints data when modal closes
       setAllPrints([]);
+      setSetFilter("");
+      setAvailableSets([]);
     }
   }, [isModalOpen, autoFetchPrints]);
+
+  // Filter autocomplete suggestions based on input
+  const filteredSetSuggestions = availableSets.filter(set => {
+    if (!setFilter.trim()) return true;
+    const filterLower = setFilter.trim().toLowerCase();
+    return set.code.toLowerCase().includes(filterLower) ||
+           set.name.toLowerCase().includes(filterLower);
+  });
+
+  // Filter images based on set filter (supports both code and name)
+  const filteredImageUrls = modalCard ? ((): string[] => {
+    if (!setFilter.trim()) {
+      return modalCard.imageUrls;
+    }
+
+    const filterUpper = setFilter.trim().toUpperCase();
+    const filtered: string[] = [];
+
+    // Find matching set code (user might have typed the name)
+    const matchingSet = availableSets.find(
+      s => s.code.toUpperCase() === filterUpper ||
+           s.name.toUpperCase() === filterUpper ||
+           s.name.toUpperCase().includes(filterUpper)
+    );
+
+    const targetSetCode = matchingSet ? matchingSet.code : filterUpper;
+
+    allPrints.forEach(print => {
+      if (print.set?.toUpperCase() === targetSetCode) {
+        const urls = print.imageUrls ?? [];
+        filtered.push(...urls);
+      }
+    });
+
+    return filtered;
+  })() : [];
 
   return (
     <Modal
@@ -191,6 +289,47 @@ export function ArtworkModal() {
 
         {modalCard && (
           <>
+            <div className="mb-4">
+              <Label htmlFor="set-filter" className="mb-2">
+                Filter by Set
+              </Label>
+              <TextInput
+                id="set-filter"
+                type="text"
+                placeholder="Enter set code or name (e.g., MID, Midnight Hunt)..."
+                value={setFilter}
+                onChange={(e) => setSetFilter(e.target.value)}
+                list="available-sets"
+              />
+              <datalist id="available-sets">
+                {filteredSetSuggestions.flatMap(set => [
+                  <option key={`${set.code}-code`} value={set.code}>
+                    {set.name}
+                  </option>,
+                  set.code !== set.name && (
+                    <option key={`${set.code}-name`} value={set.name}>
+                      {set.code}
+                    </option>
+                  )
+                ]).filter(Boolean)}
+              </datalist>
+              <div className="flex items-center justify-between mt-1">
+                {setFilter && (
+                  <button
+                    onClick={() => setSetFilter("")}
+                    className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Clear filter
+                  </button>
+                )}
+                {filteredImageUrls.length > 0 && (
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                    {filteredImageUrls.length} artwork{filteredImageUrls.length !== 1 ? 's' : ''} {setFilter ? 'in this set' : 'available'}
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="flex items-center gap-2 mb-4">
               <Checkbox
                 id="apply-to-all"
@@ -202,8 +341,14 @@ export function ArtworkModal() {
               </Label>
             </div>
 
+            {filteredImageUrls.length === 0 && setFilter && (
+              <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                No artworks found for set "{setFilter.toUpperCase()}". Try a different set code or clear the filter.
+              </div>
+            )}
+
             <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
-              {modalCard.imageUrls.map((pngUrl, i) => {
+              {filteredImageUrls.map((pngUrl, i) => {
                 const thumbUrl = pngToNormal(pngUrl);
                 return (
                   <img
