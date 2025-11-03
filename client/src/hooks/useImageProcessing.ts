@@ -53,6 +53,16 @@ export function useImageProcessing({
       }
       return stored;
     }
+
+    // Use the current face index if available
+    if (card.faces && card.faces.length > 0) {
+      const faceIndex = card.currentFaceIndex ?? 0;
+      const face = card.faces[faceIndex];
+      if (face?.imageUrl) {
+        return getLocalBleedImageUrl(face.imageUrl);
+      }
+    }
+
     if (card.imageUrls?.length) {
       return getLocalBleedImageUrl(card.imageUrls[0]);
     }

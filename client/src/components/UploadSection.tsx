@@ -386,9 +386,27 @@ export function UploadSection() {
         const k = cardKey(ci);
         const fallbackK = `${ci.name.toLowerCase()}||`;
         const card = optionByKey[k] ?? optionByKey[fallbackK];
+
+        if (!card) {
+          return {
+            name: ci.name,
+            imageUrls: [],
+            uuid: crypto.randomUUID(),
+            isUserUpload: false,
+          } as CardOption;
+        }
+
+        // Ensure imageUrls is populated from faces if needed
+        let imageUrls = card.imageUrls ?? [];
+        if (imageUrls.length === 0 && card.faces && card.faces.length > 0) {
+          imageUrls = card.faces.map(face => face.imageUrl).filter(Boolean);
+        }
+
         return {
-          ...(card ?? { name: ci.name, imageUrls: [] }),
+          ...card,
+          imageUrls,
           uuid: crypto.randomUUID(),
+          currentFaceIndex: 0,
         } as CardOption;
       });
 
@@ -402,8 +420,19 @@ export function UploadSection() {
 
       const newOriginals: Record<string, string> = {};
       for (const card of expandedCards) {
+        let firstImageUrl: string | undefined;
+
+        // Try to get image from imageUrls first
         if (card?.imageUrls?.length > 0) {
-          newOriginals[card.uuid] = card.imageUrls[0];
+          firstImageUrl = card.imageUrls[0];
+        }
+        // Fallback to faces array for double-faced cards
+        else if (card?.faces && card.faces.length > 0) {
+          firstImageUrl = card.faces[0]?.imageUrl;
+        }
+
+        if (firstImageUrl) {
+          newOriginals[card.uuid] = firstImageUrl;
         }
       }
       if (Object.keys(newOriginals).length) {

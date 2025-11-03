@@ -50,6 +50,8 @@ export function PageSettingsControls() {
   const setUseOriginalCardNames = useSettingsStore((s) => s.setUseOriginalCardNames);
   const prefixIndexToExportNames = useSettingsStore((s) => s.prefixIndexToExportNames);
   const setPrefixIndexToExportNames = useSettingsStore((s) => s.setPrefixIndexToExportNames);
+  const includeDoubleFacesInZip = useSettingsStore((s) => s.includeDoubleFacesInZip);
+  const setIncludeDoubleFacesInZip = useSettingsStore((s) => s.setIncludeDoubleFacesInZip);
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
     bleedEdgeWidth,
@@ -384,6 +386,20 @@ export function PageSettingsControls() {
                       placement="left"
                       style="dark">
                       <Label htmlFor="prefix-index-to-export-names">Add Index Prefix</Label>
+                    </Tooltip>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="include-double-faces-in-zip"
+                      checked={includeDoubleFacesInZip}
+                      onChange={(e) => setIncludeDoubleFacesInZip(e.target.checked)}
+                    />
+                    <Tooltip
+                      content="Automatically include both sides of double-faced cards in ZIP export"
+                      placement="left"
+                      style="dark">
+                      <Label htmlFor="include-double-faces-in-zip">Include Both Faces</Label>
                     </Tooltip>
                   </div>
                 </div>

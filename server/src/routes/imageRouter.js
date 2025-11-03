@@ -125,26 +125,99 @@ imageRouter.post("/", async (req, res) => {
   const started = Date.now();
 
   try {
+    // When fetching all prints, we need to return multiple cards per name
+    if (unique === "prints") {
+      const allResults = [];
+
+      for (const ci of infos) {
+        try {
+          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("scryfall-timeout")), 20000));
+          const task = (async () => {
+            // For prints, fetch all printings directly
+            const { fetchCardsByQuery } = require("../utils/getCardImagesPaged");
+            const q = `!"${ci.name}" include:extras unique:prints lang:${(ci.language || "en").toLowerCase()}`;
+            console.log(`[Prints] Querying: ${q}`);
+            let cards = await fetchCardsByQuery(q);
+
+            if (!cards.length && fallbackToEnglish && ci.language !== "en") {
+              const qEn = `!"${ci.name}" include:extras unique:prints lang:en`;
+              console.log(`[Prints] Fallback query: ${qEn}`);
+              cards = await fetchCardsByQuery(qEn);
+            }
+
+            console.log(`[Prints] Found ${cards.length} printings for "${ci.name}"`);
+
+            return cards.map(cardData => {
+              // Ensure imageUrls is populated from faces if needed
+              let imageUrls = cardData.imageUrls || [];
+              if (imageUrls.length === 0 && cardData.faces && cardData.faces.length > 0) {
+                imageUrls = cardData.faces.map(face => face.imageUrl).filter(Boolean);
+              }
+
+              return {
+                name: ci.name,
+                set: cardData.set,
+                number: cardData.collector_number,
+                imageUrls,
+                language: ci.language,
+                layout: cardData.layout,
+                faces: cardData.faces,
+              };
+            });
+          })();
+
+          const result = await Promise.race([task, timeout]);
+          allResults.push(...result);
+        } catch (err) {
+          // On timeout/error, return empty object
+          console.error(`[Prints] Error fetching prints for "${ci.name}":`, err?.message);
+          allResults.push({
+            name: ci.name,
+            set: ci.set,
+            number: ci.number,
+            imageUrls: [],
+            language: ci.language,
+            layout: null,
+            faces: null,
+          });
+        }
+      }
+
+      console.log(`[Prints] Returning ${allResults.length} total results`);
+      return res.json(allResults);
+    }
+
+    // For unique:art (default), return one card per name
     const results = await Promise.all(
       infos.map((ci) =>
         limit(async () => {
-          // 20s safety timeout per card so one slow POP can’t hang everything
+          // 20s safety timeout per card so one slow POP can't hang everything
           const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("scryfall-timeout")), 20000));
           const task = (async () => {
-            const imageUrls = await getImagesForCardInfo(ci, unique, ci.language, fallbackToEnglish);
+            const cardData = await getImagesForCardInfo(ci, unique, ci.language, fallbackToEnglish);
             return {
               name: ci.name,
-              set: ci.set,
-              number: ci.number,
-              imageUrls,
+              set: cardData.set || ci.set,
+              number: cardData.collector_number || ci.number,
+              imageUrls: cardData.imageUrls || [],
               language: ci.language,
+              layout: cardData.layout,
+              faces: cardData.faces,
             };
           })();
           try {
             return await Promise.race([task, timeout]);
           } catch {
-            // On timeout/error, return empty list (UI won’t spin forever)
-            return { name: ci.name, set: ci.set, number: ci.number, imageUrls: [], language: ci.language };
+            // On timeout/error, return empty list (UI won't spin forever)
+            return {
+              name: ci.name,
+              set: ci.set,
+              number: ci.number,
+              imageUrls: [],
+              language: ci.language,
+              layout: null,
+              faces: null,
+            };
           }
         })
       )

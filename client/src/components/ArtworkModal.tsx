@@ -19,6 +19,7 @@ export function ArtworkModal() {
   const [isGettingMore, setIsGettingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [applyToAll, setApplyToAll] = useState(false);
+  const [allPrints, setAllPrints] = useState<CardOption[]>([]);
 
   const isModalOpen = useArtworkModalStore((state) => state.open);
   const modalCard = useArtworkModalStore((state) => state.card);
@@ -55,17 +56,55 @@ export function ArtworkModal() {
         { cardNames: [modalCard.name], cardArt: "prints" }
       );
 
-      const urls = res.data?.[0]?.imageUrls ?? [];
-      updateArtworkCard({ imageUrls: urls });
+      console.log(`[ArtworkModal] Received ${res.data?.length ?? 0} results for "${modalCard.name}"`);
+
+      if (!res.data || res.data.length === 0) {
+        console.warn(`[ArtworkModal] No prints found for "${modalCard.name}"`);
+        return;
+      }
+
+      // Combine imageUrls from all prints
+      const allUrls: string[] = [];
+      let firstCardData = res.data[0];
+
+      for (const cardData of res.data) {
+        // Extract imageUrls from either the direct property or from faces
+        let urls = cardData.imageUrls ?? [];
+        if (urls.length === 0 && cardData.faces && cardData.faces.length > 0) {
+          urls = cardData.faces.map(face => face.imageUrl).filter(Boolean);
+        }
+        console.log(`[ArtworkModal] Card ${cardData.set}-${cardData.number}: ${urls.length} images`);
+        allUrls.push(...urls);
+      }
+
+      console.log(`[ArtworkModal] Total combined URLs: ${allUrls.length}`);
+
+      // Store all prints for later lookup
+      setAllPrints(res.data);
+
+      updateArtworkCard({
+        imageUrls: allUrls,
+        faces: firstCardData.faces,
+        layout: firstCardData.layout,
+        set: firstCardData.set,
+        number: firstCardData.number,
+      });
     } finally {
       setIsGettingMore(false);
     }
   }
 
-  // Auto-fetch all prints when Shift-clicked
+  // Auto-fetch all prints when modal opens (unless card already has multiple images)
   useEffect(() => {
-    if (isModalOpen && autoFetchPrints && modalCard) {
-      getMoreCards();
+    if (isModalOpen && modalCard) {
+      // Only fetch if we don't already have multiple artwork options
+      const hasMultipleOptions = (modalCard.imageUrls?.length ?? 0) > 1;
+      if (!hasMultipleOptions || autoFetchPrints) {
+        getMoreCards();
+      }
+    } else {
+      // Clear prints data when modal closes
+      setAllPrints([]);
     }
   }, [isModalOpen, autoFetchPrints]);
 
@@ -99,31 +138,48 @@ export function ArtworkModal() {
 
               if (!res.data.length) return;
 
-              const newCard = res.data[0]; // { name, imageUrls }
-              if (!newCard.imageUrls?.length) return;
+              const newCard = res.data[0];
+
+              // Extract imageUrls from either the direct property or from faces
+              let urls = newCard.imageUrls ?? [];
+              if (urls.length === 0 && newCard.faces && newCard.faces.length > 0) {
+                urls = newCard.faces.map(face => face.imageUrl).filter(Boolean);
+              }
+
+              if (!urls.length) return;
 
               const newUuid = crypto.randomUUID();
+              const firstImageUrl = urls[0];
 
               updateCard(modalIndex, {
                 uuid: newUuid,
                 name: newCard.name,
-                imageUrls: newCard.imageUrls,
+                imageUrls: urls,
                 isUserUpload: false,
+                faces: newCard.faces,
+                layout: newCard.layout,
+                set: newCard.set,
+                number: newCard.number,
+                currentFaceIndex: 0,
               });
 
               updateArtworkCard({
                 uuid: newUuid,
                 name: newCard.name,
-                imageUrls: newCard.imageUrls,
+                imageUrls: urls,
                 isUserUpload: false,
+                faces: newCard.faces,
+                layout: newCard.layout,
+                set: newCard.set,
+                number: newCard.number,
               });
 
               appendOriginalSelectedImages({
-                [newUuid]: newCard.imageUrls[0],
+                [newUuid]: firstImageUrl,
               });
 
               appendCachedImageUrls({
-                [newUuid]: getLocalBleedImageUrl(newCard.imageUrls[0]),
+                [newUuid]: getLocalBleedImageUrl(firstImageUrl),
               });
 
               clearSelectedImage(newUuid);
@@ -162,6 +218,26 @@ export function ArtworkModal() {
                         : "border-transparent"
                       }`}
                     onClick={async (e) => {
+                      // Find which print this URL belongs to and which face was clicked
+                      let matchingPrint: CardOption | undefined;
+                      let clickedFaceIndex = 0;
+
+                      for (const print of allPrints) {
+                        const printUrls = print.imageUrls ?? [];
+                        const urlIndex = printUrls.indexOf(pngUrl);
+                        if (urlIndex !== -1) {
+                          matchingPrint = print;
+                          // Find which face this URL represents
+                          if (print.faces && print.faces.length > 0) {
+                            const faceIndex = print.faces.findIndex(f => f.imageUrl === pngUrl);
+                            if (faceIndex !== -1) {
+                              clickedFaceIndex = faceIndex;
+                            }
+                          }
+                          break;
+                        }
+                      }
+
                       // Apply to all if checkbox is checked OR Shift is held
                       if (applyToAll || e.shiftKey) {
                         const newOriginalSelectedImages: Record<
@@ -177,6 +253,17 @@ export function ArtworkModal() {
                             cachedUpdates[card.uuid] =
                               getLocalBleedImageUrl(pngUrl);
                             uuidsToClear.push(card.uuid);
+
+                            // Update card metadata to match the selected print
+                            if (matchingPrint && modalIndex !== null) {
+                              updateCard(cards.indexOf(card), {
+                                faces: matchingPrint.faces,
+                                layout: matchingPrint.layout,
+                                set: matchingPrint.set,
+                                number: matchingPrint.number,
+                                currentFaceIndex: clickedFaceIndex,
+                              });
+                            }
                           }
                         });
 
@@ -194,6 +281,17 @@ export function ArtworkModal() {
                         appendCachedImageUrls({
                           [modalCard.uuid]: getLocalBleedImageUrl(pngUrl),
                         });
+
+                        // Update the card's metadata to match the selected print
+                        if (matchingPrint && modalIndex !== null) {
+                          updateCard(modalIndex, {
+                            faces: matchingPrint.faces,
+                            layout: matchingPrint.layout,
+                            set: matchingPrint.set,
+                            number: matchingPrint.number,
+                            currentFaceIndex: clickedFaceIndex,
+                          });
+                        }
 
                         clearSelectedImage(modalCard.uuid);
                       }

@@ -44,6 +44,12 @@ type Store = {
   setCornerGuideOffsetMm: (mm: number) => void;
   isProcessing: boolean;
   setIsProcessing: (value: boolean) => void;
+  includeDoubleFacesInZip: boolean;
+  setIncludeDoubleFacesInZip: (value: boolean) => void;
+  useOriginalCardNames: boolean;
+  setUseOriginalCardNames: (value: boolean) => void;
+  prefixIndexToExportNames: boolean;
+  setPrefixIndexToExportNames: (value: boolean) => void;
 };
 
 const defaultPageSettings = {
@@ -67,6 +73,9 @@ const defaultPageSettings = {
   roundedCornerGuides: false,
   cornerGuideOffsetMm: -0.5,
   isProcessing: false,
+  includeDoubleFacesInZip: false,
+  useOriginalCardNames: false,
+  prefixIndexToExportNames: true,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -127,6 +136,9 @@ export const useSettingsStore = create<Store>()(
       setCornerGuideOffsetMm: (mm) => set({ cornerGuideOffsetMm: mm }),
       resetSettings: () => set({ ...defaultPageSettings }),
       setIsProcessing: (value) => set({ isProcessing: value }),
+      setIncludeDoubleFacesInZip: (value) => set({ includeDoubleFacesInZip: value }),
+      setUseOriginalCardNames: (value) => set({ useOriginalCardNames: value }),
+      setPrefixIndexToExportNames: (value) => set({ prefixIndexToExportNames: value }),
     }),
     {
       name: "proxxied:layout-settings:v1",

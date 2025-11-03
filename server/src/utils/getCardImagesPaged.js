@@ -17,56 +17,55 @@ if (USE_LOCAL_DB) {
 }
 
 /**
- * Core: given a CardInfo { name, set?, number?, language? }, return PNG urls.
+ * Core: given a CardInfo { name, set?, number?, language? }, return card data with metadata.
  * If set && number => try exact printing (that language); else set+name; else name-only.
  * `unique` can be "art" or "prints".
  */
 async function getImagesForCardInfo(
   cardInfo,
   unique = "art",
-  language = "en", // NEW
-  fallbackToEnglish = true // NEW
+  language = "en",
+  fallbackToEnglish = true
 ) {
   const { name, set, number } = cardInfo || {};
   const lang = (language || "en").toLowerCase();
 
   // 1) Exact printing: set + collector number + name (language filter still applied)
   if (set && number) {
-    // include language
     const q = `set:${set} number:${escapeColon(
       number
-    )} name:"${name}" include:extras unique:prints lang:${lang}`; // NEW
-    let urls = await fetchPngsByQuery(q);
-    if (!urls.length && fallbackToEnglish && lang !== "en") {
+    )} name:"${name}" include:extras unique:prints lang:${lang}`;
+    let cards = await fetchCardsByQuery(q);
+    if (!cards.length && fallbackToEnglish && lang !== "en") {
       const qEn = `set:${set} number:${escapeColon(
         number
-      )} name:"${name}" include:extras unique:prints lang:en`; // NEW
-      urls = await fetchPngsByQuery(qEn);
+      )} name:"${name}" include:extras unique:prints lang:en`;
+      cards = await fetchCardsByQuery(qEn);
     }
-    if (urls.length) return urls;
+    if (cards.length) return cards[0]; // Return first match
     // fall through to next strategy if exact failed
   }
 
   // 2) Set + name (all printings in set for that name)
   if (set && !number) {
-    const q = `set:${set} name:"${name}" include:extras unique:${unique} lang:${lang}`; // NEW
-    let urls = await fetchPngsByQuery(q);
-    if (!urls.length && fallbackToEnglish && lang !== "en") {
-      const qEn = `set:${set} name:"${name}" include:extras unique:${unique} lang:en`; // NEW
-      urls = await fetchPngsByQuery(qEn);
+    const q = `set:${set} name:"${name}" include:extras unique:${unique} lang:${lang}`;
+    let cards = await fetchCardsByQuery(q);
+    if (!cards.length && fallbackToEnglish && lang !== "en") {
+      const qEn = `set:${set} name:"${name}" include:extras unique:${unique} lang:en`;
+      cards = await fetchCardsByQuery(qEn);
     }
-    if (urls.length) return urls;
+    if (cards.length) return cards[0]; // Return first match
     // fallback if empty
   }
 
   // 3) Name-only exact match (prefer language)
-  const q = `!"${name}" include:extras unique:${unique} lang:${lang}`; // NEW
-  let urls = await fetchPngsByQuery(q);
-  if (!urls.length && fallbackToEnglish && lang !== "en") {
-    const qEn = `!"${name}" include:extras unique:${unique} lang:en`; // NEW
-    urls = await fetchPngsByQuery(qEn);
+  const q = `!"${name}" include:extras unique:${unique} lang:${lang}`;
+  let cards = await fetchCardsByQuery(q);
+  if (!cards.length && fallbackToEnglish && lang !== "en") {
+    const qEn = `!"${name}" include:extras unique:${unique} lang:en`;
+    cards = await fetchCardsByQuery(qEn);
   }
-  return urls;
+  return cards.length ? cards[0] : { imageUrls: [], faces: null, layout: null };
 }
 
 /** Escape colon in collector numbers like "321a" (safe) */
@@ -74,12 +73,14 @@ function escapeColon(s) {
   return String(s).replace(/:/g, "\\:");
 }
 
-/** Run a Scryfall search and collect PNGs (handles DFC). Paginates. */
-async function fetchPngsByQuery(query) {
+/** Run a Scryfall search and collect card data with metadata. Paginates. */
+async function fetchCardsByQuery(query) {
   // Use local database if enabled
   if (USE_LOCAL_DB) {
     try {
-      return await queryLocalDbForPngs(query);
+      const urls = await queryLocalDbForPngs(query);
+      // Legacy format: just return URLs without metadata
+      return urls.map(url => ({ imageUrls: [url], faces: null, layout: null }));
     } catch (err) {
       console.warn("[LocalDB] Query failed, falling back to API:", query, err?.message);
       // Fall through to API call
@@ -88,7 +89,7 @@ async function fetchPngsByQuery(query) {
 
   // Use Scryfall API
   const encodedUrl = `${SCRYFALL_API}?q=${encodeURIComponent(query)}`;
-  const pngs = [];
+  const cards = [];
   let next = encodedUrl;
 
   try {
@@ -98,14 +99,35 @@ async function fetchPngsByQuery(query) {
       const { data, has_more, next_page } = resp.data;
 
       for (const card of data || []) {
+        const cardData = {
+          layout: card.layout,
+          set: card.set,
+          collector_number: card.collector_number,
+          imageUrls: [],
+          faces: null
+        };
+
         if (card?.image_uris?.png) {
-          pngs.push(card.image_uris.png);
+          // Single-faced card
+          cardData.imageUrls.push(card.image_uris.png);
+          cardData.faces = [{
+            name: card.name,
+            imageUrl: card.image_uris.png,
+            faceIndex: 0
+          }];
         } else if (Array.isArray(card?.card_faces)) {
-          for (const face of card.card_faces) {
-            if (face?.image_uris?.png) {
-              pngs.push(face.image_uris.png);
-            }
-          }
+          // Multi-faced card (transform, modal_dfc, etc.)
+          cardData.faces = card.card_faces.map((face, idx) => ({
+            name: face.name,
+            imageUrl: face?.image_uris?.png,
+            faceIndex: idx
+          })).filter(f => f.imageUrl);
+
+          cardData.imageUrls = cardData.faces.map(f => f.imageUrl);
+        }
+
+        if (cardData.imageUrls.length > 0) {
+          cards.push(cardData);
         }
       }
 
@@ -115,10 +137,17 @@ async function fetchPngsByQuery(query) {
     console.warn("[Scryfall] Query failed:", query, err?.message);
   }
 
-  return pngs;
+  return cards;
+}
+
+// Keep old function for backward compatibility, extract just URLs
+async function fetchPngsByQuery(query) {
+  const cards = await fetchCardsByQuery(query);
+  return cards.flatMap(c => c.imageUrls);
 }
 
 module.exports.getImagesForCardInfo = getImagesForCardInfo;
+module.exports.fetchCardsByQuery = fetchCardsByQuery;
 module.exports.getScryfallPngImagesForCard = async (cardName, unique = "art", language = "en", fallbackToEnglish = true) => {
   // name-only helper with language support
   const q = `!"${cardName}" include:extras unique:${unique} lang:${(language || "en").toLowerCase()}`;

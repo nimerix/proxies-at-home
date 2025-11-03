@@ -34,6 +34,7 @@ export function ExportActions() {
   const useExportBatching = useSettingsStore((state) => state.useExportBatching);
   const exportBatchSize = useSettingsStore((state) => state.exportBatchSize);
   const processingProgress = useSettingsStore((state) => state.processingProgress);
+  const includeDoubleFacesInZip = useSettingsStore((state) => state.includeDoubleFacesInZip);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -118,8 +119,10 @@ export function ExportActions() {
           ExportImagesZip({
             cards,
             originalSelectedImages,
+            cachedImageUrls,
             uploadedFiles,
             fileBaseName: "card_images",
+            includeDoubleFaces: includeDoubleFacesInZip,
           });
         }}
         disabled={!cards.length}

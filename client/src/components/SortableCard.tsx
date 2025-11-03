@@ -1,4 +1,4 @@
-import { useMemo, memo } from "react";
+import { useMemo, memo, useCallback } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useArtworkModalStore, useSettingsStore } from "../store";
@@ -43,6 +43,32 @@ const SortableCard = memo(function SortableCard({
 
   const openArtworkModal = useArtworkModalStore((state) => state.openModal);
   const duplicateCardAt = useCardsStore((state) => state.duplicateCardAt);
+  const updateCard = useCardsStore((state) => state.updateCard);
+  const appendOriginalSelectedImages = useCardsStore((state) => state.appendOriginalSelectedImages);
+  const clearSelectedImage = useCardsStore((state) => state.clearSelectedImage);
+
+  // Check if card has multiple faces (is reversible)
+  const isReversible = card.faces && card.faces.length > 1;
+  const currentFaceIndex = card.currentFaceIndex ?? 0;
+
+  const handleFlipCard = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isReversible || !card.faces) return;
+
+    const nextFaceIndex = (currentFaceIndex + 1) % card.faces.length;
+    const nextFace = card.faces[nextFaceIndex];
+
+    if (nextFace?.imageUrl) {
+      // Update the card's current face index
+      updateCard(globalIndex, { currentFaceIndex: nextFaceIndex });
+
+      // Update the original selected image to point to the new face
+      appendOriginalSelectedImages({ [card.uuid]: nextFace.imageUrl });
+
+      // Clear the processed preview so it gets regenerated
+      clearSelectedImage(card.uuid);
+    }
+  }, [isReversible, currentFaceIndex, card.faces, card.uuid, globalIndex, updateCard, appendOriginalSelectedImages, clearSelectedImage]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -152,7 +178,18 @@ const SortableCard = memo(function SortableCard({
       >
         ⠿
       </div>
-      
+
+      {/* Flip Indicator for reversible cards */}
+      {isReversible && (
+        <div
+          onClick={handleFlipCard}
+          className="absolute left-1 top-1 w-6 h-6 bg-blue-600 text-white text-xs rounded-sm flex items-center justify-center cursor-pointer group-hover:opacity-100 opacity-75 hover:bg-blue-700 transition-colors"
+          title={`Flip to ${card.faces?.[currentFaceIndex === 0 ? 1 : 0]?.name || "other side"}`}
+        >
+          ⇄
+        </div>
+      )}
+
       {useCornerGuides && roundedCornerGuides && cornerStyles.validCornerPosition && (
         <>
           <div style={cornerStyles.arcLeftUpper} />

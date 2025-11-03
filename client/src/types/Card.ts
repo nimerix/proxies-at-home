@@ -1,3 +1,9 @@
+export interface CardFace {
+  name: string;
+  imageUrl: string;
+  faceIndex: number;
+}
+
 export interface CardOption {
   uuid: string;
   name: string;
@@ -7,6 +13,9 @@ export interface CardOption {
   set?: string;
   number?: string;
   lang?: string;
+  layout?: string;
+  faces?: CardFace[];
+  currentFaceIndex?: number;
 }
 
 export interface CardDimensions {
