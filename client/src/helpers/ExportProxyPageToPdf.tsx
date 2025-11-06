@@ -813,7 +813,7 @@ export async function exportProxyPagesToPdf({
 
   throwIfAborted();
 
-  const bleedMm = useCornerGuides ? bleedEdgeWidthMm : 0;
+  const bleedMm = bleedEdgeWidthMm;
   const contentWidthMm = CARD_W_MM;
   const contentHeightMm = CARD_H_MM;
   const cardWidthMm = contentWidthMm + bleedMm * 2;
@@ -967,7 +967,7 @@ export async function exportProxyPagesToPdf({
           throwIfAborted();
           const cardCanvas = await buildCardWithBleed(
             src,
-            useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
+            Math.round(bleedMm * DPMM(exportDpi)),
             {
               isUserUpload: !!card.isUserUpload || useCardbackImage,
               hasBakedBleed: useCardbackImage ? customCardbackHasBleed : (isBackFace ? false : !!card.hasBakedBleed),

@@ -12,7 +12,7 @@ export function ExportActions() {
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
-  const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls); // <-- NEW
+  const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls);
   const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
 
   const isProcessing = useSettingsStore((state) => state.isProcessing);
