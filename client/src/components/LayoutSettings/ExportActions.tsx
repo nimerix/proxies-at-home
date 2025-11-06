@@ -35,6 +35,9 @@ export function ExportActions() {
   const exportBatchSize = useSettingsStore((state) => state.exportBatchSize);
   const processingProgress = useSettingsStore((state) => state.processingProgress);
   const includeDoubleFacesInZip = useSettingsStore((state) => state.includeDoubleFacesInZip);
+  const customCardbackUrl = useSettingsStore((state) => state.customCardbackUrl);
+  const customCardbackHasBleed = useSettingsStore((state) => state.customCardbackHasBleed);
+  const disableBackPageGuides = useSettingsStore((state) => state.disableBackPageGuides);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -47,14 +50,14 @@ export function ExportActions() {
     downloadDecklist(`decklist_${date}.txt`, text);
   };
 
-  const handleExport = async () => {
+  const handleExport = async (isBackSide = false) => {
     if (!cards.length) return;
     if (isProcessing) return;
 
     const controller = new AbortController();
     const cancelHandler = () => controller.abort();
 
-    setLoadingTask("Generating PDF", {
+    setLoadingTask(isBackSide ? "Generating Cardback PDF" : "Generating PDF", {
       onCancel: cancelHandler,
       cancelLabel: "Cancel export",
     });
@@ -66,7 +69,7 @@ export function ExportActions() {
         originalSelectedImages,
         cachedImageUrls,
         uploadedFiles,
-        useCornerGuides,
+        useCornerGuides: isBackSide && disableBackPageGuides ? false : useCornerGuides,
         bleedEdgeWidthMm: bleedEdgeWidth,
         guideColor,
         guideWidthPx: guideWidth,
@@ -85,6 +88,9 @@ export function ExportActions() {
         pagesPerBatch: exportBatchSize,
         onProgress: (value: any) => setLoadingProgress(value),
         abortSignal: controller.signal,
+        isBackSide,
+        customCardbackUrl: customCardbackUrl || undefined,
+        customCardbackHasBleed,
       });
     } catch (err) {
       if (controller.signal.aborted || (err as any)?.name === "AbortError") {
@@ -99,7 +105,7 @@ export function ExportActions() {
 
   return (
     <div className="flex flex-col gap-2">
-      <Button color="green" onClick={handleExport} disabled={!cards.length || isProcessing}>
+      <Button color="green" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
         {isProcessing ? (
           <span className="flex items-center gap-2">
             <Spinner size="md" color="purple" />
@@ -108,7 +114,20 @@ export function ExportActions() {
             </span>
           </span>
         ) : (
-          <span>Export to PDF</span>
+          <span>Export Fronts to PDF</span>
+        )}
+      </Button>
+
+      <Button color="purple" onClick={() => handleExport(true)} disabled={!cards.length || isProcessing}>
+        {isProcessing ? (
+          <span className="flex items-center gap-2">
+            <Spinner size="md" color="purple" />
+            <span className="whitespace-nowrap">
+              Processing {processingProgress}%
+            </span>
+          </span>
+        ) : (
+          <span>Export Backs to PDF</span>
         )}
       </Button>
 

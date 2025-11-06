@@ -42,9 +42,14 @@ export function PageView() {
     rows,
     bleedEdgeWidth,
     zoom,
-    cardSpacingMm
+    cardSpacingMm,
+    viewMode,
+    setViewMode,
+    customCardbackUrl,
+    customCardbackHasBleed,
+    disableBackPageGuides
   } = settings;
-  const { cards, selectedImages, originalSelectedImages, uploadedFiles } = cardsState;
+  const { cards, selectedImages, selectedBackFaceImages, originalSelectedImages, uploadedFiles } = cardsState;
   const {
     setCards,
     setSelectedImages,
@@ -158,13 +163,13 @@ export function PageView() {
     return chunks;
   }
 
-  const { loadingMap, ensureProcessed } = useImageProcessing({
+  const { loadingMap, ensureProcessed, ensureBackFaceProcessed } = useImageProcessing({
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
   });
 
   return (
-    <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex justify-center dark:bg-gray-800 ">
+    <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex flex-col items-center dark:bg-gray-800 ">
       {cards.length === 0 ? (
         <div className="flex flex-col items-center">
           <div className="flex flex-row items-center">
@@ -182,6 +187,25 @@ export function PageView() {
           </Label>
         </div>
       ) : null}
+
+      {cards.length > 0 && (
+        <div className="mb-4 flex gap-2">
+          <Button
+            size="sm"
+            color={viewMode === "front" ? "blue" : "gray"}
+            onClick={() => setViewMode("front")}
+          >
+            Front View
+          </Button>
+          <Button
+            size="sm"
+            color={viewMode === "back" ? "blue" : "gray"}
+            onClick={() => setViewMode("back")}
+          >
+            Back View
+          </Button>
+        </div>
+      )}
 
       <div ref={pageRef} className="flex flex-col gap-[1rem]">
         {contextMenu.visible && contextMenu.cardIndex !== null && (
@@ -286,7 +310,21 @@ export function PageView() {
                 >
                   {page.map((card, index) => {
                     const globalIndex = pageIndex * 9 + index;
-                    const img = selectedImages[card.uuid];
+
+                    // Determine which image to show based on view mode
+                    let img: string | undefined = selectedImages[card.uuid];
+                    const hasBackFace = card.faces && card.faces.length > 1 && card.faces[1]?.imageUrl;
+
+                    if (viewMode === "back") {
+                      if (hasBackFace) {
+                        // Use the processed back face image
+                        img = selectedBackFaceImages[card.uuid];
+                      } else {
+                        // Single-faced card in back view - don't show front image, let SortableCard show cardback
+                        img = undefined;
+                      }
+                    }
+
                     const noImages =
                       !img &&
                       !originalSelectedImages[card.uuid] &&
@@ -333,32 +371,38 @@ export function PageView() {
                         key={globalIndex}
                         card={card}
                         state={loadingMap[card.uuid] ?? "idle"}
-                        hasImage={!!selectedImages[card.uuid]}
-                        ensureProcessed={ensureProcessed}
+                        hasImage={!!img || (viewMode === "back" && !hasBackFace)}
+                        ensureProcessed={viewMode === "back" && hasBackFace ? ensureBackFaceProcessed : ensureProcessed}
                       >
                         <SortableCard
                           key={globalIndex}
                           card={card}
                           index={index}
                           globalIndex={globalIndex}
-                          imageSrc={img}
+                          imageSrc={img || ""}
                           totalCardWidth={totalCardWidth}
                           totalCardHeight={totalCardHeight}
                           guideOffset={guideOffset}
                           setContextMenu={setContextMenu}
+                          viewMode={viewMode}
+                          customCardbackUrl={customCardbackUrl}
+                          customCardbackHasBleed={customCardbackHasBleed}
+                          disableBackPageGuides={disableBackPageGuides}
                         />
                       </CardCellLazy>
                     );
                   })}
                 </div>
 
-                <EdgeCutLines
-                  totalCardWidthMm={totalCardWidth}
-                  totalCardHeightMm={totalCardHeight}
-                  baseCardWidthMm={baseCardWidthMm}
-                  baseCardHeightMm={baseCardHeightMm}
-                  bleedEdgeWidthMm={bleedEdgeWidth}
-                />
+                {!(viewMode === "back" && disableBackPageGuides) && (
+                  <EdgeCutLines
+                    totalCardWidthMm={totalCardWidth}
+                    totalCardHeightMm={totalCardHeight}
+                    baseCardWidthMm={baseCardWidthMm}
+                    baseCardHeightMm={baseCardHeightMm}
+                    bleedEdgeWidthMm={bleedEdgeWidth}
+                  />
+                )}
               </div>
             ))}
           </SortableContext>

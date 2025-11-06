@@ -19,6 +19,10 @@ type SortableCardProps = {
     y: number;
     cardIndex: number;
   }) => void;
+  viewMode: "front" | "back";
+  customCardbackUrl: string | null;
+  customCardbackHasBleed: boolean;
+  disableBackPageGuides: boolean;
 };
 
 const SortableCard = memo(function SortableCard({
@@ -30,6 +34,10 @@ const SortableCard = memo(function SortableCard({
   totalCardHeight,
   guideOffset,
   setContextMenu,
+  viewMode,
+  customCardbackUrl,
+  customCardbackHasBleed,
+  disableBackPageGuides,
 }: SortableCardProps) {
   const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
   const guideWidth = useSettingsStore((state) => state.guideWidth);
@@ -37,6 +45,9 @@ const SortableCard = memo(function SortableCard({
   const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
   const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
   const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
+
+  // Determine if we should show guides
+  const shouldShowGuides = useCornerGuides && !(viewMode === "back" && disableBackPageGuides);
 
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: card.uuid });
@@ -69,6 +80,22 @@ const SortableCard = memo(function SortableCard({
       clearSelectedImage(card.uuid);
     }
   }, [isReversible, currentFaceIndex, card.faces, card.uuid, globalIndex, updateCard, appendOriginalSelectedImages, clearSelectedImage]);
+
+  // Determine what image to show based on view mode
+  const displayImageSrc = useMemo(() => {
+    if (viewMode === "back") {
+      // If we have a processed image (either back face or front), use it
+      if (imageSrc) {
+        return imageSrc;
+      }
+
+      // Otherwise show cardback (custom or default)
+      return customCardbackUrl || "/cardback.png";
+    }
+
+    // Front view - show normal image
+    return imageSrc;
+  }, [viewMode, imageSrc, customCardbackUrl]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -157,8 +184,13 @@ const SortableCard = memo(function SortableCard({
       }}
     >
       <img
-        src={imageSrc}
+        src={displayImageSrc}
         className="cursor-pointer block"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: customCardbackHasBleed && viewMode === "back" && displayImageSrc === customCardbackUrl ? "cover" : "contain"
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           setContextMenu({
@@ -190,7 +222,7 @@ const SortableCard = memo(function SortableCard({
         </div>
       )}
 
-      {useCornerGuides && roundedCornerGuides && cornerStyles.validCornerPosition && (
+      {shouldShowGuides && roundedCornerGuides && cornerStyles.validCornerPosition && (
         <>
           <div style={cornerStyles.arcLeftUpper} />
           <div style={cornerStyles.arcRightUpper} />
@@ -198,7 +230,7 @@ const SortableCard = memo(function SortableCard({
           <div style={cornerStyles.arcRightLower} />
         </>
       )}
-      {useCornerGuides && !roundedCornerGuides && (
+      {shouldShowGuides && !roundedCornerGuides && (
         <>
           <div
             style={{

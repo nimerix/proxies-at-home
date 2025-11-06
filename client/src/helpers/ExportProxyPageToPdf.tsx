@@ -772,6 +772,9 @@ export async function exportProxyPagesToPdf({
   pagesPerBatch = 20,
   onProgress,
   abortSignal,
+  isBackSide = false,
+  customCardbackUrl,
+  customCardbackHasBleed = false,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -796,6 +799,9 @@ export async function exportProxyPagesToPdf({
   pagesPerBatch?: number;
   onProgress?: (progress: LoadingProgressState) => void;
   abortSignal?: AbortSignal;
+  isBackSide?: boolean;
+  customCardbackUrl?: string;
+  customCardbackHasBleed?: boolean;
 }) {
   if (!cards.length) return;
 
@@ -825,7 +831,15 @@ export async function exportProxyPagesToPdf({
 
   const pages: CardOption[][] = [];
   for (let i = 0; i < cards.length; i += perPage) {
-    pages.push(cards.slice(i, i + perPage));
+    const pageCards = cards.slice(i, i + perPage);
+
+    // For backside export, reverse the order of cards on each page
+    // This is because the sheet will be printed on the reverse side
+    if (isBackSide) {
+      pageCards.reverse();
+    }
+
+    pages.push(pageCards);
   }
 
   const guideWidthPxScaled = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
@@ -905,15 +919,33 @@ export async function exportProxyPagesToPdf({
         const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
         const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
 
-        let src =
-          (cachedImageUrls && cachedImageUrls[card.uuid]) ||
-          originalSelectedImages[card.uuid] ||
-          card.imageUrls?.[0] ||
-          "";
+        let src: string;
+        let useCardbackImage = false;
+        let isBackFace = false;
+
+        if (isBackSide) {
+          // For backside export, show the back face or cardback
+          if (card.faces && card.faces.length > 1 && card.faces[1]?.imageUrl) {
+            // Double-faced card - use the back face
+            src = getLocalBleedImageUrl(preferPng(card.faces[1].imageUrl));
+            isBackFace = true;
+          } else {
+            // Use cardback (custom or default)
+            src = customCardbackUrl || "/cardback.png";
+            useCardbackImage = true;
+          }
+        } else {
+          // Front side export - normal logic
+          src =
+            (cachedImageUrls && cachedImageUrls[card.uuid]) ||
+            originalSelectedImages[card.uuid] ||
+            card.imageUrls?.[0] ||
+            "";
+        }
 
         let uploadedUrlToRevoke: string | null = null;
 
-        if (isUploadedFileToken(src)) {
+        if (!isBackSide && isUploadedFileToken(src)) {
           const file = uploadedFiles?.[card.uuid];
           if (!file) {
             console.warn(`Skipping card ${card.name} — missing uploaded file data.`);
@@ -927,7 +959,7 @@ export async function exportProxyPagesToPdf({
           src = objectUrl;
         }
 
-        if (!card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
+        if (!isBackSide && !card.isUserUpload && !(cachedImageUrls && cachedImageUrls[card.uuid])) {
           src = getLocalBleedImageUrl(preferPng(src));
         }
 
@@ -937,8 +969,8 @@ export async function exportProxyPagesToPdf({
             src,
             useCornerGuides ? Math.round(bleedMm * DPMM(exportDpi)) : 0,
             {
-              isUserUpload: !!card.isUserUpload,
-              hasBakedBleed: !!card.hasBakedBleed,
+              isUserUpload: !!card.isUserUpload || useCardbackImage,
+              hasBakedBleed: useCardbackImage ? customCardbackHasBleed : (isBackFace ? false : !!card.hasBakedBleed),
             },
             exportDpi
           );
@@ -1011,9 +1043,10 @@ export async function exportProxyPagesToPdf({
       totalBatches > 1
         ? `_part-${String(batchIndex + 1).padStart(2, "0")}-of-${String(totalBatches).padStart(2, "0")}`
         : "";
+    const backSideSuffix = isBackSide ? "_backs" : "";
     const bytesCopy = pdfBytes.slice();
     const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
-    saveAs(blob, `proxxies_${dateSlug}${fileSuffix}.pdf`);
+    saveAs(blob, `proxxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`);
   }
 
   onProgress?.({

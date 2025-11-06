@@ -22,12 +22,16 @@ export function useImageProcessing({
   bleedEdgeWidth: number;
 }) {
   const selectedImages = useCardsStore((state) => state.selectedImages);
+  const selectedBackFaceImages = useCardsStore((state) => state.selectedBackFaceImages);
   const originalSelectedImages = useCardsStore(
     (state) => state.originalSelectedImages
   );
   const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
   const appendSelectedImages = useCardsStore(
     (state) => state.appendSelectedImages
+  );
+  const appendSelectedBackFaceImages = useCardsStore(
+    (state) => state.appendSelectedBackFaceImages
   );
   const appendOriginalSelectedImages = useCardsStore(
     (state) => state.appendOriginalSelectedImages
@@ -133,6 +137,59 @@ export function useImageProcessing({
     })();
 
     inFlight.current[uuid] = p;
+    return p;
+  }
+
+  async function ensureBackFaceProcessed(card: CardOption): Promise<void> {
+    const uuid = card.uuid;
+    if (selectedBackFaceImages[uuid]) return;
+
+    // Check if card has a back face
+    if (!card.faces || card.faces.length < 2 || !card.faces[1]?.imageUrl) return;
+
+    const backFaceKey = `${uuid}-back`;
+    const existing = inFlight.current[backFaceKey];
+    if (existing) return existing;
+
+    const p = (async () => {
+      const backFaceUrl = getLocalBleedImageUrl(card.faces![1].imageUrl);
+
+      setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
+      try {
+        const resolvedSrc = await urlToDataUrl(backFaceUrl);
+
+        let processedUrl: string | null = null;
+        try {
+          // Back faces from Scryfall don't have baked-in bleed
+          processedUrl = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
+            unit,
+            bleedEdgeWidth,
+            hasBakedBleed: false,
+          });
+          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
+          const preview = await createPreviewDataUrl(processedUrl, {
+            maxWidth: previewWidth,
+            maxHeight: previewHeight,
+            mimeType: "image/jpeg",
+            quality: 0.82,
+            background: "#FFFFFF",
+          });
+
+          appendSelectedBackFaceImages({ [uuid]: preview });
+        } finally {
+          revokeIfBlobUrl(processedUrl);
+        }
+
+        setLoadingMap((m) => ({ ...m, [uuid]: "idle" }));
+      } catch (e) {
+        console.error("ensureBackFaceProcessed error for", card.name, e);
+        setLoadingMap((m) => ({ ...m, [uuid]: "error" }));
+      } finally {
+        delete inFlight.current[backFaceKey];
+      }
+    })();
+
+    inFlight.current[backFaceKey] = p;
     return p;
   }
 
@@ -250,5 +307,5 @@ export function useImageProcessing({
     }
   }
 
-  return { loadingMap, ensureProcessed, reprocessSelectedImages };
+  return { loadingMap, ensureProcessed, ensureBackFaceProcessed, reprocessSelectedImages };
 }

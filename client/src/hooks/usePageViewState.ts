@@ -12,6 +12,11 @@ export function usePageViewState() {
       bleedEdgeWidth: state.bleedEdgeWidth,
       zoom: state.zoom,
       cardSpacingMm: state.cardSpacingMm,
+      viewMode: state.viewMode,
+      setViewMode: state.setViewMode,
+      customCardbackUrl: state.customCardbackUrl,
+      customCardbackHasBleed: state.customCardbackHasBleed,
+      disableBackPageGuides: state.disableBackPageGuides,
     }))
   );
 
@@ -19,6 +24,7 @@ export function usePageViewState() {
     useShallow((state) => ({
       cards: state.cards,
       selectedImages: state.selectedImages,
+      selectedBackFaceImages: state.selectedBackFaceImages,
       originalSelectedImages: state.originalSelectedImages,
       uploadedFiles: state.uploadedFiles,
     }))

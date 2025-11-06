@@ -28,6 +28,11 @@ type Store = {
   clearSelectedImage: (uuid: string) => void;
   clearManySelectedImages: (uuids: string[]) => void;
 
+  selectedBackFaceImages: Record<string, string>;
+  setSelectedBackFaceImages: (images: Record<string, string>) => void;
+  appendSelectedBackFaceImages: (newImages: Record<string, string>) => void;
+  clearSelectedBackFaceImage: (uuid: string) => void;
+
   originalSelectedImages: Record<string, string>;
   setOriginalSelectedImages: (images: Record<string, string>) => void;
   appendOriginalSelectedImages: (newImages: Record<string, string>) => void;
@@ -111,6 +116,19 @@ export const useCardsStore = create<Store>()(
           return { selectedImages: newSelected };
         }),
 
+      selectedBackFaceImages: {},
+      setSelectedBackFaceImages: (images) => set({ selectedBackFaceImages: images }),
+      appendSelectedBackFaceImages: (newImages) =>
+        set((state) => ({
+          selectedBackFaceImages: { ...state.selectedBackFaceImages, ...newImages },
+        })),
+      clearSelectedBackFaceImage: (uuid) =>
+        set((state) => {
+          const newSelected = { ...state.selectedBackFaceImages };
+          delete newSelected[uuid];
+          return { selectedBackFaceImages: newSelected };
+        }),
+
       originalSelectedImages: {},
       setOriginalSelectedImages: (images) =>
         set({ originalSelectedImages: images }),
@@ -156,6 +174,7 @@ export const useCardsStore = create<Store>()(
             const uuid = removed.uuid;
             const {
               selectedImages,
+              selectedBackFaceImages,
               originalSelectedImages,
               uploadedImages,
               uploadedOriginalImages,
@@ -164,6 +183,7 @@ export const useCardsStore = create<Store>()(
             } = state;
 
             delete selectedImages[uuid];
+            delete selectedBackFaceImages[uuid];
             delete originalSelectedImages[uuid];
             delete uploadedImages[uuid];
             delete uploadedOriginalImages[uuid];
@@ -173,6 +193,7 @@ export const useCardsStore = create<Store>()(
             return {
               cards,
               selectedImages: { ...selectedImages },
+              selectedBackFaceImages: { ...selectedBackFaceImages },
               originalSelectedImages: { ...originalSelectedImages },
               uploadedImages: { ...uploadedImages },
               uploadedOriginalImages: { ...uploadedOriginalImages },
@@ -202,6 +223,7 @@ export const useCardsStore = create<Store>()(
           const oldUuid = cardToDuplicate.uuid;
           const {
             selectedImages,
+            selectedBackFaceImages,
             originalSelectedImages,
             uploadedImages,
             uploadedOriginalImages,
@@ -215,6 +237,12 @@ export const useCardsStore = create<Store>()(
             updates.selectedImages = {
               ...selectedImages,
               [newUuid]: selectedImages[oldUuid],
+            };
+          }
+          if (selectedBackFaceImages[oldUuid]) {
+            updates.selectedBackFaceImages = {
+              ...selectedBackFaceImages,
+              [newUuid]: selectedBackFaceImages[oldUuid],
             };
           }
           if (originalSelectedImages[oldUuid]) {
@@ -258,6 +286,7 @@ export const useCardsStore = create<Store>()(
         set((state) => {
           const {
             selectedImages,
+            selectedBackFaceImages,
             originalSelectedImages,
             uploadedImages,
             uploadedOriginalImages,
@@ -265,6 +294,7 @@ export const useCardsStore = create<Store>()(
             cachedImageUrls,
           } = state;
           delete selectedImages[uuid];
+          delete selectedBackFaceImages[uuid];
           delete originalSelectedImages[uuid];
           delete uploadedImages[uuid];
           delete uploadedOriginalImages[uuid];
@@ -273,6 +303,7 @@ export const useCardsStore = create<Store>()(
 
           return {
             selectedImages: { ...selectedImages },
+            selectedBackFaceImages: { ...selectedBackFaceImages },
             originalSelectedImages: { ...originalSelectedImages },
             uploadedImages: { ...uploadedImages },
             uploadedOriginalImages: { ...uploadedOriginalImages },
@@ -302,6 +333,7 @@ export const useCardsStore = create<Store>()(
           return {
             cards,
             selectedImages: strip(state.selectedImages),
+            selectedBackFaceImages: strip(state.selectedBackFaceImages),
             originalSelectedImages: strip(state.originalSelectedImages),
             uploadedImages: strip(state.uploadedImages),
             uploadedOriginalImages: strip(state.uploadedOriginalImages),

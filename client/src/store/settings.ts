@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 export type LayoutPreset = "A4" | "A3" | "Letter" | "Tabloid" | "Legal" | "ArchA" | "ArchB" | "SuperB" | "A2" | "A1";
 export type PageOrientation = "portrait" | "landscape";
 export type ExportDpi = 600 | 900 | 1200;
+export type ViewMode = "front" | "back";
 
 type Store = {
   pageSizeUnit: "mm" | "in";
@@ -50,6 +51,14 @@ type Store = {
   setUseOriginalCardNames: (value: boolean) => void;
   prefixIndexToExportNames: boolean;
   setPrefixIndexToExportNames: (value: boolean) => void;
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  customCardbackUrl: string | null;
+  setCustomCardbackUrl: (url: string | null) => void;
+  customCardbackHasBleed: boolean;
+  setCustomCardbackHasBleed: (value: boolean) => void;
+  disableBackPageGuides: boolean;
+  setDisableBackPageGuides: (value: boolean) => void;
 };
 
 const defaultPageSettings = {
@@ -76,6 +85,10 @@ const defaultPageSettings = {
   includeDoubleFacesInZip: false,
   useOriginalCardNames: false,
   prefixIndexToExportNames: true,
+  viewMode: "front",
+  customCardbackUrl: null,
+  customCardbackHasBleed: false,
+  disableBackPageGuides: true,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -139,6 +152,10 @@ export const useSettingsStore = create<Store>()(
       setIncludeDoubleFacesInZip: (value) => set({ includeDoubleFacesInZip: value }),
       setUseOriginalCardNames: (value) => set({ useOriginalCardNames: value }),
       setPrefixIndexToExportNames: (value) => set({ prefixIndexToExportNames: value }),
+      setViewMode: (mode) => set({ viewMode: mode }),
+      setCustomCardbackUrl: (url) => set({ customCardbackUrl: url }),
+      setCustomCardbackHasBleed: (value) => set({ customCardbackHasBleed: value }),
+      setDisableBackPageGuides: (value) => set({ disableBackPageGuides: value }),
     }),
     {
       name: "proxxied:layout-settings:v1",

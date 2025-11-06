@@ -9,6 +9,7 @@ import { PageSizeControl } from "./LayoutSettings/PageSizeControl";
 import { BATCH_PDF_MAX_SIZE, CARD_H_MM, CARD_W_MM, IN_TO_MM } from "@/constants";
 import { GridControls } from "./LayoutSettings/GridControl";
 import { ClampNumber } from "@/helpers/SizeHelpers";
+import { CardbackSettings } from "./LayoutSettings/CardbackSettings";
 
 export function PageSettingsControls() {
   const cards = useCardsStore((state) => state.cards);
@@ -431,6 +432,10 @@ export function PageSettingsControls() {
             </Button>
           </div>
         </div>
+
+        <HR className="dark:bg-gray-500" />
+
+        <CardbackSettings />
 
         <HR className="dark:bg-gray-500" />
 
