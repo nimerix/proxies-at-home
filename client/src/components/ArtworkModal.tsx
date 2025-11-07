@@ -8,7 +8,7 @@ import {
   ModalHeader,
   TextInput,
 } from "flowbite-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../constants";
 import { pngToNormal, getLocalBleedImageUrl } from "../helpers/ImageHelper";
 import { useArtworkModalStore } from "../store";
@@ -23,10 +23,15 @@ interface ScryfallSet {
 export function ArtworkModal() {
   const [isGettingMore, setIsGettingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<CardOption[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
   const [applyToAll, setApplyToAll] = useState(false);
   const [allPrints, setAllPrints] = useState<CardOption[]>([]);
   const [setFilter, setSetFilter] = useState("");
   const [availableSets, setAvailableSets] = useState<ScryfallSet[]>([]);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isModalOpen = useArtworkModalStore((state) => state.open);
   const modalCard = useArtworkModalStore((state) => state.card);
@@ -167,8 +172,126 @@ export function ArtworkModal() {
       setAllPrints([]);
       setSetFilter("");
       setAvailableSets([]);
+      setSearchQuery("");
+      setSearchResults([]);
+      setShowDropdown(false);
     }
   }, [isModalOpen, autoFetchPrints]);
+
+  // Debounced search for card replacement
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    const query = searchQuery.trim();
+
+    if (query.length < 3) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    setIsSearching(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const res = await axios.post<CardOption[]>(
+          `${API_BASE}/api/cards/images`,
+          { cardNames: [query] }
+        );
+
+        if (res.data && res.data.length > 0) {
+          setSearchResults(res.data.slice(0, 10));
+          setShowDropdown(true);
+        } else {
+          setSearchResults([]);
+          setShowDropdown(false);
+        }
+      } catch (error) {
+        console.error("Search failed:", error);
+        setSearchResults([]);
+        setShowDropdown(false);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+
+    if (showDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showDropdown]);
+
+  // Helper function to replace the current card with a new one
+  async function replaceCardWith(newCard: CardOption) {
+    if (modalIndex === null) return;
+
+    // Extract imageUrls from either the direct property or from faces
+    let urls = newCard.imageUrls ?? [];
+    if (urls.length === 0 && newCard.faces && newCard.faces.length > 0) {
+      urls = newCard.faces.map(face => face.imageUrl).filter(Boolean);
+    }
+
+    if (!urls.length) return;
+
+    const newUuid = crypto.randomUUID();
+    const firstImageUrl = urls[0];
+
+    updateCard(modalIndex, {
+      uuid: newUuid,
+      name: newCard.name,
+      imageUrls: urls,
+      isUserUpload: false,
+      faces: newCard.faces,
+      layout: newCard.layout,
+      set: newCard.set,
+      number: newCard.number,
+      currentFaceIndex: 0,
+    });
+
+    updateArtworkCard({
+      uuid: newUuid,
+      name: newCard.name,
+      imageUrls: urls,
+      isUserUpload: false,
+      faces: newCard.faces,
+      layout: newCard.layout,
+      set: newCard.set,
+      number: newCard.number,
+    });
+
+    appendOriginalSelectedImages({
+      [newUuid]: firstImageUrl,
+    });
+
+    appendCachedImageUrls({
+      [newUuid]: getLocalBleedImageUrl(firstImageUrl),
+    });
+
+    clearSelectedImage(newUuid);
+
+    setSearchQuery("");
+    setSearchResults([]);
+    setShowDropdown(false);
+
+    // Fetch all prints for the new card
+    getMoreCards();
+  }
 
   // Filter autocomplete suggestions based on input
   const filteredSetSuggestions = availableSets.filter(set => {
@@ -215,7 +338,7 @@ export function ArtworkModal() {
     >
       <ModalHeader>Select Artwork</ModalHeader>
       <ModalBody>
-        <div className="mb-4">
+        <div className="mb-4 relative" ref={dropdownRef}>
           <TextInput
             type="text"
             placeholder="Replace with a different card..."
@@ -226,65 +349,50 @@ export function ArtworkModal() {
               e.preventDefault();
               e.stopPropagation();
 
-              const name = searchQuery.trim();
-              if (!name || modalIndex === null) return;
-
-              const res = await axios.post<CardOption[]>(
-                `${API_BASE}/api/cards/images`,
-                { cardNames: [name] } // unique:art default happens server-side
-              );
-
-              if (!res.data.length) return;
-
-              const newCard = res.data[0];
-
-              // Extract imageUrls from either the direct property or from faces
-              let urls = newCard.imageUrls ?? [];
-              if (urls.length === 0 && newCard.faces && newCard.faces.length > 0) {
-                urls = newCard.faces.map(face => face.imageUrl).filter(Boolean);
+              if (searchResults.length > 0) {
+                replaceCardWith(searchResults[0]);
               }
-
-              if (!urls.length) return;
-
-              const newUuid = crypto.randomUUID();
-              const firstImageUrl = urls[0];
-
-              updateCard(modalIndex, {
-                uuid: newUuid,
-                name: newCard.name,
-                imageUrls: urls,
-                isUserUpload: false,
-                faces: newCard.faces,
-                layout: newCard.layout,
-                set: newCard.set,
-                number: newCard.number,
-                currentFaceIndex: 0,
-              });
-
-              updateArtworkCard({
-                uuid: newUuid,
-                name: newCard.name,
-                imageUrls: urls,
-                isUserUpload: false,
-                faces: newCard.faces,
-                layout: newCard.layout,
-                set: newCard.set,
-                number: newCard.number,
-              });
-
-              appendOriginalSelectedImages({
-                [newUuid]: firstImageUrl,
-              });
-
-              appendCachedImageUrls({
-                [newUuid]: getLocalBleedImageUrl(firstImageUrl),
-              });
-
-              clearSelectedImage(newUuid);
-
-              setSearchQuery("");
             }}
           />
+          {isSearching && (
+            <div className="absolute right-3 top-3 text-gray-400">
+              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          )}
+          {showDropdown && searchResults.length > 0 && (
+            <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-80 overflow-y-auto">
+              {searchResults.map((card, idx) => (
+                <div
+                  key={idx}
+                  className="px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer border-b border-gray-200 dark:border-gray-600 last:border-b-0 flex items-center gap-3"
+                  onClick={() => replaceCardWith(card)}
+                >
+                  <div className="flex-shrink-0 w-12 h-16">
+                    <img
+                      src={pngToNormal(card.imageUrls?.[0] || (card.faces?.[0]?.imageUrl || ""))}
+                      alt={card.name}
+                      className="w-full h-full object-cover rounded"
+                      onError={(e) => {
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.src = card.imageUrls?.[0] || (card.faces?.[0]?.imageUrl || "");
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                      {card.name}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      {card.set && card.number ? `${card.set.toUpperCase()} #${card.number}` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {modalCard && (

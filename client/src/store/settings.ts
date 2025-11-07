@@ -166,24 +166,97 @@ export const useSettingsStore = create<Store>()(
       setUseHighQualityPreviews: (value) => set({ useHighQualityPreviews: value }),
     }),
     {
-      name: "proxxied:layout-settings:v1",
-      version: 2,
+      name: "proxxied:layout-settings:v2",
+      version: 1,
 
       partialize: (state) => {
-        const { pageOrientation, pageWidth, pageHeight, pageSizeUnit, ...rest } = state;
-        return rest;
+        const persisted = {
+          // Persist all settings except:
+          // - Page dimensions (recalculated from preset)
+          // - Transient state (isProcessing, processingProgress)
+          // - Setter functions (explicitly excluded)
+          pageSizePreset: state.pageSizePreset,
+          columns: state.columns,
+          rows: state.rows,
+          bleedEdgeWidth: state.bleedEdgeWidth,
+          useCornerGuides: state.useCornerGuides,
+          guideColor: state.guideColor,
+          guideWidth: state.guideWidth,
+          zoom: state.zoom,
+          cardSpacingMm: state.cardSpacingMm,
+          exportDpi: state.exportDpi,
+          useExportBatching: state.useExportBatching,
+          exportBatchSize: state.exportBatchSize,
+          roundedCornerGuides: state.roundedCornerGuides,
+          cornerGuideOffsetMm: state.cornerGuideOffsetMm,
+          includeDoubleFacesInZip: state.includeDoubleFacesInZip,
+          useOriginalCardNames: state.useOriginalCardNames,
+          prefixIndexToExportNames: state.prefixIndexToExportNames,
+          viewMode: state.viewMode,
+          customCardbackUrl: state.customCardbackUrl,
+          customCardbackHasBleed: state.customCardbackHasBleed,
+          disableBackPageGuides: state.disableBackPageGuides,
+          exportCollated: state.exportCollated,
+          useHighQualityPreviews: state.useHighQualityPreviews,
+        };
+        console.log("[Settings] Persisting state:", persisted);
+        return persisted;
       },
 
-      migrate: (persistedState, _version) => {
-        const { pageOrientation, pageWidth, pageHeight, pageSizeUnit, ...rest } =
-          (persistedState as any) ?? {};
-        return rest;
+      migrate: (persistedState: any, _version) => {
+        console.log("[Settings] Migrating from version", _version, "state:", persistedState);
+        // Return only properties that exist in the persisted state
+        // Missing properties will use defaults from initial state
+        const state = persistedState ?? {};
+        const migrated: any = {};
+
+        // Only include properties that are defined
+        if (state.pageSizePreset !== undefined) migrated.pageSizePreset = state.pageSizePreset;
+        if (state.columns !== undefined) migrated.columns = state.columns;
+        if (state.rows !== undefined) migrated.rows = state.rows;
+        if (state.bleedEdgeWidth !== undefined) migrated.bleedEdgeWidth = state.bleedEdgeWidth;
+        if (state.useCornerGuides !== undefined) migrated.useCornerGuides = state.useCornerGuides;
+        if (state.guideColor !== undefined) migrated.guideColor = state.guideColor;
+        if (state.guideWidth !== undefined) migrated.guideWidth = state.guideWidth;
+        if (state.zoom !== undefined) migrated.zoom = state.zoom;
+        if (state.cardSpacingMm !== undefined) migrated.cardSpacingMm = state.cardSpacingMm;
+        if (state.exportDpi !== undefined) migrated.exportDpi = state.exportDpi;
+        if (state.useExportBatching !== undefined) migrated.useExportBatching = state.useExportBatching;
+        if (state.exportBatchSize !== undefined) migrated.exportBatchSize = state.exportBatchSize;
+        if (state.roundedCornerGuides !== undefined) migrated.roundedCornerGuides = state.roundedCornerGuides;
+        if (state.cornerGuideOffsetMm !== undefined) migrated.cornerGuideOffsetMm = state.cornerGuideOffsetMm;
+        if (state.includeDoubleFacesInZip !== undefined) migrated.includeDoubleFacesInZip = state.includeDoubleFacesInZip;
+        if (state.useOriginalCardNames !== undefined) migrated.useOriginalCardNames = state.useOriginalCardNames;
+        if (state.prefixIndexToExportNames !== undefined) migrated.prefixIndexToExportNames = state.prefixIndexToExportNames;
+        if (state.viewMode !== undefined) migrated.viewMode = state.viewMode;
+        if (state.customCardbackUrl !== undefined) migrated.customCardbackUrl = state.customCardbackUrl;
+        if (state.customCardbackHasBleed !== undefined) migrated.customCardbackHasBleed = state.customCardbackHasBleed;
+        if (state.disableBackPageGuides !== undefined) migrated.disableBackPageGuides = state.disableBackPageGuides;
+        if (state.exportCollated !== undefined) migrated.exportCollated = state.exportCollated;
+        if (state.useHighQualityPreviews !== undefined) migrated.useHighQualityPreviews = state.useHighQualityPreviews;
+
+        console.log("[Settings] Migration result:", migrated);
+        return migrated;
       },
 
       onRehydrateStorage: () => (state, error) => {
-        if (error) return;
-        const preset = state?.pageSizePreset ?? "Letter";
-        state?.setPageSizePreset?.(preset);
+        console.log("[Settings] Rehydrating storage, error:", error, "state:", state);
+        if (error) {
+          console.error("[Settings] Rehydration error:", error);
+          return;
+        }
+        // Manually set page dimensions without triggering persist
+        // This avoids the setPageSizePreset call which would overwrite other settings
+        if (state) {
+          const preset = state.pageSizePreset ?? "Letter";
+          const { pageWidth, pageHeight, pageSizeUnit } = layoutPresetsSizes[preset];
+          console.log("[Settings] Restoring page dimensions for preset:", preset);
+          // Directly mutate the state without triggering persist
+          state.pageWidth = pageWidth;
+          state.pageHeight = pageHeight;
+          state.pageSizeUnit = pageSizeUnit;
+          state.pageOrientation = "portrait";
+        }
       },
     }
   )
