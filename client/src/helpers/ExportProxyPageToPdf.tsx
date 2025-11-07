@@ -924,11 +924,21 @@ export async function exportProxyPagesToPdf({
         let isBackFace = false;
 
         if (isBackSide) {
-          // For backside export, show the back face or cardback
-          if (card.faces && card.faces.length > 1 && card.faces[1]?.imageUrl) {
-            // Double-faced card - use the back face
-            src = getLocalBleedImageUrl(preferPng(card.faces[1].imageUrl));
-            isBackFace = true;
+          // For backside export, show the OPPOSITE face of what's currently displayed on front
+          if (card.faces && card.faces.length > 1) {
+            const currentFaceIndex = card.currentFaceIndex ?? 0;
+            const oppositeFaceIndex = currentFaceIndex === 0 ? 1 : 0;
+            const oppositeFace = card.faces[oppositeFaceIndex];
+
+            if (oppositeFace?.imageUrl) {
+              // Double-faced card - use the opposite face
+              src = getLocalBleedImageUrl(preferPng(oppositeFace.imageUrl));
+              isBackFace = true;
+            } else {
+              // Fallback to cardback
+              src = customCardbackUrl || "/cardback.png";
+              useCardbackImage = true;
+            }
           } else {
             // Use cardback (custom or default)
             src = customCardbackUrl || "/cardback.png";

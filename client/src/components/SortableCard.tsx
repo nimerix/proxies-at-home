@@ -57,6 +57,7 @@ const SortableCard = memo(function SortableCard({
   const updateCard = useCardsStore((state) => state.updateCard);
   const appendOriginalSelectedImages = useCardsStore((state) => state.appendOriginalSelectedImages);
   const clearSelectedImage = useCardsStore((state) => state.clearSelectedImage);
+  const clearSelectedBackFaceImage = useCardsStore((state) => state.clearSelectedBackFaceImage);
 
   // Check if card has multiple faces (is reversible)
   const isReversible = card.faces && card.faces.length > 1;
@@ -76,10 +77,11 @@ const SortableCard = memo(function SortableCard({
       // Update the original selected image to point to the new face
       appendOriginalSelectedImages({ [card.uuid]: nextFace.imageUrl });
 
-      // Clear the processed preview so it gets regenerated
+      // Clear the processed previews so they get regenerated
       clearSelectedImage(card.uuid);
+      clearSelectedBackFaceImage(card.uuid);
     }
-  }, [isReversible, currentFaceIndex, card.faces, card.uuid, globalIndex, updateCard, appendOriginalSelectedImages, clearSelectedImage]);
+  }, [isReversible, currentFaceIndex, card.faces, card.uuid, globalIndex, updateCard, appendOriginalSelectedImages, clearSelectedImage, clearSelectedBackFaceImage]);
 
   // Determine what image to show based on view mode
   const displayImageSrc = useMemo(() => {

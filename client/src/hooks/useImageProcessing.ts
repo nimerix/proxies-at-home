@@ -144,15 +144,22 @@ export function useImageProcessing({
     const uuid = card.uuid;
     if (selectedBackFaceImages[uuid]) return;
 
-    // Check if card has a back face
-    if (!card.faces || card.faces.length < 2 || !card.faces[1]?.imageUrl) return;
+    // Check if card has multiple faces
+    if (!card.faces || card.faces.length < 2) return;
+
+    // For back view, show the OPPOSITE face of what's currently displayed on front
+    const currentFaceIndex = card.currentFaceIndex ?? 0;
+    const oppositeFaceIndex = currentFaceIndex === 0 ? 1 : 0;
+    const oppositeFace = card.faces[oppositeFaceIndex];
+
+    if (!oppositeFace?.imageUrl) return;
 
     const backFaceKey = `${uuid}-back`;
     const existing = inFlight.current[backFaceKey];
     if (existing) return existing;
 
     const p = (async () => {
-      const backFaceUrl = getLocalBleedImageUrl(card.faces![1].imageUrl);
+      const backFaceUrl = getLocalBleedImageUrl(oppositeFace.imageUrl);
 
       setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
       try {
