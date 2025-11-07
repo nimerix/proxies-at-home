@@ -85,11 +85,11 @@ async function getImagesForCardInfo(
       cards = await fetchCardsByQuery(qEn);
     }
     if (cards.length) return cards[0]; // Return first match
-    // fall through to next strategy if exact failed
+    // fall through to retry without collector number
   }
 
-  // 2) Set + name (all printings in set for that name)
-  if (set && !number) {
+  // 2) Set + name (without collector number - used as fallback from step 1 or when no number provided)
+  if (set) {
     const q = `set:${set} name:"${name}" include:extras unique:${unique} lang:${lang}`;
     let cards = await fetchCardsByQuery(q);
     if (!cards.length && fallbackToEnglish && lang !== "en") {
@@ -97,7 +97,7 @@ async function getImagesForCardInfo(
       cards = await fetchCardsByQuery(qEn);
     }
     if (cards.length) return cards[0]; // Return first match
-    // fallback if empty
+    // fall through to name-only query
   }
 
   // 3) Name-only exact match (prefer language)
