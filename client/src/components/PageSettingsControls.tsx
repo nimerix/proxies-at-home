@@ -106,7 +106,7 @@ export function PageSettingsControls() {
       <h2 className="text-2xl font-semibold dark:text-white">Settings</h2>
 
       <div id="settings-content" className="space-y-4">
-        <Accordion alwaysOpen={true} flush={true}>
+        <Accordion flush={true}>
           <AccordionPanel>
             <AccordionTitle>
               Page Size Settings
@@ -115,9 +115,7 @@ export function PageSettingsControls() {
               <PageSizeControl />
             </AccordionContent>
           </AccordionPanel>
-        </Accordion>
 
-        <Accordion alwaysOpen={true} flush={true}>
           <AccordionPanel>
             <AccordionTitle>
               Layout Settings
@@ -166,26 +164,7 @@ export function PageSettingsControls() {
               </div>
             </AccordionContent>
           </AccordionPanel>
-        </Accordion>
 
-        {/* <div>
-          <Label>Bleed Edge (mm)</Label>
-          <TextInput
-            className="w-full"
-            type="number"
-            value={bleedEdgeWidth}
-            max={2}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              if (!isNaN(val)) {
-                setBleedEdgeWidth(val);
-                // Only bleed width affects reprocessing
-                debouncedReprocess(cards, val);
-              }
-            }}
-          />
-        </div> */}
-        <Accordion alwaysOpen={true} flush={true}>
           <AccordionPanel>
             <AccordionTitle>
               Cutting Guides
@@ -277,8 +256,7 @@ export function PageSettingsControls() {
               </div>
             </AccordionContent>
           </AccordionPanel>
-        </Accordion>
-        <Accordion alwaysOpen={true} flush={true}>
+
           <AccordionPanel>
             <AccordionTitle>
               Cardback Settings
@@ -287,8 +265,7 @@ export function PageSettingsControls() {
               <CardbackSettings />
             </AccordionContent>
           </AccordionPanel>
-        </Accordion>
-        <Accordion alwaysOpen={true} flush={true}>
+
           <AccordionPanel>
             <AccordionTitle>
               Export Settings
