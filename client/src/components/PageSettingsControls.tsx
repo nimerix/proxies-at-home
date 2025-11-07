@@ -53,6 +53,8 @@ export function PageSettingsControls() {
   const setPrefixIndexToExportNames = useSettingsStore((s) => s.setPrefixIndexToExportNames);
   const includeDoubleFacesInZip = useSettingsStore((s) => s.includeDoubleFacesInZip);
   const setIncludeDoubleFacesInZip = useSettingsStore((s) => s.setIncludeDoubleFacesInZip);
+  const useHighQualityPreviews = useSettingsStore((s) => s.useHighQualityPreviews);
+  const setUseHighQualityPreviews = useSettingsStore((s) => s.setUseHighQualityPreviews);
   const { reprocessSelectedImages } = useImageProcessing({
     unit: "mm",
     bleedEdgeWidth,
@@ -159,6 +161,24 @@ export function PageSettingsControls() {
                       Max that fits with current layout: <b>{maxSpacingMm} mm</b>.
                     </HelperText> */}
                   </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="use-high-quality-previews"
+                    checked={useHighQualityPreviews}
+                    onChange={(e) => {
+                      setUseHighQualityPreviews(e.target.checked);
+                      // Reprocess images with new quality setting
+                      debouncedReprocess(cards, bleedEdgeWidth);
+                    }}
+                  />
+                  <Tooltip
+                    content="Use higher DPI for web previews (uses more memory but better quality)"
+                    placement="left"
+                    style="dark">
+                    <Label htmlFor="use-high-quality-previews">High Quality Previews</Label>
+                  </Tooltip>
                 </div>
 
               </div>

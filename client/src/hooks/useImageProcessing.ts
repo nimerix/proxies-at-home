@@ -10,9 +10,12 @@ import {
   revokeIfBlobUrl,
   resolveImageProcessingConcurrency,
   urlToDataUrl,
+  PREVIEW_CARD_DPI,
 } from "../helpers/ImageHelper";
 import { useCardsStore, useSettingsStore } from "../store";
 import type { CardOption } from "../types/Card";
+
+const HIGH_QUALITY_PREVIEW_DPI = 300;
 
 export function useImageProcessing({
   unit,
@@ -105,7 +108,9 @@ export function useImageProcessing({
             bleedEdgeWidth,
             hasBakedBleed: card.hasBakedBleed,
           });
-          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
+          const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
+          const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
+          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
           const preview = await createPreviewDataUrl(processedUrl, {
             maxWidth: previewWidth,
             maxHeight: previewHeight,
@@ -173,7 +178,9 @@ export function useImageProcessing({
             bleedEdgeWidth,
             hasBakedBleed: false,
           });
-          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth);
+          const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
+          const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
+          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
           const preview = await createPreviewDataUrl(processedUrl, {
             maxWidth: previewWidth,
             maxHeight: previewHeight,
@@ -224,7 +231,9 @@ export function useImageProcessing({
 
     let completed = 0;
     const updated: Record<string, string> = {};
-    const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth);
+    const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
+    const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
+    const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth, dpi);
     const concurrency = resolveImageProcessingConcurrency();
 
     const reportProgress = () => {

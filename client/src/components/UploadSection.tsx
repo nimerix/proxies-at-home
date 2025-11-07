@@ -14,6 +14,7 @@ import {
   makeUploadedFileToken,
   revokeIfBlobUrl,
   resolveImageProcessingConcurrency,
+  PREVIEW_CARD_DPI,
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -35,6 +36,8 @@ import {
 } from "flowbite-react";
 import { ExternalLink } from "lucide-react";
 import React, { useCallback, useState } from "react";
+
+const HIGH_QUALITY_PREVIEW_DPI = 300;
 
 async function readText(file: File): Promise<string> {
   return new Promise((resolve) => {
@@ -100,7 +103,9 @@ export function UploadSection() {
         bleedEdgeWidth,
         hasBakedBleed: opts.hasBakedBleed,
       });
-      const { width, height } = computeCardPreviewPixels(bleedEdgeWidth);
+      const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
+      const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
+      const { width, height } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
       return await createPreviewDataUrl(processedUrl, {
         maxWidth: width,
         maxHeight: height,
@@ -440,7 +445,9 @@ export function UploadSection() {
       }
 
       const processed: Record<string, string> = {};
-      const previewDims = computeCardPreviewPixels(bleedEdgeWidth);
+      const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
+      const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
+      const previewDims = computeCardPreviewPixels(bleedEdgeWidth, dpi);
       const totalPreviews = Object.keys(newOriginals).length;
       let completed = 0;
       if (totalPreviews > 0) {
