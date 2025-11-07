@@ -19,34 +19,64 @@ const AX = axios.create({
   validateStatus: (s) => s >= 200 && s < 500,      // surface 4xx/429 to logic
 });
 
-// Light retry for 429 / transient errors
-async function getWithRetry(url, opts = {}, tries = 3) {
+// Retry logic with exponential backoff for 429 / transient errors
+async function getWithRetry(url, opts = {}, tries = 5) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
       const res = await AX.get(url, opts);
+
+      // Success
+      if (res.status >= 200 && res.status < 300) return res;
+
+      // Handle rate limiting - retry with backoff
       if (res.status === 429) {
-        const wait = Number(res.headers["retry-after"] || 2);
+        const retryAfter = Number(res.headers["retry-after"] || 0);
+        const wait = retryAfter > 0 ? retryAfter : Math.min(60, Math.pow(2, i));
+        console.log(`[429] Rate limited, waiting ${wait}s before retry ${i + 1}/${tries}`);
         await new Promise(r => setTimeout(r, wait * 1000));
         continue;
       }
-      if (res.status >= 200 && res.status < 300) return res;
+
+      // Client errors (4xx except 429) should NOT be retried (404, etc.)
+      if (res.status >= 400 && res.status < 500) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      // Server errors (5xx) - will be retried below
       throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       lastErr = e;
-      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+
+      // Don't retry client errors (4xx except 429)
+      if (e.response && e.response.status >= 400 && e.response.status < 500 && e.response.status !== 429) {
+        throw e;
+      }
+
+      // Retry network errors and server errors (5xx) with exponential backoff
+      if (i < tries - 1) {
+        const backoff = 500 * Math.pow(2, i);
+        await new Promise(r => setTimeout(r, backoff));
+      }
     }
   }
   throw lastErr;
 }
 
 // Tiny p-limit (cap parallel Scryfall calls)
-function pLimit(concurrency) {
+function pLimit(concurrency, delayMs = 0) {
   const q = [];
   let active = 0;
   const run = async (fn, resolve, reject) => {
     active++;
-    try { resolve(await fn()); }
+    try {
+      const result = await fn();
+      // Add delay between requests to avoid rate limiting
+      if (delayMs > 0 && q.length > 0) {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+      resolve(result);
+    }
     catch (e) { reject(e); }
     finally {
       active--;
@@ -61,7 +91,9 @@ function pLimit(concurrency) {
     else q.push([fn, resolve, reject]);
   });
 }
-const limit = pLimit(6); // 6 at a time is a safe default
+// Scryfall rate limit is ~10 requests/second
+// Use 2 concurrent with 150ms delay = ~6.6 requests/second (safe margin)
+const limit = pLimit(2, 150);
 
 // -------------------- cache helpers --------------------
 

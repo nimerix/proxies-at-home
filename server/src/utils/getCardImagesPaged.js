@@ -10,10 +10,52 @@ const USE_LOCAL_DB = process.env.USE_LOCAL_DB === "true";
 // Optional: a polite UA helps if you get rate-limited
 const AX = axios.create({
   headers: { "User-Agent": "Proxxied/1.0 (contact: your-email@example.com)" },
+  validateStatus: (s) => s >= 200 && s < 500, // surface 4xx/429 to logic
 });
 
 if (USE_LOCAL_DB) {
   console.log("[Scryfall] Using local database instead of API");
+}
+
+// Retry logic with exponential backoff for 429 / transient errors
+async function getWithRetry(url, tries = 5) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await AX.get(url);
+      if (res.status === 429) {
+        // Respect Retry-After header with longer fallback
+        const retryAfter = Number(res.headers["retry-after"] || 0);
+        const wait = retryAfter > 0 ? retryAfter : Math.min(60, Math.pow(2, i));
+        console.log(`[429] Rate limited on ${url}, waiting ${wait}s before retry ${i + 1}/${tries}`);
+        await new Promise(r => setTimeout(r, wait * 1000));
+        continue;
+      }
+
+      // Client errors (4xx except 429) should NOT be retried (404, etc.)
+      if (res.status >= 400 && res.status < 500) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      if (res.status >= 200 && res.status < 300) return res;
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+
+      // Don't retry client errors (4xx except 429)
+      if (e.response && e.response.status >= 400 && e.response.status < 500 && e.response.status !== 429) {
+        throw e;
+      }
+
+      // Retry network errors and server errors (5xx) with exponential backoff
+      if (i < tries - 1) {
+        const backoff = 500 * Math.pow(2, i);
+        console.log(`[Retry] Attempt ${i + 1}/${tries} failed for ${url}, waiting ${backoff}ms`);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -95,7 +137,7 @@ async function fetchCardsByQuery(query) {
   try {
     while (next) {
       await new Promise(resolve => setTimeout(resolve, 100));
-      const resp = await AX.get(next);
+      const resp = await getWithRetry(next);
       const { data, has_more, next_page } = resp.data;
 
       for (const card of data || []) {
