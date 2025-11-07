@@ -38,6 +38,7 @@ export function ExportActions() {
   const customCardbackUrl = useSettingsStore((state) => state.customCardbackUrl);
   const customCardbackHasBleed = useSettingsStore((state) => state.customCardbackHasBleed);
   const disableBackPageGuides = useSettingsStore((state) => state.disableBackPageGuides);
+  const exportCollated = useSettingsStore((state) => state.exportCollated);
 
   const handleCopyDecklist = async () => {
     const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
@@ -57,7 +58,8 @@ export function ExportActions() {
     const controller = new AbortController();
     const cancelHandler = () => controller.abort();
 
-    setLoadingTask(isBackSide ? "Generating Cardback PDF" : "Generating PDF", {
+    const taskName = exportCollated ? "Generating Collated PDF" : (isBackSide ? "Generating Cardback PDF" : "Generating PDF");
+    setLoadingTask(taskName, {
       onCancel: cancelHandler,
       cancelLabel: "Cancel export",
     });
@@ -91,6 +93,8 @@ export function ExportActions() {
         isBackSide,
         customCardbackUrl: customCardbackUrl || undefined,
         customCardbackHasBleed,
+        exportCollated,
+        disableBackPageGuides,
       });
     } catch (err) {
       if (controller.signal.aborted || (err as any)?.name === "AbortError") {
@@ -105,31 +109,48 @@ export function ExportActions() {
 
   return (
     <div className="flex flex-col gap-2">
-      <Button color="green" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
-        {isProcessing ? (
-          <span className="flex items-center gap-2">
-            <Spinner size="md" color="purple" />
-            <span className="whitespace-nowrap">
-              Processing {processingProgress}%
-            </span>
-          </span>
-        ) : (
-          <span>Export Fronts to PDF</span>
-        )}
-      </Button>
+      {!exportCollated ? (
+        <>
+          <Button color="green" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
+            {isProcessing ? (
+              <span className="flex items-center gap-2">
+                <Spinner size="md" color="purple" />
+                <span className="whitespace-nowrap">
+                  Processing {processingProgress}%
+                </span>
+              </span>
+            ) : (
+              <span>Export Fronts to PDF</span>
+            )}
+          </Button>
 
-      <Button color="purple" onClick={() => handleExport(true)} disabled={!cards.length || isProcessing}>
-        {isProcessing ? (
-          <span className="flex items-center gap-2">
-            <Spinner size="md" color="purple" />
-            <span className="whitespace-nowrap">
-              Processing {processingProgress}%
+          <Button color="purple" onClick={() => handleExport(true)} disabled={!cards.length || isProcessing}>
+            {isProcessing ? (
+              <span className="flex items-center gap-2">
+                <Spinner size="md" color="purple" />
+                <span className="whitespace-nowrap">
+                  Processing {processingProgress}%
+                </span>
+              </span>
+            ) : (
+              <span>Export Backs to PDF</span>
+            )}
+          </Button>
+        </>
+      ) : (
+        <Button color="blue" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
+          {isProcessing ? (
+            <span className="flex items-center gap-2">
+              <Spinner size="md" color="purple" />
+              <span className="whitespace-nowrap">
+                Processing {processingProgress}%
+              </span>
             </span>
-          </span>
-        ) : (
-          <span>Export Backs to PDF</span>
-        )}
-      </Button>
+          ) : (
+            <span>Export PDF (Collated)</span>
+          )}
+        </Button>
+      )}
 
       <Button
         color="indigo"

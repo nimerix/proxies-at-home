@@ -59,6 +59,8 @@ type Store = {
   setCustomCardbackHasBleed: (value: boolean) => void;
   disableBackPageGuides: boolean;
   setDisableBackPageGuides: (value: boolean) => void;
+  exportCollated: boolean;
+  setExportCollated: (value: boolean) => void;
 };
 
 const defaultPageSettings = {
@@ -89,6 +91,7 @@ const defaultPageSettings = {
   customCardbackUrl: null,
   customCardbackHasBleed: false,
   disableBackPageGuides: true,
+  exportCollated: false,
 } as Store;
 
 const layoutPresetsSizes: Record<
@@ -156,6 +159,7 @@ export const useSettingsStore = create<Store>()(
       setCustomCardbackUrl: (url) => set({ customCardbackUrl: url }),
       setCustomCardbackHasBleed: (value) => set({ customCardbackHasBleed: value }),
       setDisableBackPageGuides: (value) => set({ disableBackPageGuides: value }),
+      setExportCollated: (value) => set({ exportCollated: value }),
     }),
     {
       name: "proxxied:layout-settings:v1",

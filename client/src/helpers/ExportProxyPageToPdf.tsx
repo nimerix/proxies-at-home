@@ -775,6 +775,8 @@ export async function exportProxyPagesToPdf({
   isBackSide = false,
   customCardbackUrl,
   customCardbackHasBleed = false,
+  exportCollated = false,
+  disableBackPageGuides = true,
 }: {
   cards: CardOption[];
   originalSelectedImages: Record<string, string>;
@@ -802,6 +804,8 @@ export async function exportProxyPagesToPdf({
   isBackSide?: boolean;
   customCardbackUrl?: string;
   customCardbackHasBleed?: boolean;
+  exportCollated?: boolean;
+  disableBackPageGuides?: boolean;
 }) {
   if (!cards.length) return;
 
@@ -829,17 +833,40 @@ export async function exportProxyPagesToPdf({
   const startXmm = Math.max(0, (pageWidthMm - gridWidthMm) / 2);
   const startYmm = Math.max(0, (pageHeightMm - gridHeightMm) / 2);
 
+  // Track whether each page is a front or back page for collated mode
+  const pageTypes: ("front" | "back")[] = [];
   const pages: CardOption[][] = [];
-  for (let i = 0; i < cards.length; i += perPage) {
-    const pageCards = cards.slice(i, i + perPage);
 
-    // For backside export, reverse the order of cards on each page
-    // This is because the sheet will be printed on the reverse side
-    if (isBackSide) {
-      pageCards.reverse();
+  if (exportCollated) {
+    // Collated mode: alternating front and back pages
+    for (let i = 0; i < cards.length; i += perPage) {
+      const pageCards = cards.slice(i, i + perPage);
+
+      // Front page (normal order)
+      pages.push([...pageCards]);
+      pageTypes.push("front");
+
+      // Back page (reversed order for proper duplex printing alignment)
+      const backPageCards = [...pageCards].reverse();
+      pages.push(backPageCards);
+      pageTypes.push("back");
     }
+  } else {
+    // Non-collated mode: all fronts or all backs
+    for (let i = 0; i < cards.length; i += perPage) {
+      const pageCards = cards.slice(i, i + perPage);
 
-    pages.push(pageCards);
+      // For backside export, reverse the order of cards on each page
+      // This is because the sheet will be printed on the reverse side
+      if (isBackSide) {
+        pageCards.reverse();
+        pageTypes.push("back");
+      } else {
+        pageTypes.push("front");
+      }
+
+      pages.push(pageCards);
+    }
   }
 
   const guideWidthPxScaled = scaleGuideWidthForDPI(guideWidthPx, 96, exportDpi);
@@ -891,11 +918,19 @@ export async function exportProxyPagesToPdf({
 
   emitProgress();
 
-  const renderBatch = async (batchPages: CardOption[][]) => {
+  const renderBatch = async (batchPages: CardOption[][], batchStartIndex: number) => {
     throwIfAborted();
     const pdfDoc = await PDFDocument.create();
 
-    for (const pageCards of batchPages) {
+    for (let pageIndexInBatch = 0; pageIndexInBatch < batchPages.length; pageIndexInBatch++) {
+      const pageCards = batchPages[pageIndexInBatch];
+      const globalPageIndex = batchStartIndex + pageIndexInBatch;
+      const currentPageType = pageTypes[globalPageIndex];
+      const isCurrentPageBack = currentPageType === "back";
+
+      // Determine if we should show guides on this page
+      const shouldShowGuides = useCornerGuides && !(isCurrentPageBack && disableBackPageGuides);
+
       throwIfAborted();
       currentPageCardCount = pageCards.length;
       processedCardsOnPage = 0;
@@ -923,7 +958,7 @@ export async function exportProxyPagesToPdf({
         let useCardbackImage = false;
         let isBackFace = false;
 
-        if (isBackSide) {
+        if (isCurrentPageBack) {
           // For backside export, show the OPPOSITE face of what's currently displayed on front
           if (card.faces && card.faces.length > 1) {
             const currentFaceIndex = card.currentFaceIndex ?? 0;
@@ -1001,7 +1036,7 @@ export async function exportProxyPagesToPdf({
           }
         }
 
-        if (useCornerGuides && guideWidthMm > 0) {
+        if (shouldShowGuides && guideWidthMm > 0) {
           drawCornerGuidesPdf(page, {
             xMm: cardXmm,
             yMm: cardYmm,
@@ -1021,7 +1056,7 @@ export async function exportProxyPagesToPdf({
         emitProgress();
       }
 
-      if (useCornerGuides && guideWidthMm > 0) {
+      if (shouldShowGuides && guideWidthMm > 0) {
         drawEdgeStubsPdf(page, {
           pageWidthMm,
           pageHeightMm,
@@ -1047,13 +1082,14 @@ export async function exportProxyPagesToPdf({
 
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
     const batchPages = batches[batchIndex];
-    const pdfBytes = await renderBatch(batchPages);
+    const batchStartIndex = batches.slice(0, batchIndex).reduce((sum, batch) => sum + batch.length, 0);
+    const pdfBytes = await renderBatch(batchPages, batchStartIndex);
     throwIfAborted();
     const fileSuffix =
       totalBatches > 1
         ? `_part-${String(batchIndex + 1).padStart(2, "0")}-of-${String(totalBatches).padStart(2, "0")}`
         : "";
-    const backSideSuffix = isBackSide ? "_backs" : "";
+    const backSideSuffix = exportCollated ? "_collated" : (isBackSide ? "_backs" : "");
     const bytesCopy = pdfBytes.slice();
     const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
     saveAs(blob, `proxxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`);

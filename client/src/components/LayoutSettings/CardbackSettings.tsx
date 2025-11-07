@@ -9,6 +9,8 @@ export function CardbackSettings() {
   const setCustomCardbackHasBleed = useSettingsStore((state) => state.setCustomCardbackHasBleed);
   const disableBackPageGuides = useSettingsStore((state) => state.disableBackPageGuides);
   const setDisableBackPageGuides = useSettingsStore((state) => state.setDisableBackPageGuides);
+  const exportCollated = useSettingsStore((state) => state.exportCollated);
+  const setExportCollated = useSettingsStore((state) => state.setExportCollated);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,6 +93,17 @@ export function CardbackSettings() {
         />
         <Label htmlFor="disable-back-page-guides">
           Disable cut guides on back page PDF
+        </Label>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="export-collated"
+          checked={exportCollated}
+          onChange={(e) => setExportCollated(e.target.checked)}
+        />
+        <Label htmlFor="export-collated">
+          Export collated PDF (alternating front/back pages for duplex printing)
         </Label>
       </div>
     </div>

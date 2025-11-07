@@ -5,6 +5,7 @@ export type LoadingTask =
   | "Processing Images"
   | "Generating PDF"
   | "Generating Cardback PDF"
+  | "Generating Collated PDF"
   | "Uploading Images"
   | "Clearing Images"
   | null;
