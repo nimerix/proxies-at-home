@@ -18,9 +18,11 @@ import CardCellLazy from "../components/CardCellLazy";
 import EdgeCutLines from "../components/FullPageGuides";
 import SortableCard from "../components/SortableCard";
 import {
+  addBleedEdgeSmartly,
   getBleedInPixels,
   isUploadedFileToken,
   makeUploadedFileToken,
+  urlToDataUrl,
 } from "../helpers/ImageHelper";
 import { useImageProcessing } from "../hooks/useImageProcessing";
 import { usePageViewState } from "../hooks/usePageViewState";
@@ -167,6 +169,57 @@ export function PageView() {
     unit, // "mm" | "in"
     bleedEdgeWidth, // number
   });
+
+  // Process custom cardback to add bleed if needed
+  const [processedCardbackUrl, setProcessedCardbackUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let blobUrlToRevoke: string | null = null;
+
+    if (!customCardbackUrl) {
+      setProcessedCardbackUrl(null);
+      return;
+    }
+
+    if (customCardbackHasBleed) {
+      // Use as-is if it already has bleed
+      setProcessedCardbackUrl(customCardbackUrl);
+      return;
+    }
+
+    // Process the cardback to add bleed
+    (async () => {
+      try {
+        const resolvedSrc = await urlToDataUrl(customCardbackUrl);
+        if (cancelled) return;
+
+        const processedUrl = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
+          unit,
+          bleedEdgeWidth,
+          hasBakedBleed: false,
+        });
+
+        if (cancelled) {
+          if (processedUrl) URL.revokeObjectURL(processedUrl);
+          return;
+        }
+
+        blobUrlToRevoke = processedUrl;
+        setProcessedCardbackUrl(processedUrl);
+      } catch (err) {
+        console.error("Failed to process custom cardback:", err);
+        setProcessedCardbackUrl(customCardbackUrl); // Fallback to original
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (blobUrlToRevoke) {
+        URL.revokeObjectURL(blobUrlToRevoke);
+      }
+    };
+  }, [customCardbackUrl, customCardbackHasBleed, bleedEdgeWidth, unit]);
 
   return (
     <div className="w-1/2 flex-1 overflow-y-auto bg-gray-200 h-full p-6 flex flex-col items-center dark:bg-gray-800 ">
@@ -385,7 +438,7 @@ export function PageView() {
                           guideOffset={guideOffset}
                           setContextMenu={setContextMenu}
                           viewMode={viewMode}
-                          customCardbackUrl={customCardbackUrl}
+                          customCardbackUrl={processedCardbackUrl || customCardbackUrl}
                           customCardbackHasBleed={customCardbackHasBleed}
                           disableBackPageGuides={disableBackPageGuides}
                         />

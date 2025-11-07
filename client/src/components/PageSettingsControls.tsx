@@ -278,7 +278,16 @@ export function PageSettingsControls() {
             </AccordionContent>
           </AccordionPanel>
         </Accordion>
-
+        <Accordion alwaysOpen={true} flush={true}>
+          <AccordionPanel>
+            <AccordionTitle>
+              Cardback Settings
+            </AccordionTitle>
+            <AccordionContent>
+              <CardbackSettings />
+            </AccordionContent>
+          </AccordionPanel>
+        </Accordion>
         <Accordion alwaysOpen={true} flush={true}>
           <AccordionPanel>
             <AccordionTitle>
@@ -433,9 +442,9 @@ export function PageSettingsControls() {
           </div>
         </div>
 
-        <HR className="dark:bg-gray-500" />
+        {/* <HR className="dark:bg-gray-500" /> */}
 
-        <CardbackSettings />
+        
 
         <HR className="dark:bg-gray-500" />
 
