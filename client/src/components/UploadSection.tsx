@@ -355,7 +355,7 @@ export function UploadSection() {
             cardArt: "art",
             language: globalLanguage,
           },
-          { timeout: 80000, signal: controller.signal }
+          { timeout: 800000, signal: controller.signal }
         );
       } catch (e: any) {
         if (controller.signal.aborted || e?.code === "ERR_CANCELED" || e?.name === "CanceledError") {

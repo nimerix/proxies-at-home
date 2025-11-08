@@ -40,7 +40,10 @@ async function getWithRetry(url, opts = {}, tries = 5) {
 
       // Client errors (4xx except 429) should NOT be retried (404, etc.)
       if (res.status >= 400 && res.status < 500) {
-        throw new Error(`HTTP ${res.status}`);
+        const err = new Error(`HTTP ${res.status}`);
+        err.status = res.status;
+        err.response = res;
+        throw err;
       }
 
       // Server errors (5xx) - will be retried below
@@ -49,7 +52,9 @@ async function getWithRetry(url, opts = {}, tries = 5) {
       lastErr = e;
 
       // Don't retry client errors (4xx except 429)
-      if (e.response && e.response.status >= 400 && e.response.status < 500 && e.response.status !== 429) {
+      // Check both e.status (from our custom throw) and e.response.status (from axios)
+      const status = e.status || (e.response && e.response.status);
+      if (status >= 400 && status < 500 && status !== 429) {
         throw e;
       }
 
