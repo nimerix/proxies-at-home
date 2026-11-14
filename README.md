@@ -16,6 +16,38 @@ A browser workspace for building Magic: The Gathering proxy sheets. Paste a deck
 
 For duplex printing, use **100% / actual size**, with **long-edge flip in portrait** or **short-edge flip in landscape**. Test one sheet first: printer margins, registration and scaling vary. Bleed is extra artwork outside the 63 × 88 mm trim box.
 
+Under **Bleed artwork**, scanned cards use a **2.5 mm corner radius** and remove
+**0.25 mm** of the outer scan rim by default. The excluded perimeter is rebuilt
+from nearby clean artwork before reflection into the bleed. This keeps each
+corner continuous with its own edges and avoids copying rounded scan cutouts,
+transparent fringes, or shadows within the selected margin. The remaining
+artwork keeps its position; the card is not enlarged to hide its edges.
+
+**Auto** border bleed extends black border sections as black, including partial
+borders on extended-art cards, and fully white borders as white. A short 0.2 mm
+transition matches the scan's aged border tone at the cut. Fine monochrome line
+art stays artwork. Choose **Mirror all artwork** if Auto mistakes dark artwork
+for a border. Border detection changes only generated bleed, not the card face.
+
+Use upright images already cropped to the card, such as Scryfall scans. This is
+not a tool for locating or straightening cards in photographs. Increase **Shadow
+removal** up to 1 mm if a rim remains, or choose **Square artwork** to preserve
+the image's rectangular edges. If an opaque image has a larger rounded cutout,
+set **Image corner radius** to 3.2 mm (up to 3.5 mm); the physical cut radius
+stays 2.5 mm. Uniform white/black corner ink is preserved by default because it
+cannot reliably be distinguished from an identically colored scanner bed.
+These settings are defaults for regular fronts and backs, including zero-bleed
+output. Each card's artwork picker has overrides with a live front/back preview
+and a summary of detected edge treatments for mixed decks. Preview and PDF
+repair run in a cancellable worker where supported, with a browser fallback.
+When at least two matching borders support shadows on the remaining edges, the preview
+suggests a stronger removal margin; you choose whether to apply it. A failed
+preview shows an error and a retry action.
+MPC images bypass scan cleanup, retain their supplied 3 mm of bleed, and
+generate only the extra width when more is requested.
+Missing corner artwork is reconstructed, so reflected details may repeat; it
+cannot recover artwork absent from the scan. Original-image ZIPs stay unchanged.
+
 ## Run locally
 
 Requires **Node.js 22.12 or newer** and npm.
@@ -40,6 +72,12 @@ npm run test:e2e              # production-build browser, PDF, ZIP and accessibi
 ```
 
 Run `npm run build --prefix client` before `test:e2e` after client changes. Browser tests run in Chromium and WebKit and use controlled Scryfall/Drive responses; they do not establish live provider availability. See [docs/REVIEW.md](docs/REVIEW.md) for review findings and validation limits.
+
+Bleed-specific fixtures, pixel comparisons, performance measurements and review
+iterations are recorded in [docs/BLEED_REVIEW.md](docs/BLEED_REVIEW.md). Firefox
+can be included with `TEST_FIREFOX=1 npm run test:e2e` after installing its
+Playwright browser; its browser process could not start in the current local
+environment, so it is not counted as verified.
 
 ## Configure and deploy
 

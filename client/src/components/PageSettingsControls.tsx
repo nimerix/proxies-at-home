@@ -20,6 +20,10 @@ export function PageSettingsControls() {
     useCardsStore.setState({ selectedImages: {}, selectedBackFaceImages: {} });
   }, [
     s.bleedEdgeWidth,
+    s.bleedSource,
+    s.borderBleed,
+    s.scanInsetMm,
+    s.scanCornerRadiusMm,
     s.useHighQualityPreviews,
     s.customCardbackUrl,
     s.customCardbackHasBleed,
@@ -78,6 +82,105 @@ export function PageSettingsControls() {
               />{" "}
               Sharper previews <span className="hint">(more memory)</span>
             </label>
+          </div>
+        </details>
+        <details>
+          <summary>Bleed artwork</summary>
+          <div className="settings-body">
+            <div className="field">
+              <label htmlFor="border-bleed">Border bleed</label>
+              <select
+                id="border-bleed"
+                value={s.borderBleed}
+                onChange={(e) =>
+                  s.setBorderBleed(
+                    e.target.value === "mirror" ? "mirror" : "auto"
+                  )
+                }
+                aria-describedby="border-bleed-help"
+              >
+                <option value="auto">
+                  Auto · extend black and white borders
+                </option>
+                <option value="mirror">Mirror all artwork</option>
+              </select>
+              <p id="border-bleed-help" className="hint">
+                Auto keeps black border sections black and full white borders
+                white, with a short transition to match the scan tone. Choose
+                Mirror all artwork if a dark artwork area is mistaken for a
+                border.
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="bleed-source">Image edges</label>
+              <select
+                id="bleed-source"
+                value={s.bleedSource}
+                onChange={(e) =>
+                  s.setBleedSource(
+                    e.target.value === "square" ? "square" : "scan"
+                  )
+                }
+                aria-describedby="bleed-source-help"
+              >
+                <option value="scan">Scanned cards · rounded corners</option>
+                <option value="square">
+                  Square artwork · keep image edges
+                </option>
+              </select>
+              <p id="bleed-source-help" className="hint">
+                Physical cards have a 2.5 mm corner radius. Corners and bleed
+                continue nearby artwork without copying the scan background. Use
+                upright scans cropped to the card. Choose square artwork for
+                images without rounded scan edges. Other image shapes are
+                center-cropped to fit; transparent areas print white in square
+                mode.
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="scan-corner-radius">
+                Image corner radius (mm)
+              </label>
+              <NumberInput
+                id="scan-corner-radius"
+                min={2.5}
+                max={3.5}
+                step={0.1}
+                value={s.scanCornerRadiusMm}
+                onCommit={s.setScanCornerRadiusMm}
+                disabled={s.bleedSource !== "scan"}
+                aria-describedby="scan-corner-radius-help"
+              />
+              <p id="scan-corner-radius-help" className="hint">
+                Start at 2.5 mm. Use 3.2 mm if the image has a larger rounded
+                cutout or a background sliver remains in its corners. This
+                changes the repaired image area; the physical cut stays 2.5 mm.
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="scan-inset">Shadow removal (mm)</label>
+              <NumberInput
+                id="scan-inset"
+                min={0}
+                max={1}
+                step={0.05}
+                value={s.scanInsetMm}
+                onCommit={s.setScanInsetMm}
+                disabled={s.bleedSource !== "scan"}
+                aria-describedby="scan-inset-help"
+              />
+              <p id="scan-inset-help" className="hint">
+                Rebuild this much of the outer edge from clean artwork. Start at
+                0.25 mm; increase up to 1 mm if a dark rim remains. Zero keeps
+                the outer rim. Higher values replace more edge detail; wider
+                shadows need a better-cropped scan. The card stays 63 × 88 mm.
+              </p>
+            </div>
+            <p className="hint">
+              Defaults for fronts and backs, even with zero bleed. Open a card’s
+              artwork picker to override these settings for that card. MPC
+              images keep their supplied 3 mm bleed and skip shadow removal.
+            </p>
           </div>
         </details>
         <details>

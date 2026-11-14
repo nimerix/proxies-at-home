@@ -4,8 +4,13 @@ import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import { saveAs } from "file-saver";
 import { PDFDocument, rgb, type PDFPage, type PDFImage } from "pdf-lib";
-import { canvasToBlob, renderCardCanvas } from "./ImageHelper";
+import { renderCardImage } from "./renderCardImage";
 import { cardSource } from "./cardSources";
+import { cardBleedOptions } from "./cardBleedOptions";
+import {
+  DEFAULT_SCAN_INSET_MM,
+  type BleedArtworkOptions,
+} from "./bleedArtwork";
 import {
   cornerGuideLines,
   edgeGuideLines,
@@ -89,6 +94,10 @@ export async function exportProxyPagesToPdf({
   rows,
   cardSpacingMm,
   exportDpi = 600,
+  bleedSource = "scan",
+  scanInsetMm = DEFAULT_SCAN_INSET_MM,
+  borderBleed = "auto",
+  scanCornerRadiusMm = 2.5,
   roundedCornerGuides = false,
   cornerGuideOffsetMm = 0,
   useBatching = false,
@@ -119,6 +128,10 @@ export async function exportProxyPagesToPdf({
   rows: number;
   cardSpacingMm: number;
   exportDpi?: number;
+  bleedSource?: BleedArtworkOptions["source"];
+  scanInsetMm?: number;
+  borderBleed?: "auto" | "mirror";
+  scanCornerRadiusMm?: number;
   roundedCornerGuides?: boolean;
   cornerGuideOffsetMm?: number;
   useBatching?: boolean;
@@ -254,7 +267,7 @@ export async function exportProxyPagesToPdf({
   ) => {
     throwIfAborted();
     const pdfDoc = await PDFDocument.create();
-    const embedded = new Map<string | File, Map<boolean, PDFImage>>();
+    const embedded = new Map<string | File, Map<string, PDFImage>>();
 
     for (
       let pageIndexInBatch = 0;
@@ -311,29 +324,36 @@ export async function exportProxyPagesToPdf({
             `Missing image for “${card.name}”. Choose artwork or upload its image before exporting.`
           );
         let uploadUrl: string | undefined;
-        let canvas: HTMLCanvasElement | undefined;
+        const artwork = cardBleedOptions(card, {
+          source: bleedSource,
+          insetMm: scanInsetMm,
+          borders: borderBleed,
+          cornerRadiusMm: scanCornerRadiusMm,
+        });
+        const variantKey = JSON.stringify([hasBakedBleed, artwork]);
         try {
-          let cardImage = embedded.get(source)?.get(hasBakedBleed);
+          let cardImage = embedded.get(source)?.get(variantKey);
           if (!cardImage) {
             const src =
               typeof source === "string"
                 ? source
                 : (uploadUrl = URL.createObjectURL(source));
-            canvas = await renderCardCanvas(
+            const { blob } = await renderCardImage(
               src,
               bleedMm,
               hasBakedBleed,
               exportDpi,
-              abortSignal
+              {
+                signal: abortSignal,
+                quality: jpegQuality,
+                artwork,
+              }
             );
             throwIfAborted();
-            const blob = await canvasToBlob(canvas, "image/jpeg", jpegQuality);
-            canvas.width = 0;
-            canvas.height = 0;
             cardImage = await pdfDoc.embedJpg(await blob.arrayBuffer());
             const variants =
-              embedded.get(source) ?? new Map<boolean, PDFImage>();
-            variants.set(hasBakedBleed, cardImage);
+              embedded.get(source) ?? new Map<string, PDFImage>();
+            variants.set(variantKey, cardImage);
             embedded.set(source, variants);
           }
           throwIfAborted();
@@ -351,10 +371,6 @@ export async function exportProxyPagesToPdf({
           );
         } finally {
           if (uploadUrl) URL.revokeObjectURL(uploadUrl);
-          if (canvas) {
-            canvas.width = 0;
-            canvas.height = 0;
-          }
         }
 
         if (shouldShowGuides && guideWidthMm > 0) {

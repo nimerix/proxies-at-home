@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 const requireClient = createRequire(
   new URL("../client/package.json", import.meta.url)
@@ -759,7 +759,7 @@ test("MPC preview and PDF retain the same physical bleed and artwork", async ({
     .getByRole("button", { name: "Bleed, change artwork", exact: true })
     .getByRole("img");
   await expect(preview).toBeVisible();
-  for (const bleed of [0, 1, 2, 3]) {
+  for (const bleed of [0, 1, 2, 3, 3.5, 5]) {
     const previous = await preview.getAttribute("src");
     await page.getByLabel("Bleed (mm)", { exact: true }).fill(String(bleed));
     await page.getByLabel("Bleed (mm)", { exact: true }).press("Enter");
@@ -807,6 +807,628 @@ test("MPC preview and PDF retain the same physical bleed and artwork", async ({
       expect(result.left).toBeCloseTo(bleed / (63 + 2 * bleed), 2);
       expect(result.right).toBeCloseTo(bleed / (63 + 2 * bleed), 2);
     }
+  }
+});
+
+async function embeddedJpeg(bytes: Buffer) {
+  const pdf = await PDFDocument.load(bytes);
+  const stream = pdf.context
+    .enumerateIndirectObjects()
+    .map((entry: any) => entry[1])
+    .find(
+      (object: any) =>
+        object.dict?.get(PDFName.of("Subtype"))?.toString() === "/Image"
+    );
+  return `data:image/jpeg;base64,${Buffer.from(stream.contents).toString("base64")}`;
+}
+
+test("shadow controls update actual front and custom-back preview and PDF pixels", async ({
+  page,
+}) => {
+  const data = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 630;
+    c.height = 880;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#ff00ff";
+    ctx.fillRect(0, 0, 630, 880);
+    ctx.fillStyle = "#5096be";
+    ctx.fillRect(4, 4, 622, 872);
+    return c.toDataURL().split(",")[1];
+  });
+  const image = {
+    name: "Rim test.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(data, "base64"),
+  };
+  await page
+    .getByLabel("Upload card images", { exact: true })
+    .setInputFiles(image);
+  const preview = page
+    .getByRole("button", { name: "Rim test, change artwork", exact: true })
+    .getByRole("img");
+  await expect(preview).toBeVisible();
+  await page.getByText("Bleed artwork", { exact: true }).click();
+  const setInset = async (value: string) => {
+    const old = await preview.getAttribute("src");
+    await page.getByLabel("Shadow removal (mm)", { exact: true }).fill(value);
+    await page
+      .getByLabel("Shadow removal (mm)", { exact: true })
+      .press("Enter");
+    await expect(preview).not.toHaveAttribute("src", old!);
+  };
+  await setInset("0");
+  await page.getByText("Card backs & duplex", { exact: true }).click();
+  await page
+    .getByLabel("Custom cardback", { exact: true })
+    .setInputFiles(image);
+  await page.getByRole("button", { name: "Backs", exact: true }).click();
+  await expect(preview).toBeVisible();
+  const edge = async (src: string) =>
+    page.evaluate(async (src) => {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      return Array.from(
+        ctx.getImageData(
+          Math.round((img.width * 2) / 67),
+          Math.floor(img.height / 2),
+          1,
+          1
+        ).data
+      );
+    }, src);
+  const oldColor = await edge((await preview.getAttribute("src"))!);
+  expect(oldColor[0]).toBeGreaterThan(230);
+  expect(oldColor[1]).toBeLessThan(25);
+  expect(oldColor[2]).toBeGreaterThan(230);
+  await setInset("0.5");
+  for (const src of [
+    (await preview.getAttribute("src"))!,
+    await embeddedJpeg(await saveDownload(page, "Export backs PDF")),
+  ]) {
+    const color = await edge(src);
+    [80, 150, 190, 255].forEach((v, i) =>
+      expect(Math.abs(v - color[i])).toBeLessThanOrEqual(6)
+    );
+  }
+  await page.getByRole("button", { name: "Fronts", exact: true }).click();
+  await expect(preview).toBeVisible();
+  for (const src of [
+    (await preview.getAttribute("src"))!,
+    await embeddedJpeg(await saveDownload(page, "Export fronts PDF")),
+  ]) {
+    const color = await edge(src);
+    [80, 150, 190, 255].forEach((v, i) =>
+      expect(Math.abs(v - color[i])).toBeLessThanOrEqual(6)
+    );
+  }
+});
+
+test("scan cleanup removes opaque corners in preview and PDFs at every export DPI", async ({
+  page,
+}) => {
+  const source = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 630;
+    canvas.height = 880;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#ff00ff";
+    ctx.fillRect(0, 0, 630, 880);
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(0, 0, 630, 880, 25);
+    ctx.clip();
+    for (const [x, y, color] of [
+      [0, 0, "#f4d354"],
+      [315, 0, "#2c7fbe"],
+      [0, 440, "#c83c36"],
+      [315, 440, "#0e0f10"],
+    ] as const) {
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, 315, 440);
+    }
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.restore();
+    return canvas.toDataURL().split(",")[1];
+  });
+  await page.getByLabel("Upload card images", { exact: true }).setInputFiles({
+    name: "Corner probe.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(source, "base64"),
+  });
+  const preview = page
+    .getByRole("button", { name: "Corner probe, change artwork", exact: true })
+    .getByRole("img");
+  await expect(preview).toBeVisible();
+  async function checkCorners(src: string, dpi: number) {
+    const result = await page.evaluate(
+      async ({ src, dpi }) => {
+        const image = new Image();
+        image.src = src;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(image, 0, 0);
+        const b = Math.round((2 * dpi) / 25.4);
+        const pixels = [];
+        for (const [x, y] of [
+          [0, 0],
+          [image.width - 1, 0],
+          [0, image.height - 1],
+          [image.width - 1, image.height - 1],
+          [b - 1, b - 1],
+          [b, b],
+        ])
+          pixels.push(Array.from(ctx.getImageData(x, y, 1, 1).data));
+        return { width: image.width, height: image.height, pixels };
+      },
+      { src, dpi }
+    );
+    expect(result.width).toBe(
+      Math.round((63 * dpi) / 25.4) + 2 * Math.round((2 * dpi) / 25.4)
+    );
+    expect(result.height).toBe(
+      Math.round((88 * dpi) / 25.4) + 2 * Math.round((2 * dpi) / 25.4)
+    );
+    const colors = [
+      [244, 211, 84],
+      [44, 127, 190],
+      [200, 60, 54],
+      [0, 0, 0],
+      [244, 211, 84],
+      [244, 211, 84],
+    ];
+    result.pixels.forEach((p, i) => {
+      expect(p[3]).toBe(255);
+      colors[i].forEach((c, j) =>
+        expect(Math.abs(p[j] - c)).toBeLessThanOrEqual(5)
+      );
+    });
+  }
+  await checkCorners((await preview.getAttribute("src"))!, 200);
+  await page.getByText("Export quality & files", { exact: true }).click();
+  for (const dpi of [600, 900, 1200]) {
+    await page
+      .getByLabel("Resolution", { exact: true })
+      .selectOption(String(dpi));
+    await checkCorners(
+      await embeddedJpeg(await saveDownload(page, "Export fronts PDF")),
+      dpi
+    );
+  }
+  await page.getByText("Bleed artwork", { exact: true }).click();
+  const original = await preview.getAttribute("src");
+  await page.getByLabel("Image edges", { exact: true }).selectOption("square");
+  await expect(preview).not.toHaveAttribute("src", original!);
+  await expect(
+    page.getByLabel("Shadow removal (mm)", { exact: true })
+  ).toBeDisabled();
+  await page.getByLabel("Image edges", { exact: true }).selectOption("scan");
+  await page.getByLabel("Shadow removal (mm)", { exact: true }).fill("0.4");
+  await page.getByLabel("Shadow removal (mm)", { exact: true }).press("Enter");
+  await expect(
+    page.getByText("Saved in this browser", { exact: true })
+  ).toBeVisible();
+  await page.reload();
+  await page.getByText("Bleed artwork", { exact: true }).click();
+  await expect(
+    page.getByLabel("Shadow removal (mm)", { exact: true })
+  ).toHaveValue("0.4");
+  await expect(page.getByLabel("Image edges", { exact: true })).toHaveValue(
+    "scan"
+  );
+});
+
+for (const name of [
+  "fireball",
+  "hit-it",
+  "elas-il-kor",
+  "white-border-lightning-bolt",
+]) {
+  test(`${name} border behavior reaches the preview and printed PDF`, async ({
+    page,
+  }) => {
+    await page
+      .getByLabel("Upload card images", { exact: true })
+      .setInputFiles(
+        new URL(`./fixtures/${name}.png`, import.meta.url).pathname
+      );
+    const preview = page
+      .getByRole("button", {
+        name: `${name.replaceAll("-", " ")}, change artwork`,
+        exact: true,
+      })
+      .getByRole("img");
+    await expect(preview).toBeVisible();
+    const previous = await preview.getAttribute("src");
+    await page.getByLabel("Bleed (mm)", { exact: true }).fill("5");
+    await page.getByLabel("Bleed (mm)", { exact: true }).press("Enter");
+    await expect(preview).not.toHaveAttribute("src", previous!);
+    const edgeTone = async (src: string) =>
+      page.evaluate(
+        async ({ src, name }) => {
+          const image = new Image();
+          image.src = src;
+          await image.decode();
+          const c = document.createElement("canvas");
+          c.width = image.width;
+          c.height = image.height;
+          const ctx = c.getContext("2d")!;
+          ctx.drawImage(image, 0, 0);
+          const p = ctx.getImageData(
+            Math.floor(image.width * 0.4),
+            name === "elas-il-kor" ? image.height - 4 : 0,
+            Math.floor(image.width * 0.2),
+            4
+          ).data;
+          let min = 255,
+            max = 0;
+          for (let i = 0; i < p.length; i++)
+            if (i % 4 !== 3) {
+              min = Math.min(min, p[i]);
+              max = Math.max(max, p[i]);
+            }
+          return { min, max };
+        },
+        { src, name }
+      );
+    for (const src of [
+      (await preview.getAttribute("src"))!,
+      await embeddedJpeg(await saveDownload(page, "Export fronts PDF")),
+    ]) {
+      const tone = await edgeTone(src);
+      if (name === "white-border-lightning-bolt")
+        expect(tone.min).toBeGreaterThanOrEqual(253);
+      else expect(tone.max).toBeLessThanOrEqual(2);
+    }
+    if (name === "fireball") {
+      await page.getByText("Bleed artwork", { exact: true }).click();
+      const before = await preview.getAttribute("src");
+      await page
+        .getByLabel("Border bleed", { exact: true })
+        .selectOption("mirror");
+      await expect(preview).not.toHaveAttribute("src", before!);
+      for (const src of [
+        (await preview.getAttribute("src"))!,
+        await embeddedJpeg(await saveDownload(page, "Export fronts PDF")),
+      ])
+        expect((await edgeTone(src)).max).toBeGreaterThan(80);
+      await page.reload();
+      await page.getByText("Bleed artwork", { exact: true }).click();
+      await expect(
+        page.getByLabel("Border bleed", { exact: true })
+      ).toHaveValue("mirror");
+      await expect(preview).toBeVisible();
+      expect(
+        (await edgeTone((await preview.getAttribute("src"))!)).max
+      ).toBeGreaterThan(80);
+      await page
+        .getByLabel("Border bleed", { exact: true })
+        .selectOption("auto");
+      await expect
+        .poll(
+          async () => (await edgeTone((await preview.getAttribute("src"))!)).max
+        )
+        .toBeLessThanOrEqual(2);
+    }
+  });
+}
+
+test("large uploaded previews run serially in workers while the UI stays responsive", async ({
+  page,
+}) => {
+  const source = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 4200;
+    c.height = 5867;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#5096be";
+    ctx.fillRect(0, 0, c.width, c.height);
+    const src = c.toDataURL().split(",")[1];
+    c.width = c.height = 0;
+    const NativeWorker = window.Worker;
+    let running = 0;
+    (window as any).workerEvidence = {
+      maxRunning: 0,
+      started: 0,
+      terminated: 0,
+      ticks: 0,
+    };
+    const evidence = (window as any).workerEvidence;
+    setInterval(() => {
+      if (running) evidence.ticks++;
+    }, 10);
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        running++;
+        evidence.started++;
+        evidence.maxRunning = Math.max(evidence.maxRunning, running);
+      }
+      terminate() {
+        running--;
+        evidence.terminated++;
+        super.terminate();
+      }
+    };
+    return src;
+  });
+  await page.getByLabel("Upload card images", { exact: true }).setInputFiles(
+    [1, 2, 3].map((i) => ({
+      name: `Large${i}.png`,
+      mimeType: "image/png",
+      buffer: Buffer.from(source, "base64"),
+    }))
+  );
+  for (const i of [1, 2, 3])
+    await expect(
+      page
+        .getByRole("button", { name: `Large${i}, change artwork`, exact: true })
+        .getByRole("img")
+    ).toBeVisible();
+  const evidence = await page.evaluate(() => (window as any).workerEvidence);
+  expect(evidence.maxRunning).toBe(1);
+  expect(evidence.started).toBe(1);
+  expect(evidence.terminated).toBe(0);
+  expect(evidence.ticks).toBeGreaterThan(2);
+});
+
+test("per-card bleed overrides preserve mixed-deck previews, PDF variants and saved choices", async ({
+  page,
+}) => {
+  await page
+    .getByLabel("Upload card images", { exact: true })
+    .setInputFiles(
+      new URL("./fixtures/fireball.png", import.meta.url).pathname
+    );
+  const buttons = page.getByRole("button", {
+    name: "fireball, change artwork",
+    exact: true,
+  });
+  await expect(buttons.getByRole("img")).toBeVisible();
+  await buttons.first().click({ button: "right" });
+  await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+  await expect(buttons).toHaveCount(2);
+  await page.getByLabel("Bleed (mm)", { exact: true }).fill("5");
+  await page.getByLabel("Bleed (mm)", { exact: true }).press("Enter");
+  await expect(buttons.last().getByRole("img")).toBeVisible();
+  await buttons.first().click();
+  await page.getByText("Bleed for this card", { exact: true }).click();
+  await expect(page.getByLabel("Bleed result", { exact: true })).toHaveText(
+    "Detected edges: top: black; right: black; bottom: black; left: black."
+  );
+  await expect(
+    page
+      .getByLabel("Card border bleed", { exact: true })
+      .getByRole("option", { selected: true })
+  ).toHaveText("Use print setting · Auto");
+  await page
+    .getByLabel("Card border bleed", { exact: true })
+    .selectOption("mirror");
+  await page
+    .getByLabel("Card image corner radius", { exact: true })
+    .selectOption("3.2");
+  await page
+    .getByLabel("Card shadow removal", { exact: true })
+    .selectOption("1");
+  await page
+    .getByLabel("Card image edges", { exact: true })
+    .selectOption("square");
+  await expect(
+    page.getByLabel("Card shadow removal", { exact: true })
+  ).toBeDisabled();
+  const tone = async (src: string) =>
+    page.evaluate(async (src) => {
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      const c = document.createElement("canvas");
+      c.width = image.width;
+      c.height = image.height;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(image, 0, 0);
+      const p = ctx.getImageData(
+        Math.floor(c.width * 0.4),
+        0,
+        Math.floor(c.width * 0.2),
+        4
+      ).data;
+      let max = 0;
+      for (let i = 0; i < p.length; i++)
+        if (i % 4 !== 3) max = Math.max(max, p[i]);
+      return max;
+    }, src);
+  await expect
+    .poll(async () => {
+      const src = await page
+        .getByRole("img", { name: "Card bleed preview", exact: true })
+        .getAttribute("src");
+      return src ? await tone(src) : 0;
+    })
+    .toBeGreaterThan(80);
+  await expect(page.getByLabel("Bleed result", { exact: true })).toHaveText(
+    "All edges continue the artwork."
+  );
+  await page
+    .getByRole("button", { name: "Close artwork picker", exact: true })
+    .click();
+  await expect
+    .poll(async () => {
+      const src = await buttons.last().getByRole("img").getAttribute("src");
+      return src ? await tone(src) : 255;
+    })
+    .toBeLessThanOrEqual(2);
+  const pdf = await PDFDocument.load(
+    await saveDownload(page, "Export fronts PDF")
+  );
+  const streams = pdf.context
+    .enumerateIndirectObjects()
+    .map((entry: any) => entry[1])
+    .filter(
+      (o: any) => o.dict?.get(PDFName.of("Subtype"))?.toString() === "/Image"
+    );
+  expect(streams).toHaveLength(2); // Same source, distinct processing options.
+  const tones = await Promise.all(
+    streams.map((s: any) =>
+      tone(
+        `data:image/jpeg;base64,${Buffer.from(s.contents).toString("base64")}`
+      )
+    )
+  );
+  expect(Math.min(...tones)).toBeLessThanOrEqual(2);
+  expect(Math.max(...tones)).toBeGreaterThan(80);
+  await expect(
+    page.getByText("Saved in this browser", { exact: true })
+  ).toBeVisible();
+  await page.reload();
+  await expect(buttons.first().getByRole("img")).toBeVisible();
+  expect(
+    await tone((await buttons.first().getByRole("img").getAttribute("src"))!)
+  ).toBeGreaterThan(80);
+  expect(
+    await tone((await buttons.last().getByRole("img").getAttribute("src"))!)
+  ).toBeLessThanOrEqual(2);
+  await buttons.first().click();
+  await page.getByText("Bleed for this card", { exact: true }).click();
+  await expect(
+    page.getByLabel("Card border bleed", { exact: true })
+  ).toHaveValue("mirror");
+  await expect(
+    page.getByLabel("Card image edges", { exact: true })
+  ).toHaveValue("square");
+  await expect(
+    page.getByLabel("Card image corner radius", { exact: true })
+  ).toHaveValue("3.2");
+  await expect(
+    page.getByLabel("Card shadow removal", { exact: true })
+  ).toHaveValue("1");
+});
+
+test("per-card bleed preview keeps updating while viewing backs", async ({
+  page,
+}) => {
+  await page
+    .getByLabel("Upload card images", { exact: true })
+    .setInputFiles(
+      new URL("./fixtures/fireball.png", import.meta.url).pathname
+    );
+  const card = page.getByRole("button", {
+    name: "fireball, change artwork",
+    exact: true,
+  });
+  await expect(card.getByRole("img")).toBeVisible();
+  await page.getByRole("button", { name: "Backs", exact: true }).click();
+  await expect(card.getByRole("img")).toBeVisible();
+  await card.click();
+  await page.getByText("Bleed for this card", { exact: true }).click();
+  const preview = page.getByRole("img", {
+    name: "Card bleed preview",
+    exact: true,
+  });
+  await expect(preview).toBeVisible();
+  await page
+    .getByLabel("Card border bleed", { exact: true })
+    .selectOption("mirror");
+  await expect(preview).toBeVisible();
+  await expect
+    .poll(async () => {
+      const previewSource = await preview.getAttribute("src");
+      const cardSource = await card.getByRole("img").getAttribute("src");
+      return !!previewSource && previewSource === cardSource;
+    })
+    .toBe(true);
+  await page
+    .getByLabel("Card shadow removal", { exact: true })
+    .selectOption("1");
+  await expect(preview).toBeVisible();
+  await expect
+    .poll(async () => {
+      const previewSource = await preview.getAttribute("src");
+      const cardSource = await card.getByRole("img").getAttribute("src");
+      return !!previewSource && previewSource === cardSource;
+    })
+    .toBe(true);
+});
+
+test("Arasta's four rounded corners have local artwork instead of scan wedges", async ({
+  page,
+}) => {
+  await page
+    .getByLabel("Upload card images", { exact: true })
+    .setInputFiles(new URL("./fixtures/arasta.png", import.meta.url).pathname);
+  const preview = page
+    .getByRole("button", { name: "arasta, change artwork", exact: true })
+    .getByRole("img");
+  await expect(preview).toBeVisible();
+  const pdf = await embeddedJpeg(await saveDownload(page, "Export fronts PDF"));
+  for (const [label, src] of [
+    ["preview", await preview.getAttribute("src")],
+    ["pdf", pdf],
+  ]) {
+    const result = await page.evaluate(async (src) => {
+      const img = new Image();
+      img.src = src!;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const b = Math.round((img.width * 2) / 67);
+      const corners = [
+        [b, b],
+        [img.width - b - 1, b],
+        [b, img.height - b - 1],
+        [img.width - b - 1, img.height - b - 1],
+      ];
+      const radius = Math.max(2, Math.round((img.width / 67) * 0.5));
+      return {
+        pixels: corners.map(([x, y]) => {
+          const patch = ctx.getImageData(
+            x - radius,
+            y - radius,
+            2 * radius + 1,
+            2 * radius + 1
+          ).data;
+          const mean = [0, 0, 0];
+          for (let i = 0; i < patch.length; i += 4)
+            for (let c = 0; c < 3; c++)
+              mean[c] += patch[i + c] / (patch.length / 4);
+          return mean;
+        }),
+        png: canvas.toDataURL(),
+      };
+    }, src);
+    // The old top-left sample filled both bottom corners with pale yellow.
+    for (const p of result.pixels.slice(2))
+      expect(Math.max(...p.slice(0, 3))).toBeLessThan(35);
+    // Average a physical patch: the top-right artwork contains legitimate ink
+    // lines, so an individual dark pixel is not evidence of a scan shadow.
+    const [topLeft, topRight] = result.pixels;
+    expect(topLeft[0] + topLeft[1] + topLeft[2]).toBeGreaterThan(600);
+    // The helmet corner is orange/brown, not the pale yellow previously
+    // borrowed from the top-left corner. Dark helmet ink must be preserved.
+    expect(topRight[0]).toBeGreaterThan(topRight[1] * 1.2);
+    expect(topRight[1]).toBeGreaterThan(topRight[2] * 1.15);
+    await test.info().attach(`arasta-${label}`, {
+      body: Buffer.from(result.png.split(",")[1], "base64"),
+      contentType: "image/png",
+    });
+    await mkdir(".artifacts/bleed", { recursive: true });
+    await writeFile(
+      `.artifacts/bleed/arasta-${label}-${test.info().project.name}.png`,
+      Buffer.from(result.png.split(",")[1], "base64")
+    );
   }
 });
 
@@ -1002,3 +1624,112 @@ test("editing the uploaded source file does not change originals or reloads", as
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("failed per-card bleed previews show an error and can be retried", async ({
+  page,
+}) => {
+  await addDeck(page, "1 Sol Ring");
+  const card = page.getByRole("button", {
+    name: "Sol Ring, change artwork",
+    exact: true,
+  });
+  await expect(card.getByRole("img")).toBeVisible();
+  await card.click();
+  await page.getByText("Bleed for this card", { exact: true }).click();
+  let fail = true;
+  await page.route("**/api/cards/images/proxy?**", (route) =>
+    fail
+      ? route.fulfill({ status: 503, body: "Unavailable" })
+      : route.fulfill({ contentType: "image/png", body: fixture })
+  );
+  await page
+    .getByLabel("Card border bleed", { exact: true })
+    .selectOption("mirror");
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "Could not prepare the bleed preview" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Preparing bleed preview…", { exact: true })
+  ).toHaveCount(0);
+  fail = false;
+  await page
+    .getByRole("button", { name: "Retry bleed preview", exact: true })
+    .click();
+  await expect(
+    page.getByRole("img", { name: "Card bleed preview", exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry bleed preview", exact: true })
+  ).toHaveCount(0);
+});
+
+for (const [tone, shadow, suggested] of [
+  [240, 0.5, 0.6],
+  [30, 0.4, 0.5],
+]) {
+  test(`shadow guidance repairs two edges of a ${tone === 240 ? "white" : "black"} frame`, async ({
+    page,
+  }) => {
+    const source = await page.evaluate(
+      ({ tone, shadow }) => {
+        const c = document.createElement("canvas");
+        c.width = 1260;
+        c.height = 1760;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = `rgb(${tone},${tone},${tone})`;
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.fillStyle = "#cc8822";
+        ctx.fillRect(40, 40, 1180, 1680);
+        ctx.fillStyle = "#8c8c8c";
+        ctx.fillRect(0, 0, shadow * 20, c.height);
+        ctx.fillRect(0, 0, c.width, shadow * 20);
+        return c.toDataURL().split(",")[1];
+      },
+      { tone, shadow }
+    );
+    await page
+      .getByLabel("Upload card images", { exact: true })
+      .setInputFiles({
+        name: "Shadow.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(source, "base64"),
+      });
+    const card = page.getByRole("button", {
+      name: "Shadow, change artwork",
+      exact: true,
+    });
+    await expect(card.getByRole("img")).toBeVisible();
+    await card.click();
+    await page.getByText("Bleed for this card", { exact: true }).click();
+    await expect(
+      page.getByText(
+        `Possible edge shadow. Try ${suggested} mm shadow removal.`,
+        { exact: true }
+      )
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "Use suggested shadow removal",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByLabel("Card shadow removal", { exact: true })
+    ).toHaveValue(String(suggested));
+    await expect(
+      page.getByRole("img", { name: "Card bleed preview", exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Use suggested shadow removal",
+        exact: true,
+      })
+    ).toHaveCount(0);
+    const treatment = tone === 240 ? "white" : "black";
+    await expect(page.getByLabel("Bleed result", { exact: true })).toHaveText(
+      `Detected edges: top: ${treatment}; right: ${treatment}; bottom: ${treatment}; left: ${treatment}.`
+    );
+  });
+}

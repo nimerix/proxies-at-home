@@ -60,7 +60,7 @@ export function PageView() {
     ) * s.zoom;
   const capacity = s.columns * s.rows;
   const pageCount = Math.ceil(cards.length / capacity);
-  const { loadingMap, ensureProcessed, ensureBackFaceProcessed } =
+  const { loadingMap, errorMap, ensureProcessed, ensureBackFaceProcessed } =
     useImageProcessing({ unit: "mm", bleedEdgeWidth: s.bleedEdgeWidth });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -269,7 +269,13 @@ export function PageView() {
         </>
       )}
       <Suspense fallback={null}>
-        <ArtworkModal />
+        <ArtworkModal
+          loadingMap={loadingMap}
+          errorMap={errorMap}
+          onRetry={(card, back) => {
+            void (back ? ensureBackFaceProcessed : ensureProcessed)(card);
+          }}
+        />
       </Suspense>
     </section>
   );

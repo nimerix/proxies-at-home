@@ -6,6 +6,13 @@ import {
   hydrationErrorMessage,
 } from "../helpers/IndexedDBStorage";
 import { finiteClamp, fitLayout } from "../helpers/printLayout";
+import {
+  DEFAULT_SCAN_INSET_MM,
+  MAX_SCAN_INSET_MM,
+  CARD_CORNER_RADIUS_MM,
+  MAX_SCAN_CORNER_RADIUS_MM,
+  type BleedArtworkOptions,
+} from "../helpers/bleedArtwork";
 
 export type LayoutPreset =
   | "A4"
@@ -40,6 +47,14 @@ type Store = {
   setRows: (value: number) => void;
   bleedEdgeWidth: number;
   setBleedEdgeWidth: (value: number) => void;
+  bleedSource: BleedArtworkOptions["source"];
+  setBleedSource: (value: BleedArtworkOptions["source"]) => void;
+  borderBleed: "auto" | "mirror";
+  setBorderBleed: (value: "auto" | "mirror") => void;
+  scanInsetMm: number;
+  setScanInsetMm: (value: number) => void;
+  scanCornerRadiusMm: number;
+  setScanCornerRadiusMm: (value: number) => void;
   useCornerGuides: boolean;
   setUseCornerGuides: (value: boolean) => void;
   guideColor: string;
@@ -97,6 +112,10 @@ export const defaultPageSettings = {
   columns: 3,
   rows: 3,
   bleedEdgeWidth: 2,
+  bleedSource: "scan",
+  borderBleed: "auto",
+  scanInsetMm: DEFAULT_SCAN_INSET_MM,
+  scanCornerRadiusMm: CARD_CORNER_RADIUS_MM,
   useCornerGuides: true,
   guideColor: "#39FF14",
   guideWidth: 0.5,
@@ -183,6 +202,20 @@ function restoreSettings(value: unknown): Partial<Store> {
     pageWidth: landscape ? size.pageHeight : size.pageWidth,
     pageHeight: landscape ? size.pageWidth : size.pageHeight,
     bleedEdgeWidth: finiteClamp(result.bleedEdgeWidth, 0, 5, 2),
+    bleedSource: saved.bleedSource === "square" ? "square" : "scan",
+    borderBleed: saved.borderBleed === "mirror" ? "mirror" : "auto",
+    scanInsetMm: finiteClamp(
+      result.scanInsetMm,
+      0,
+      MAX_SCAN_INSET_MM,
+      DEFAULT_SCAN_INSET_MM
+    ),
+    scanCornerRadiusMm: finiteClamp(
+      result.scanCornerRadiusMm,
+      CARD_CORNER_RADIUS_MM,
+      MAX_SCAN_CORNER_RADIUS_MM,
+      CARD_CORNER_RADIUS_MM
+    ),
     guideWidth: finiteClamp(result.guideWidth, 0.1, 4, 0.5),
     guideColor: /^#[0-9a-f]{6}$/i.test(result.guideColor)
       ? result.guideColor
@@ -260,6 +293,26 @@ export const useSettingsStore = create<Store>()(
         ),
       setCardSpacingMm: (cardSpacingMm) =>
         set((s) => fitPreferredGrid({ ...s, cardSpacingMm })),
+      setBleedSource: (bleedSource) => set({ bleedSource }),
+      setBorderBleed: (borderBleed) => set({ borderBleed }),
+      setScanCornerRadiusMm: (value) =>
+        set({
+          scanCornerRadiusMm: finiteClamp(
+            value,
+            CARD_CORNER_RADIUS_MM,
+            MAX_SCAN_CORNER_RADIUS_MM,
+            CARD_CORNER_RADIUS_MM
+          ),
+        }),
+      setScanInsetMm: (value) =>
+        set({
+          scanInsetMm: finiteClamp(
+            value,
+            0,
+            MAX_SCAN_INSET_MM,
+            DEFAULT_SCAN_INSET_MM
+          ),
+        }),
       setUseCornerGuides: (useCornerGuides) => set({ useCornerGuides }),
       setGuideColor: (guideColor) => set({ guideColor }),
       setGuideWidth: (value) =>

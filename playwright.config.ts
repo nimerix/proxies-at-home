@@ -9,6 +9,9 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { browserName: "chromium" } },
     { name: "webkit", use: { browserName: "webkit" } },
+    ...(process.env.TEST_FIREFOX === "1"
+      ? [{ name: "firefox", use: { browserName: "firefox" as const } }]
+      : []),
   ],
   use: {
     baseURL: "http://127.0.0.1:4173",

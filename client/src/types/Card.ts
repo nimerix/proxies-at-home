@@ -1,3 +1,5 @@
+import type { BleedArtworkOptions } from "../helpers/bleedArtwork";
+
 export interface CardFace {
   name: string;
   imageUrl: string;
@@ -20,6 +22,7 @@ export interface CardOption {
   layout?: string;
   faces?: CardFace[];
   currentFaceIndex?: number;
+  bleedArtwork?: Partial<BleedArtworkOptions>;
 }
 
 export interface CardDimensions {

@@ -11,6 +11,7 @@ import {
 } from "../helpers/IndexedDBStorage";
 import { MAX_CARDS } from "../helpers/CardInfoHelper";
 import { notify } from "./notifications";
+import type { BleedReport } from "../helpers/bleedReport";
 import type { CardOption } from "../types/Card";
 
 type Store = {
@@ -23,8 +24,19 @@ type Store = {
   setCards: (cards: CardOption[]) => void;
   appendCards: (newCards: CardOption[]) => void;
   updateCard: (pos: number, updatedCard: Partial<CardOption>) => void;
+  setCardBleedArtwork: (
+    uuid: string,
+    value: NonNullable<CardOption["bleedArtwork"]>
+  ) => void;
 
   // ---------- volatile (NOT persisted) ----------
+  bleedReports: Record<string, { front?: BleedReport; back?: BleedReport }>;
+  setProcessedImage: (
+    uuid: string,
+    back: boolean,
+    src: string,
+    report?: BleedReport
+  ) => void;
   selectedImages: Record<string, string>;
   setSelectedImages: (images: Record<string, string>) => void;
   appendSelectedImages: (newImages: Record<string, string>) => void;
@@ -59,6 +71,7 @@ type Store = {
 };
 
 const emptyImages = () => ({
+  bleedReports: {},
   selectedImages: {},
   selectedBackFaceImages: {},
   originalSelectedImages: {},
@@ -73,6 +86,7 @@ function strip<T>(map: Record<string, T>, ids: Set<string>) {
 
 function removeImages(state: Store, ids: Set<string>) {
   return {
+    bleedReports: strip(state.bleedReports, ids),
     selectedImages: strip(state.selectedImages, ids),
     selectedBackFaceImages: strip(state.selectedBackFaceImages, ids),
     originalSelectedImages: strip(state.originalSelectedImages, ids),
@@ -95,6 +109,37 @@ export const useCardsStore = create<Store>()(
       updateCard: (pos, patch) =>
         set((s) => ({
           cards: s.cards.map((c, i) => (i === pos ? { ...c, ...patch } : c)),
+        })),
+      setCardBleedArtwork: (uuid, value) =>
+        set((s) => ({
+          cards: s.cards.map((c) =>
+            c.uuid === uuid
+              ? { ...c, bleedArtwork: { ...c.bleedArtwork, ...value } }
+              : c
+          ),
+          selectedImages: strip(s.selectedImages, new Set([uuid])),
+          selectedBackFaceImages: strip(
+            s.selectedBackFaceImages,
+            new Set([uuid])
+          ),
+        })),
+      setProcessedImage: (uuid, back, src, report) =>
+        set((s) => ({
+          ...(back
+            ? {
+                selectedBackFaceImages: {
+                  ...s.selectedBackFaceImages,
+                  [uuid]: src,
+                },
+              }
+            : { selectedImages: { ...s.selectedImages, [uuid]: src } }),
+          bleedReports: {
+            ...s.bleedReports,
+            [uuid]: {
+              ...s.bleedReports[uuid],
+              [back ? "back" : "front"]: report,
+            },
+          },
         })),
       clearAll: () => set({ cards: [], ...emptyImages() }),
       setSelectedImages: (selectedImages) => set({ selectedImages }),
@@ -180,6 +225,7 @@ export const useCardsStore = create<Store>()(
                 };
           return {
             cards,
+            bleedReports: copy(state.bleedReports),
             selectedImages: copy(state.selectedImages),
             selectedBackFaceImages: copy(state.selectedBackFaceImages),
             originalSelectedImages: copyOriginal(state.originalSelectedImages),

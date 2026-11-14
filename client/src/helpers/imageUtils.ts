@@ -92,6 +92,15 @@ export async function loadImageWithBlobFetch(
   signal?: AbortSignal
 ): Promise<HTMLImageElement> {
   if (/^(data:|blob:)/i.test(src)) return loadImageElement(src, signal);
+  const objectUrl = URL.createObjectURL(await fetchImageBlob(src, signal));
+  try {
+    return await loadImageElement(objectUrl, signal);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+export async function fetchImageBlob(src: string, signal?: AbortSignal) {
   const timeout = AbortSignal.timeout(30000);
   const response = await fetch(toProxied(src), {
     credentials: "omit",
@@ -103,10 +112,5 @@ export async function loadImageWithBlobFetch(
       src,
       response.status
     );
-  const objectUrl = URL.createObjectURL(await response.blob());
-  try {
-    return await loadImageElement(objectUrl, signal);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
+  return response.blob();
 }

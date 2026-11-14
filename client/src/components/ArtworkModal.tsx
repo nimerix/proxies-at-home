@@ -4,6 +4,10 @@ import { X, Search } from "lucide-react";
 import { API_BASE } from "../constants";
 import { toProxied } from "../helpers/ImageHelper";
 import { useArtworkModalStore, useCardsStore } from "../store";
+import {
+  BleedArtworkControls,
+  type BleedPreviewStatus,
+} from "./BleedArtworkControls";
 import { errorMessage, notify } from "../store/notifications";
 import type { CardOption } from "../types/Card";
 
@@ -22,11 +26,18 @@ function getSets() {
       });
   return setsPromise;
 }
-export function ArtworkModal() {
+export function ArtworkModal(props: BleedPreviewStatus) {
   const { open, card } = useArtworkModalStore();
-  return open && card ? <ArtworkDialog key={card.uuid} card={card} /> : null;
+  return open && card ? (
+    <ArtworkDialog key={card.uuid} card={card} {...props} />
+  ) : null;
 }
-function ArtworkDialog({ card }: { card: CardOption }) {
+function ArtworkDialog({
+  card,
+  loadingMap,
+  errorMap,
+  onRetry,
+}: { card: CardOption } & BleedPreviewStatus) {
   const dialog = useRef<HTMLDialogElement>(null);
   const language = useCardsStore((s) => s.globalLanguage);
   const original = useCardsStore((s) => s.originalSelectedImages[card.uuid]);
@@ -202,6 +213,12 @@ function ArtworkDialog({ card }: { card: CardOption }) {
         </button>
       </header>
       <div className="dialog-body">
+        <BleedArtworkControls
+          card={card}
+          loadingMap={loadingMap}
+          errorMap={errorMap}
+          onRetry={onRetry}
+        />
         <form
           className="art-search"
           onSubmit={(e) => {
