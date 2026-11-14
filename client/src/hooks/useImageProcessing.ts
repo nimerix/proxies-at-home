@@ -1,362 +1,158 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addBleedEdgeSmartly,
-  computeCardPreviewPixels,
-  createPreviewDataUrl,
-  getLocalBleedImageUrl,
-  isUploadedFileToken,
-  makeUploadedFileToken,
-  processWithConcurrency,
-  revokeIfBlobUrl,
-  resolveImageProcessingConcurrency,
-  urlToDataUrl,
+  createTaskQueue,
+  renderCardCanvas,
+  toProxied,
   PREVIEW_CARD_DPI,
 } from "../helpers/ImageHelper";
+import { cardSource } from "../helpers/cardSources";
 import { useCardsStore, useSettingsStore } from "../store";
 import type { CardOption } from "../types/Card";
 
-const HIGH_QUALITY_PREVIEW_DPI = 300;
+type LoadState = "idle" | "loading" | "error";
+type PreviewJob = {
+  card: CardOption;
+  source: string | File | undefined;
+  bleed: number;
+  dpi: number;
+  hasBakedBleed: boolean;
+  epoch: number;
+  promise?: Promise<void>;
+};
+const queuePreview = createTaskQueue(3);
 
 export function useImageProcessing({
-  unit,
   bleedEdgeWidth,
 }: {
   unit: "mm" | "in";
   bleedEdgeWidth: number;
 }) {
-  const selectedImages = useCardsStore((state) => state.selectedImages);
-  const selectedBackFaceImages = useCardsStore((state) => state.selectedBackFaceImages);
-  const originalSelectedImages = useCardsStore(
-    (state) => state.originalSelectedImages
-  );
-  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
-  const uploadedBackFiles = useCardsStore((state) => state.uploadedBackFiles);
-  const originalSelectedBackImages = useCardsStore((state) => state.originalSelectedBackImages);
-  const appendSelectedImages = useCardsStore(
-    (state) => state.appendSelectedImages
-  );
-  const appendSelectedBackFaceImages = useCardsStore(
-    (state) => state.appendSelectedBackFaceImages
-  );
-  const appendOriginalSelectedImages = useCardsStore(
-    (state) => state.appendOriginalSelectedImages
-  );
-  const setIsProcessing = useSettingsStore((state) => state.setIsProcessing);
-  const setProcessingProgress = useSettingsStore(
-    (state) => state.setProcessingProgress
+  const customBack = useSettingsStore((s) => s.customCardbackUrl);
+  const customHasBleed = useSettingsStore((s) => s.customCardbackHasBleed);
+  const highQuality = useSettingsStore((s) => s.useHighQualityPreviews);
+  const [loadingMap, setLoadingMap] = useState<Record<string, LoadState>>({});
+  const inFlight = useRef(new Map<string, PreviewJob>());
+  const generation = useRef(0);
+  useEffect(
+    () => () => {
+      generation.current++;
+    },
+    []
   );
 
-  const [loadingMap, setLoadingMap] = useState<
-    Record<string, "idle" | "loading" | "error">
-  >({});
-  const inFlight = useRef<Record<string, Promise<void>>>({});
-  const jobTokenCounter = useRef(0);
-  const activeJobToken = useRef<number | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  function getOriginalSrcForCard(card: CardOption): string | File | undefined {
-    const stored = originalSelectedImages[card.uuid];
-    if (stored) {
-      if (isUploadedFileToken(stored)) {
-        return uploadedFiles[card.uuid];
-      }
-      return stored;
-    }
-
-    // Use the current face index if available
-    if (card.faces && card.faces.length > 0) {
-      const faceIndex = card.currentFaceIndex ?? 0;
-      const face = card.faces[faceIndex];
-      if (face?.imageUrl) {
-        return getLocalBleedImageUrl(face.imageUrl);
-      }
-    }
-
-    if (card.imageUrls?.length) {
-      return getLocalBleedImageUrl(card.imageUrls[0]);
-    }
-    return undefined;
-  }
-
-  async function ensureProcessed(card: CardOption): Promise<void> {
-    const uuid = card.uuid;
-    if (selectedImages[uuid]) return;
-
-    const existing = inFlight.current[uuid];
-    if (existing) return existing;
-
-    const p = (async () => {
-      const source = getOriginalSrcForCard(card);
-      if (!source) return;
-
-      setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
-      let revokeUrl: string | null = null;
-      try {
-        let resolvedSrc: string;
-
-        if (source instanceof File) {
-          resolvedSrc = URL.createObjectURL(source);
-          revokeUrl = resolvedSrc;
-        } else if (/^(data:|blob:)/i.test(source)) {
-          resolvedSrc = source;
-        } else {
-          resolvedSrc = await urlToDataUrl(source);
-        }
-
-        let processedUrl: string | null = null;
+  const process = useCallback(
+    async (card: CardOption, back: boolean) => {
+      const images = useCardsStore.getState();
+      if (
+        (back ? images.selectedBackFaceImages : images.selectedImages)[
+          card.uuid
+        ]
+      )
+        return;
+      const { source, hasBakedBleed } = cardSource(
+        card,
+        images,
+        back,
+        customBack,
+        customHasBleed
+      );
+      const dpi = highQuality ? 300 : PREVIEW_CARD_DPI;
+      const key = `${card.uuid}:${back}`;
+      const previous = inFlight.current.get(key);
+      if (
+        previous?.card === card &&
+        previous.epoch === generation.current &&
+        previous.source === source &&
+        previous.bleed === bleedEdgeWidth &&
+        previous.dpi === dpi &&
+        previous.hasBakedBleed === hasBakedBleed
+      )
+        return previous.promise;
+      const epoch = generation.current;
+      const job: PreviewJob = {
+        card,
+        source,
+        bleed: bleedEdgeWidth,
+        dpi,
+        hasBakedBleed,
+        epoch,
+      };
+      inFlight.current.set(key, job);
+      const isCurrent = () => {
+        const current = useCardsStore.getState(),
+          settings = useSettingsStore.getState();
+        const currentSource = cardSource(
+          card,
+          current,
+          back,
+          settings.customCardbackUrl,
+          settings.customCardbackHasBleed
+        );
+        return (
+          epoch === generation.current &&
+          inFlight.current.get(key) === job &&
+          current.cards.some((c) => c === card) &&
+          settings.bleedEdgeWidth === bleedEdgeWidth &&
+          settings.useHighQualityPreviews === highQuality &&
+          currentSource.source === source &&
+          currentSource.hasBakedBleed === hasBakedBleed
+        );
+      };
+      setLoadingMap((m) => ({ ...m, [key]: "loading" }));
+      job.promise = queuePreview(async () => {
+        let uploadUrl: string | undefined;
+        let canvas: HTMLCanvasElement | undefined;
         try {
-          processedUrl = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
-            unit,
-            bleedEdgeWidth,
-            hasBakedBleed: card.hasBakedBleed,
-          });
-          const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
-          const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
-          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
-          const preview = await createPreviewDataUrl(processedUrl, {
-            maxWidth: previewWidth,
-            maxHeight: previewHeight,
-            mimeType: "image/jpeg",
-            quality: 0.82,
-            background: "#FFFFFF",
-          });
-
-          appendSelectedImages({ [uuid]: preview });
-        } finally {
-          revokeIfBlobUrl(processedUrl);
-        }
-
-        if (!originalSelectedImages[uuid]) {
-          if (source instanceof File) {
-            appendOriginalSelectedImages({ [uuid]: makeUploadedFileToken(uuid) });
-          } else {
-            appendOriginalSelectedImages({ [uuid]: source });
-          }
-        }
-        setLoadingMap((m) => ({ ...m, [uuid]: "idle" }));
-      } catch (e) {
-        console.error("ensureProcessed error for", card.name, e);
-        setLoadingMap((m) => ({ ...m, [uuid]: "error" }));
-      } finally {
-        if (revokeUrl) URL.revokeObjectURL(revokeUrl);
-        delete inFlight.current[uuid];
-      }
-    })();
-
-    inFlight.current[uuid] = p;
-    return p;
-  }
-
-  async function ensureBackFaceProcessed(card: CardOption): Promise<void> {
-    const uuid = card.uuid;
-    if (selectedBackFaceImages[uuid]) return;
-
-    // Check if card has uploaded back image
-    const hasUploadedBackImage = originalSelectedBackImages[uuid];
-    const hasDoubleFace = card.faces && card.faces.length >= 2;
-
-    console.log(`[ensureBackFaceProcessed] ${card.name}:`, {
-      hasUploadedBackImage: !!hasUploadedBackImage,
-      hasDoubleFace,
-      facesCount: card.faces?.length,
-      faces: card.faces?.map(f => ({ name: f.name, hasUrl: !!f.imageUrl }))
-    });
-
-    if (!hasUploadedBackImage && !hasDoubleFace) return;
-
-    const backFaceKey = `${uuid}-back`;
-    const existing = inFlight.current[backFaceKey];
-    if (existing) return existing;
-
-    const p = (async () => {
-      setLoadingMap((m) => ({ ...m, [uuid]: "loading" }));
-      let revokeUrl: string | null = null;
-      try {
-        let resolvedSrc: string;
-
-        if (hasUploadedBackImage) {
-          // Process user-uploaded back image
-          const backFile = uploadedBackFiles[uuid];
-          if (!backFile) return;
-
-          resolvedSrc = URL.createObjectURL(backFile);
-          revokeUrl = resolvedSrc;
-        } else if (hasDoubleFace) {
-          // Process double-faced card from Scryfall
-          const currentFaceIndex = card.currentFaceIndex ?? 0;
-          const oppositeFaceIndex = currentFaceIndex === 0 ? 1 : 0;
-          const oppositeFace = card.faces![oppositeFaceIndex];
-
-          console.log(`[ensureBackFaceProcessed] Processing face ${oppositeFaceIndex}:`, {
-            name: oppositeFace?.name,
-            imageUrl: oppositeFace?.imageUrl
-          });
-
-          if (!oppositeFace?.imageUrl) {
-            console.warn(`[ensureBackFaceProcessed] No imageUrl for back face of ${card.name}`);
-            return;
-          }
-
-          const backFaceUrl = getLocalBleedImageUrl(oppositeFace.imageUrl);
-          resolvedSrc = await urlToDataUrl(backFaceUrl);
-        } else {
-          return;
-        }
-
-        let processedUrl: string | null = null;
-        try {
-          // User uploads may have baked bleed, Scryfall back faces don't
-          const hasBakedBleed = hasUploadedBackImage ? (card.hasBakedBleed ?? false) : false;
-          processedUrl = await addBleedEdgeSmartly(resolvedSrc, bleedEdgeWidth, {
-            unit,
+          if (!isCurrent()) return;
+          if (!source)
+            throw new Error(
+              "Image source is missing. Upload the image again or choose another artwork."
+            );
+          const src =
+            typeof source === "string"
+              ? toProxied(source)
+              : (uploadUrl = URL.createObjectURL(source));
+          canvas = await renderCardCanvas(
+            src,
             bleedEdgeWidth,
             hasBakedBleed,
-          });
-          const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
-          const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
-          const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
-          const preview = await createPreviewDataUrl(processedUrl, {
-            maxWidth: previewWidth,
-            maxHeight: previewHeight,
-            mimeType: "image/jpeg",
-            quality: 0.82,
-            background: "#FFFFFF",
-          });
-
-          appendSelectedBackFaceImages({ [uuid]: preview });
-        } finally {
-          revokeIfBlobUrl(processedUrl);
-        }
-
-        setLoadingMap((m) => ({ ...m, [uuid]: "idle" }));
-      } catch (e) {
-        console.error("ensureBackFaceProcessed error for", card.name, e);
-        setLoadingMap((m) => ({ ...m, [uuid]: "error" }));
-      } finally {
-        if (revokeUrl) URL.revokeObjectURL(revokeUrl);
-        delete inFlight.current[backFaceKey];
-      }
-    })();
-
-    inFlight.current[backFaceKey] = p;
-    return p;
-  }
-
-  async function reprocessSelectedImages(
-    cards: CardOption[],
-    newBleedWidth: number
-  ) {
-    const totalCards = cards.length;
-    if (totalCards === 0) {
-      return;
-    }
-
-    // Cancel any existing job
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    const token = ++jobTokenCounter.current;
-    activeJobToken.current = token;
-    setIsProcessing(true);
-    setProcessingProgress(0);
-
-    let completed = 0;
-    const updated: Record<string, string> = {};
-    const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
-    const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
-    const { width: previewWidth, height: previewHeight } = computeCardPreviewPixels(newBleedWidth, dpi);
-    const concurrency = resolveImageProcessingConcurrency();
-
-    const reportProgress = () => {
-      if (activeJobToken.current !== token) return;
-      completed += 1;
-      const percentage = Math.min(100, Math.round((completed / totalCards) * 100));
-      setProcessingProgress(percentage);
-    };
-
-    try {
-      await processWithConcurrency(
-        cards,
-        async (card) => {
-          if (controller.signal.aborted) return;
-
-          const uuid = card.uuid;
-          const original = originalSelectedImages[uuid];
-
-          let resolvedSrc: string | undefined;
-          let revokeUrl: string | null = null;
-
-          try {
-            if (!original) {
-              return;
-            }
-
-            if (isUploadedFileToken(original)) {
-              const file = uploadedFiles[uuid];
-              if (!file) return;
-              resolvedSrc = URL.createObjectURL(file);
-              revokeUrl = resolvedSrc;
-            } else if (/^(data:|blob:)/i.test(original)) {
-              resolvedSrc = original;
-            } else if (card.isUserUpload) {
-              resolvedSrc = await urlToDataUrl(original);
-            } else {
-              resolvedSrc = getLocalBleedImageUrl(original);
-            }
-
-            if (!resolvedSrc || controller.signal.aborted) return;
-
-            let processedUrl: string | null = null;
-            try {
-              processedUrl = await addBleedEdgeSmartly(resolvedSrc, newBleedWidth, {
-                unit,
-                bleedEdgeWidth: newBleedWidth,
-                hasBakedBleed: card.hasBakedBleed,
-              });
-
-              if (controller.signal.aborted) return;
-
-              updated[uuid] = await createPreviewDataUrl(processedUrl, {
-                maxWidth: previewWidth,
-                maxHeight: previewHeight,
-                mimeType: "image/jpeg",
-                quality: 0.82,
-                background: "#FFFFFF",
-              });
-            } catch (err) {
-              if (!controller.signal.aborted) {
-                console.warn("[Reprocess] Failed for card", card.name ?? uuid, err);
-              }
-            } finally {
-              revokeIfBlobUrl(processedUrl);
-            }
-          } finally {
-            if (revokeUrl) URL.revokeObjectURL(revokeUrl);
-            reportProgress();
+            dpi
+          );
+          if (!isCurrent()) return;
+          const preview = canvas.toDataURL("image/jpeg", 0.85);
+          if (preview === "data:,")
+            throw new Error("The browser could not prepare the preview.");
+          const current = useCardsStore.getState();
+          if (back)
+            current.appendSelectedBackFaceImages({ [card.uuid]: preview });
+          else current.appendSelectedImages({ [card.uuid]: preview });
+          setLoadingMap((m) => ({ ...m, [key]: "idle" }));
+        } catch (error) {
+          if (isCurrent()) {
+            console.warn(`Could not prepare ${card.name}`, error);
+            setLoadingMap((m) => ({ ...m, [key]: "error" }));
           }
-        },
-        concurrency,
-        controller.signal
-      );
+        } finally {
+          if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+          if (canvas) {
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+          if (inFlight.current.get(key) === job) inFlight.current.delete(key);
+        }
+      });
+      return job.promise;
+    },
+    [bleedEdgeWidth, highQuality, customBack, customHasBleed]
+  );
 
-      if (activeJobToken.current === token && Object.keys(updated).length > 0 && !controller.signal.aborted) {
-        appendSelectedImages(updated);
-      }
-    } finally {
-      if (activeJobToken.current === token) {
-        setIsProcessing(false);
-        setProcessingProgress(0);
-        activeJobToken.current = null;
-      }
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
-    }
-  }
-
-  return { loadingMap, ensureProcessed, ensureBackFaceProcessed, reprocessSelectedImages };
+  const ensureProcessed = useCallback(
+    (card: CardOption) => process(card, false),
+    [process]
+  );
+  const ensureBackFaceProcessed = useCallback(
+    (card: CardOption) => process(card, true),
+    [process]
+  );
+  return { loadingMap, ensureProcessed, ensureBackFaceProcessed };
 }

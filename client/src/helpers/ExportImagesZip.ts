@@ -1,270 +1,120 @@
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import type { CardOption } from "../types/Card";
-import { API_BASE } from "@/constants";
-import { isUploadedFileToken } from "./ImageHelper";
+import { cardSource, type ImageSources } from "./cardSources";
+import { processWithConcurrency, toProxied } from "./ImageHelper";
 
-function sanitizeFilename(name: string): string {
-  return (
-    name
-      .replace(/[\/\\?%*:|"<>]/g, "_")
-      .replace(/\s+/g, " ")
-      .trim() || "card"
-  );
-}
-
-function generateScryfallFilename(card: CardOption, faceName?: string): string {
-  const name = faceName || card.name;
-
-  // Convert to lowercase and replace spaces/special chars with dashes
-  const namePart = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")  // Replace non-alphanumeric with dashes
-    .replace(/^-+|-+$/g, "");      // Trim leading/trailing dashes
-
-  // Build filename: set-number-name or just name if no set info
-  if (card.set && card.number) {
-    return `${card.set.toLowerCase()}-${card.number}-${namePart}`;
-  } else if (card.set) {
-    return `${card.set.toLowerCase()}-${namePart}`;
-  } else {
-    return namePart;
-  }
-}
-
-function getLocalBleedImageUrl(originalUrl: string) {
-  return `${API_BASE}/api/cards/images/proxy?url=${encodeURIComponent(originalUrl)}`;
-}
-
-// Scryfall thumbs sometimes come as .jpg; prefer .png for fewer artifacts
-function preferPng(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.endsWith("scryfall.io") && u.pathname.match(/\.(jpg|jpeg)$/i)) {
-      u.pathname = u.pathname.replace(/\.(jpg|jpeg)$/i, ".png");
-      return u.toString();
-    }
-  } catch {
-    /* noop */
-  }
-  return url;
-}
-
-type ExportOpts = {
+type ExportOpts = ImageSources & {
   cards: CardOption[];
-  originalSelectedImages: Record<string, string>;
-  cachedImageUrls?: Record<string, string>;
-  uploadedFiles?: Record<string, File>;
-  originalSelectedBackImages?: Record<string, string>;
-  uploadedBackFiles?: Record<string, File>;
-  fileBaseName?: string; // default: card_images_YYYY-MM-DD
-  concurrency?: number;  // default: 6
-  includeDoubleFaces?: boolean; // default: false - include both sides of double-faced cards
-  useOriginalCardNames?: boolean; // default: false - use Scryfall-style filenames
-  prefixIndexToExportNames?: boolean; // default: true - add index prefix to filenames
+  fileBaseName?: string;
+  concurrency?: number;
+  includeDoubleFaces?: boolean;
+  useOriginalCardNames?: boolean;
+  prefixIndexToExportNames?: boolean;
+  signal?: AbortSignal;
+  onProgress?: (value: number) => void;
 };
+const sanitize = (name: string) =>
+  Array.from(name, (c) => (c.charCodeAt(0) < 32 ? "_" : c))
+    .join("")
+    .replace(/[/\\?%*:|"<>]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim() || "card";
 
 export async function ExportImagesZip(opts: ExportOpts) {
-  const {
-    cards,
-    originalSelectedImages,
-    cachedImageUrls,
-    uploadedFiles,
-    originalSelectedBackImages,
-    uploadedBackFiles,
-    fileBaseName,
-    concurrency = 6,
-    includeDoubleFaces = false,
-    useOriginalCardNames = false,
-    prefixIndexToExportNames = true,
-  } = opts;
-
   const zip = new JSZip();
-  const usedNames = new Map<string, number>();
-
-  // Build a work list that resolves the best URL for each card (and optionally both faces)
-  const tasks: Array<() => Promise<any>> = [];
-
-  cards.forEach((c, i) => {
-    const idx = String(i + 1).padStart(3, "0");
-
-    // Determine which faces to export
-    const facesToExport: Array<{ url: string; faceName?: string; faceIndex?: number; isBackSide?: boolean }> = [];
-    const hasUploadedBackImage = originalSelectedBackImages?.[c.uuid];
-
-    if (includeDoubleFaces) {
-      // Export front side
-      const frontSource =
-        (cachedImageUrls && cachedImageUrls[c.uuid]) ||
-        originalSelectedImages[c.uuid] ||
-        (c.faces && c.faces.length > 0
-          ? c.faces[c.currentFaceIndex ?? 0]?.imageUrl
-          : c.imageUrls?.[0]) ||
-        "";
-
-      if (frontSource) {
-        facesToExport.push({ url: frontSource, faceName: c.name });
-      }
-
-      // Export back side - priority: 1) uploaded back image, 2) double-faced card back
-      if (hasUploadedBackImage) {
-        // User uploaded a custom back image
-        facesToExport.push({
-          url: hasUploadedBackImage,
-          faceName: `${c.name} (Back)`,
-          isBackSide: true,
-        });
-      } else if (c.faces && c.faces.length > 1) {
-        // Export the opposite face for double-faced cards
-        const currentFaceIndex = c.currentFaceIndex ?? 0;
-        const oppositeFaceIndex = currentFaceIndex === 0 ? 1 : 0;
-        const oppositeFace = c.faces[oppositeFaceIndex];
-
-        if (oppositeFace?.imageUrl) {
-          facesToExport.push({
-            url: oppositeFace.imageUrl,
-            faceName: oppositeFace.name,
-            faceIndex: oppositeFaceIndex,
-            isBackSide: true,
-          });
-        }
-      }
-    } else {
-      // Export only current/selected face
-      const rawSource =
-        (cachedImageUrls && cachedImageUrls[c.uuid]) ||
-        originalSelectedImages[c.uuid] ||
-        (c.faces && c.faces.length > 0
-          ? c.faces[c.currentFaceIndex ?? 0]?.imageUrl
-          : c.imageUrls?.[0]) ||
-        "";
-
-      if (rawSource) {
-        facesToExport.push({ url: rawSource });
-      }
-    }
-
-    // Create tasks for each face to export
-    facesToExport.forEach((faceInfo) => {
-      let source:
-        | { kind: "file"; file: File }
-        | { kind: "url"; url: string }
-        | null = null;
-
-      if (isUploadedFileToken(faceInfo.url)) {
-        // Check if this is a back side uploaded file or front side
-        const file = faceInfo.isBackSide
-          ? uploadedBackFiles?.[c.uuid]
-          : uploadedFiles?.[c.uuid];
-
-        if (!file) {
-          console.warn(`[Export skipped] Missing uploaded file for card ${c.name}`);
-          tasks.push(async () => null);
-          return;
-        }
-        source = { kind: "file", file };
-      } else {
-        let url = faceInfo.url;
-        if (!url) {
-          tasks.push(async () => null);
-          return;
-        }
-
-        // Always use server proxy for non-user-upload cards (avoids CORS issues)
-        if (!c.isUserUpload) {
-          url = getLocalBleedImageUrl(preferPng(url));
-        }
-        source = { kind: "url", url };
-      }
-
-      // Generate base filename based on settings
-      let baseName: string;
-      if (useOriginalCardNames) {
-        // Use Scryfall-style filename
-        baseName = generateScryfallFilename(c, faceInfo.faceName);
-      } else {
-        // Use sanitized card name
-        const cardName = faceInfo.faceName || c.name || `Card ${i + 1}`;
-        baseName = sanitizeFilename(cardName);
-
-        // Add face suffix for multi-face cards
-        if (facesToExport.length > 1 && faceInfo.faceName) {
-          baseName = `${sanitizeFilename(c.name)} (${sanitizeFilename(faceInfo.faceName)})`;
-        }
-      }
-
-      // Create task for this face
-      tasks.push(async () => {
-        try {
-          let blob: Blob;
-          if (source?.kind === "file") {
-            blob = source.file;
-          } else if (source?.kind === "url") {
-            const res = await fetch(source.url, { mode: "cors", credentials: "omit" });
-            if (!res.ok) {
-              console.warn(`[Export skipped] Could not fetch: ${source.url}`);
-              return null;
-            }
-            blob = await res.blob();
-          } else {
-            return null;
-          }
-
-          // de-dupe filenames per printed order
-          const count = (usedNames.get(baseName) ?? 0) + 1;
-          usedNames.set(baseName, count);
-          const suffix = count > 1 ? ` (${count})` : "";
-
-          // Try to keep the right extension if we know it; default to .png
-          const ext =
-            blob.type === "image/jpeg"
-              ? "jpg"
-              : blob.type === "image/webp"
-                ? "webp"
-                : blob.type === "image/png"
-                  ? "png"
-                  : "png";
-
-          // Build final filename with optional index prefix
-          let filename: string;
-          if (prefixIndexToExportNames) {
-            filename = `${idx} - ${baseName}${suffix}.${ext}`;
-          } else {
-            filename = `${baseName}${suffix}.${ext}`;
-          }
-
-          zip.file(filename, blob);
-          return true;
-        } catch (err) {
-          const descriptor = source?.kind === "url" ? source.url : "uploaded file";
-          console.warn(`[Export skipped] Error fetching ${descriptor}`, err);
-          return null;
-        }
+  const names = new Map<string, number>();
+  const jobs: { source: string | File; filename: string; label: string }[] = [];
+  const checkAbort = () => opts.signal?.throwIfAborted();
+  for (const [index, card] of opts.cards.entries()) {
+    const sides =
+      opts.includeDoubleFaces &&
+      (opts.originalSelectedBackImages?.[card.uuid] ||
+        (card.faces?.length ?? 0) > 1)
+        ? [false, true]
+        : [false];
+    for (const back of sides) {
+      const { source } = cardSource(card, opts, back);
+      if (!source)
+        throw new Error(
+          `Missing image for “${card.name}”. Upload it again or choose artwork before exporting.`
+        );
+      const label = card.name + (back ? " (Back)" : "");
+      let base = opts.useOriginalCardNames
+        ? [
+            card.set,
+            card.number,
+            label
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-+|-+$/g, ""),
+          ]
+            .filter(Boolean)
+            .join("-")
+        : label;
+      base = sanitize(base);
+      const count = (names.get(base) ?? 0) + 1;
+      names.set(base, count);
+      const prefix =
+        opts.prefixIndexToExportNames === false
+          ? ""
+          : `${String(index + 1).padStart(3, "0")} - `;
+      jobs.push({
+        source,
+        label,
+        filename: `${prefix}${base}${count > 1 ? ` (${count})` : ""}`,
       });
-    });
-  });
-
-  // Simple concurrency limiter
-  async function runWithConcurrency<T>(jobs: Array<() => Promise<T>>, limit: number) {
-    const results: T[] = [];
-    let next = 0;
-
-    async function worker() {
-      while (next < jobs.length) {
-        const cur = next++;
-        results[cur] = await jobs[cur]();
-      }
     }
-
-    const workers = Array.from({ length: Math.max(1, limit) }, worker);
-    await Promise.all(workers);
-    return results;
   }
-
-  await runWithConcurrency(tasks, concurrency);
-
-  const date = new Date().toISOString().slice(0, 10);
-  const outName = `${fileBaseName || "card_images"}_${date}.zip`;
-  const content = await zip.generateAsync({ type: "blob" });
-  saveAs(content, outName);
+  let completed = 0;
+  await processWithConcurrency(
+    jobs,
+    async ({ source, filename, label }) => {
+      checkAbort();
+      let blob: Blob;
+      if (typeof source !== "string") blob = source;
+      else {
+        const signal = opts.signal
+          ? AbortSignal.any([opts.signal, AbortSignal.timeout(30000)])
+          : AbortSignal.timeout(30000);
+        const response = await fetch(toProxied(source), {
+          signal,
+          credentials: "omit",
+        });
+        if (!response.ok)
+          throw new Error(
+            `Could not download “${label}”. Retry or replace its artwork.`
+          );
+        blob = await response.blob();
+      }
+      if (!blob.type.startsWith("image/"))
+        throw new Error(
+          `“${label}” did not return an image. Choose another artwork and retry.`
+        );
+      checkAbort();
+      const extension =
+        (
+          {
+            "image/jpeg": "jpg",
+            "image/webp": "webp",
+            "image/gif": "gif",
+            "image/avif": "avif",
+          } as Record<string, string>
+        )[blob.type] ?? "png";
+      zip.file(`${filename}.${extension}`, await blob.arrayBuffer());
+      opts.onProgress?.((++completed / jobs.length) * 90);
+    },
+    opts.concurrency ?? 4,
+    opts.signal
+  );
+  checkAbort();
+  const content = await zip.generateAsync({ type: "blob" }, (metadata) => {
+    checkAbort();
+    opts.onProgress?.(90 + metadata.percent / 10);
+  });
+  checkAbort();
+  saveAs(
+    content,
+    `${sanitize(opts.fileBaseName || "card_images")}_${new Date().toISOString().slice(0, 10)}.zip`
+  );
 }

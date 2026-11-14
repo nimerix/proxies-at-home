@@ -20,20 +20,49 @@ export async function processWithConcurrency<T>(
   signal?: AbortSignal
 ) {
   if (!items.length) return;
-  const maxWorkers = Math.max(1, limit ?? resolveImageProcessingConcurrency());
+  const maxWorkers = resolveImageProcessingConcurrency(limit);
   let nextIndex = 0;
+  let failed = false;
 
   const run = async () => {
     while (true) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || failed) return;
       const current = nextIndex++;
       if (current >= items.length) return;
-      await worker(items[current], current);
+      try {
+        await worker(items[current], current);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
       if (signal?.aborted) return;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   };
 
-  const runners = Array.from({ length: Math.min(maxWorkers, items.length) }, run);
-  await Promise.all(runners);
+  const runners = Array.from(
+    { length: Math.min(maxWorkers, items.length) },
+    run
+  );
+  const results = await Promise.allSettled(runners);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+}
+
+// Limits independent lazy-preview requests as well as batch operations.
+export function createTaskQueue(limit: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(work: () => Promise<T>): Promise<T> => {
+    if (active >= Math.max(1, limit))
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await work();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
 }

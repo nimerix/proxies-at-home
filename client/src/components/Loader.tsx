@@ -5,6 +5,7 @@ export function Loader() {
   const loadingTask = useLoadingStore((state) => state.loadingTask);
   const loadingProgress = useLoadingStore((state) => state.loadingProgress);
   const cancelLabel = useLoadingStore((state) => state.cancelLabel);
+  const canCancel = useLoadingStore((state) => !!state.cancelAction);
   const requestCancel = useLoadingStore((state) => state.requestCancel);
 
   if (loadingTask === null) {
@@ -16,7 +17,7 @@ export function Loader() {
       task={loadingTask}
       progress={loadingProgress}
       cancelLabel={cancelLabel}
-      onCancel={cancelLabel ? requestCancel : null}
+      onCancel={canCancel ? requestCancel : null}
     />
   );
 }

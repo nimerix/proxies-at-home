@@ -1,5 +1,3 @@
-import { API_BASE } from "../constants";
-
 type MpcItem = {
   qty: number;
   name: string;
@@ -20,7 +18,7 @@ export function inferCardNameFromFilename(filename: string): string {
 
 export function getMpcImageUrl(frontId?: string | null): string | null {
   if (!frontId) return null;
-  return `${API_BASE}/api/cards/images/front?id=${encodeURIComponent(frontId)}`;
+  return `/api/cards/images/front?id=${encodeURIComponent(frontId)}`;
 }
 
 export function extractDriveId(
@@ -37,7 +35,8 @@ export function extractDriveId(
       const u = new URL(v);
       const qid = u.searchParams.get("id");
       if (qid && DRIVE_ID_RE.test(qid)) return qid;
-      const last = u.pathname.split("/").filter(Boolean).pop();
+      const segments = u.pathname.split("/").filter(Boolean);
+      const last = segments[segments.indexOf("d") + 1] || segments.at(-1);
       if (last && DRIVE_ID_RE.test(last)) return last;
     } catch (e) {
       console.error("Error in extractDriveId:", e);
@@ -55,21 +54,33 @@ export function tryParseMpcSchemaXml(raw: string): MpcItem[] | null {
   if (!order) return null;
 
   const fronts = Array.from(order.querySelectorAll("fronts > card"));
+  const defaultBack = extractDriveId(
+    order.querySelector("cardback")?.textContent
+  );
+  const parseSlots = (raw: string) => {
+    if (!raw.trim()) return [];
+    const values = raw
+      .split(",")
+      .map((s) => (/^\d+$/.test(s.trim()) ? Number(s.trim()) : NaN));
+    if (
+      values.some((slot) => !Number.isInteger(slot) || slot < 0 || slot >= 1000)
+    )
+      throw new Error("MPC slot numbers must be between 0 and 999.");
+    return values;
+  };
   const backs = new Map<number, string>(); // slotIndex -> backId
   for (const bc of Array.from(order.querySelectorAll("backs > card"))) {
     const backId = extractDriveId(
       bc.querySelector("id")?.textContent || undefined
     );
-    const slots = (bc.querySelector("slots")?.textContent || "")
-      .split(",")
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => Number.isFinite(n));
+    const slots = parseSlots(bc.querySelector("slots")?.textContent || "");
     if (backId && slots.length) {
       for (const s of slots) backs.set(s, backId);
     }
   }
 
-  const items: MpcItem[] = [];
+  const items: (MpcItem & { slot: number })[] = [];
+  const usedSlots = new Set<number>();
 
   for (const fc of fronts) {
     const idText = fc.querySelector("id")?.textContent || undefined;
@@ -78,12 +89,7 @@ export function tryParseMpcSchemaXml(raw: string): MpcItem[] | null {
     const query = fc.querySelector("query")?.textContent || "";
 
     const frontId = extractDriveId(idText);
-    const slots = slotsRaw
-      .split(",")
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => Number.isFinite(n));
-    const qty = Math.max(1, slots.length || 1);
-
+    const slots = parseSlots(slotsRaw);
     const looksLikeFilename = /\.[a-z0-9]{2,4}$/i.test(nameText);
     const filename = looksLikeFilename ? nameText.trim() : undefined;
     const name = (
@@ -92,15 +98,27 @@ export function tryParseMpcSchemaXml(raw: string): MpcItem[] | null {
         : nameText || query || "Custom Art"
     ).trim();
 
-    items.push({
-      qty,
-      name,
-      filename,
-      frontId,
-    });
+    const actualSlots = slots.length ? slots : [items.length];
+    for (const slot of actualSlots) {
+      if (slot < 0 || slot >= 1000 || items.length >= 1000)
+        throw new Error("MPC slot numbers must be between 0 and 999.");
+      if (usedSlots.has(slot))
+        throw new Error(
+          `MPC slot ${slot} has more than one front image. Correct the file before importing.`
+        );
+      usedSlots.add(slot);
+      items.push({
+        qty: 1,
+        name,
+        filename,
+        frontId,
+        backId: backs.get(slot) ?? defaultBack,
+        slot,
+      });
+    }
   }
 
-  return items;
+  return items.sort((a, b) => a.slot - b.slot);
 }
 
 export function parseMpcText(raw: string): MpcItem[] {
@@ -117,6 +135,8 @@ export function parseMpcText(raw: string): MpcItem[] {
     const qty = Number.isFinite(parseInt(tokens[0], 10))
       ? parseInt(tokens[0], 10)
       : 1;
+    if (!Number.isSafeInteger(qty) || qty < 1 || qty > 1000)
+      throw new Error("MPC quantities must be between 1 and 1,000.");
 
     const fileEndIdx = tokens.findIndex((t) => fileEndRe.test(t));
     if (fileEndIdx === -1) {

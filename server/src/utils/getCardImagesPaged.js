@@ -1,226 +1,108 @@
-const axios = require("axios");
-const logger = require("../utils/logger.js");
-
-const SCRYFALL_HOST = process.env.SCRYFALL_HOST || "https://api.scryfall.com";
-// const SCRYFALL_HOST =  "https://api.scryfall.com";
-const SCRYFALL_API = `${SCRYFALL_HOST}/cards/search`;
-
-const RATE_LIMITING_ENABLED = process.env.ENABLE_SCRYFALL_RATE_LIMITING === "true";
-
-// Optional: a polite UA helps if you get rate-limited
-const AX = axios.create({
-  headers: { "User-Agent": "Proxxied/1.0 (contact: your-email@example.com)" },
-  validateStatus: (s) => s >= 200 && s < 500, // surface 4xx/429 to logic
-});
-
-// Retry logic with exponential backoff for 429 / transient errors
-async function getWithRetry(url, tries = 5) {
-  // Log all requests if LOG_ALL_REQUESTS=true
-  if (process.env.LOG_ALL_REQUESTS === "true") {
-    logger.info(`[GET] ${url}`);
-  }
-
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await AX.get(url);
-      if (res.status === 429) {
-        // Respect Retry-After header with longer fallback
-        const retryAfter = Number(res.headers["retry-after"] || 0);
-        const wait = retryAfter > 0 ? retryAfter : Math.min(60, Math.pow(2, i));
-        logger.info(`[429] Rate limited on ${url}, waiting ${wait}s before retry ${i + 1}/${tries}`);
-        await new Promise(r => setTimeout(r, wait * 1000));
-        continue;
+const { scryfallGet } = require("./http");
+const SCRYFALL_HOST = (
+  process.env.SCRYFALL_HOST || "https://api.scryfall.com"
+).replace(/\/$/, "");
+const cache = new Map();
+const quoted = (value) => JSON.stringify(String(value));
+function mapCard(card) {
+  if (card.digital) return null;
+  const image = (value) => value?.png || value?.large || value?.normal;
+  // Split/adventure cards have card_faces but only one top-level printed image.
+  const single = image(card.image_uris);
+  const faces = single
+    ? [
+        {
+          name: card.name,
+          imageUrl: single,
+          thumbUrl: card.image_uris.normal || card.image_uris.small || single,
+          faceIndex: 0,
+        },
+      ]
+    : (card.card_faces || [])
+        .map((face, index) => ({
+          name: face.name,
+          imageUrl: image(face.image_uris),
+          thumbUrl:
+            face.image_uris?.normal ||
+            face.image_uris?.small ||
+            image(face.image_uris),
+          faceIndex: index,
+        }))
+        .filter((face) => face.imageUrl);
+  return faces.length
+    ? {
+        name: card.name,
+        set: card.set,
+        collector_number: card.collector_number,
+        layout: card.layout,
+        faces,
+        imageUrls: faces.map((face) => face.imageUrl),
       }
-
-      // Client errors (4xx except 429) should NOT be retried (404, etc.)
-      if (res.status >= 400 && res.status < 500) {
-        const err = new Error(`HTTP ${res.status}`);
-        err.status = res.status;
-        err.response = res;
-        throw err;
-      }
-
-      if (res.status >= 200 && res.status < 300) return res;
-
-      // Server errors (5xx) - will be retried
-      throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      lastErr = e;
-
-      // Don't retry client errors (4xx except 429)
-      // Check both e.status (from our custom throw) and e.response.status (from axios)
-      const status = e.status || (e.response && e.response.status);
-      if (status >= 400 && status < 500 && status !== 429) {
-        throw e;
-      }
-
-      // Retry network errors and server errors (5xx) with exponential backoff
-      if (i < tries - 1) {
-        const backoff = 500 * Math.pow(2, i);
-        logger.info(`[Retry] Attempt ${i + 1}/${tries} failed for ${url}, waiting ${backoff}ms`);
-        await new Promise(r => setTimeout(r, backoff));
-      }
-    }
-  }
-  throw lastErr;
+    : null;
 }
-
-/**
- * Core: given a CardInfo { name, set?, number?, language? }, return card data with metadata.
- * If set && number => try exact printing (that language); else set+name; else name-only.
- * `unique` can be "art" or "prints".
- */
-async function getImagesForCardInfo(
-  cardInfo,
-  unique = "art",
-  language = "en",
-  fallbackToEnglish = true
-) {
-  const { name, set, number } = cardInfo || {};
-  const lang = (language || "en").toLowerCase();
-  const baseQuery = `include:extras game:paper`;
-  // 1) Exact printing: set + collector number + name (language filter still applied)
-  if (set && number) {
-    const q = `set:${set} number:${escapeColon(
-      number
-    )} name:"${name}" ${baseQuery} unique:prints lang:${lang}`;
-    let cards = await fetchCardsByQuery(q);
-    if (!cards.length && fallbackToEnglish && lang !== "en") {
-      const qEn = `set:${set} number:${escapeColon(
-        number
-      )} name:"${name}" ${baseQuery} unique:prints lang:en`;
-      cards = await fetchCardsByQuery(qEn);
-    }
-    if (cards.length) return cards[0]; // Return first match
-    // fall through to retry without collector number
-  }
-
-  // 2) Set + name (without collector number - used as fallback from step 1 or when no number provided)
-  if (set) {
-    const q = `set:${set} name:"${name}" ${baseQuery} unique:${unique} lang:${lang}`;
-    let cards = await fetchCardsByQuery(q);
-    if (!cards.length && fallbackToEnglish && lang !== "en") {
-      const qEn = `set:${set} name:"${name}" ${baseQuery} unique:${unique} lang:en`;
-      cards = await fetchCardsByQuery(qEn);
-    }
-    if (cards.length) return cards[0]; // Return first match
-    // fall through to name-only query
-  }
-
-  // 3) Name-only exact match (prefer language)
-  const q = `!"${name}" ${baseQuery} unique:${unique} lang:${lang}`;
-  let cards = await fetchCardsByQuery(q);
-  if (!cards.length && fallbackToEnglish && lang !== "en") {
-    const qEn = `!"${name}" ${baseQuery} unique:${unique} lang:en`;
-    cards = await fetchCardsByQuery(qEn);
-  }
-  return cards.length ? cards[0] : { imageUrls: [], faces: null, layout: null };
-}
-
-/** Escape colon in collector numbers like "321a" (safe) */
-function escapeColon(s) {
-  return String(s).replace(/:/g, "\\:");
-}
-
-/** Run a Scryfall search and collect card data with metadata. Paginates. */
-async function fetchCardsByQuery(query) {
-
-  // Use Scryfall API
-  const encodedUrl = `${SCRYFALL_API}?q=${encodeURIComponent(query)}`;
+async function fetchCardsByQuery(query, signal, maxCards = 1000) {
+  const key = `${query}|${maxCards}`;
+  const cached = cache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.cards;
+  let next = `${SCRYFALL_HOST}/cards/search?q=${encodeURIComponent(query)}`;
   const cards = [];
-  let next = encodedUrl;
-
-  try {
-    while (next) {
-      logger.info(`[Scryfall] Fetching: ${next}`);
-      if (RATE_LIMITING_ENABLED) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      const resp = await getWithRetry(next);
-      const { data, has_more, next_page } = resp.data;
-
-      for (const card of data || []) {
-        if (card?.digital === true) {
-          // Skip digital-only cards
-          continue;
-        }
-        const cardData = {
-          layout: card.layout,
-          set: card.set,
-          collector_number: card.collector_number,
-          imageUrls: [],
-          faces: null
-        };
-
-        // Check for card_faces FIRST (multi-faced cards have both card_faces AND top-level image_uris)
-        if (Array.isArray(card?.card_faces) && card.card_faces.length > 0) {
-          // Multi-faced card (transform, modal_dfc, etc.) - prefer PNG, fallback to large JPG, then normal
-          cardData.faces = card.card_faces.map((face, idx) => {
-            const imageUrl = face?.image_uris?.png || face?.image_uris?.large || face?.image_uris?.normal;
-            return {
-              name: face.name,
-              imageUrl: imageUrl,
-              faceIndex: idx
-            };
-          }).filter(f => f.imageUrl);
-
-          cardData.imageUrls = cardData.faces.map(f => f.imageUrl);
-
-          // Debug logging for double-faced cards
-          if (cardData.faces.length > 1) {
-            logger.info(`[DFC] ${card.name}: ${cardData.faces.length} faces`,
-              cardData.faces.map(f => `${f.name} (${f.imageUrl ? 'has image' : 'NO IMAGE'})`));
-          }
-        } else if (card?.image_uris?.png || card?.image_uris?.large || card?.image_uris?.normal) {
-          // Single-faced card - prefer PNG, fallback to large JPG, then normal JPG
-          const imageUrl = card.image_uris.png || card.image_uris.large || card.image_uris.normal;
-          cardData.imageUrls.push(imageUrl);
-          cardData.faces = [{
-            name: card.name,
-            imageUrl: imageUrl,
-            faceIndex: 0
-          }];
-        }
-
-        if (cardData.imageUrls.length > 0) {
-          cards.push(cardData);
-        }
-      }
-
-      next = has_more ? next_page : null;
+  const visited = new Set();
+  while (next && cards.length < maxCards) {
+    signal?.throwIfAborted();
+    if (
+      new URL(next).origin !== new URL(SCRYFALL_HOST).origin ||
+      visited.has(next) ||
+      visited.size >= 10
+    )
+      throw new Error("Invalid card-service pagination response.");
+    visited.add(next);
+    const response = await scryfallGet(next, signal);
+    if (!response) break;
+    for (const card of response.data || []) {
+      const mapped = mapCard(card);
+      if (mapped) cards.push(mapped);
+      if (cards.length >= maxCards) break;
     }
-  } catch (err) {
-    logger.warn("[Scryfall] Query failed:", query, err?.message);
+    next = response.has_more ? response.next_page : null;
   }
-
+  if (cache.size >= 250) cache.delete(cache.keys().next().value);
+  cache.set(key, { cards, expires: Date.now() + 60 * 60 * 1000 });
   return cards;
 }
-
-// Keep old function for backward compatibility, extract just URLs
-async function fetchPngsByQuery(query) {
-  const cards = await fetchCardsByQuery(query);
-  return cards.flatMap(c => c.imageUrls);
+async function getImagesForCardInfo(
+  info,
+  unique = "art",
+  language = "en",
+  fallbackToEnglish = true,
+  signal
+) {
+  const names = [info.name];
+  const languages =
+    fallbackToEnglish && language !== "en" ? [language, "en"] : [language];
+  const queries = [];
+  for (const name of names) {
+    if (info.set && info.number)
+      queries.push(
+        `set:${quoted(info.set)} number:${quoted(info.number)} !${quoted(name)}`
+      );
+    if (info.set) queries.push(`set:${quoted(info.set)} !${quoted(name)}`);
+    queries.push(`!${quoted(name)}`);
+  }
+  for (const query of queries)
+    for (const lang of languages) {
+      const cards = await fetchCardsByQuery(
+        `${query} include:extras game:paper unique:${unique} lang:${lang}`,
+        signal,
+        1
+      );
+      if (cards.length) return cards[0];
+    }
+  return { imageUrls: [], faces: [], layout: null };
 }
-
-module.exports.getImagesForCardInfo = getImagesForCardInfo;
-module.exports.fetchCardsByQuery = fetchCardsByQuery;
-module.exports.getScryfallPngImagesForCard = async (cardName, unique = "art", language = "en", fallbackToEnglish = true) => {
-  // name-only helper with language support
-  const q = `!"${cardName}" include:extras unique:${unique} lang:${(language || "en").toLowerCase()}`;
-  let urls = await fetchPngsByQuery(q);
-  if (!urls.length && fallbackToEnglish && language !== "en") {
-    const qEn = `!"${cardName}" include:extras unique:${unique} lang:en`;
-    urls = await fetchPngsByQuery(qEn);
-  }
-  return urls;
-};
-module.exports.getScryfallPngImagesForCardPrints = async (name, language = "en", fallbackToEnglish = true) => {
-  const q = `!"${name}" include:extras unique:prints lang:${(language || "en").toLowerCase()}`;
-  let urls = await fetchPngsByQuery(q);
-  if (!urls.length && fallbackToEnglish && language !== "en") {
-    const qEn = `!"${name}" include:extras unique:prints lang:en`;
-    urls = await fetchPngsByQuery(qEn);
-  }
-  return urls;
+module.exports = {
+  getImagesForCardInfo,
+  fetchCardsByQuery,
+  mapCard,
+  SCRYFALL_HOST,
+  quoted,
 };

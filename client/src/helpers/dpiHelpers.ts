@@ -19,13 +19,16 @@ export function computeCardPreviewPixels(
   };
 }
 
-export function guessBucketDpiFromHeight(h: number) {
-  for (const [px, dpi] of Object.entries(pixelDPIMap)) {
-    if (h >= Number(px) - 30 && h <= Number(px) + 30) {
-      return dpi;
-    }
+export function guessBucketDpiFromHeight(h: number): {
+  dpi: number;
+  hasBleed: boolean;
+} {
+  for (const [dpi, dims] of pixelDPIMap) {
+    if (Math.abs(h - dims.heightWithBakedBleed) <= 2)
+      return { dpi, hasBleed: true };
+    if (Math.abs(h - dims.height) <= 2) return { dpi, hasBleed: false };
   }
-  return 300;
+  return { dpi: 300, hasBleed: false };
 }
 
 export const createDpiHelpers = (dpi: number) => ({

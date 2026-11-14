@@ -1,19 +1,21 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { isUploadedFileToken, makeUploadedFileToken } from "../helpers/ImageHelper";
-import { indexedDBStorage, migrateFromLocalStorage } from "../helpers/IndexedDBStorage";
+import { persist } from "zustand/middleware";
+import {
+  isUploadedFileToken,
+  makeUploadedFileToken,
+} from "../helpers/ImageHelper";
+import {
+  createIndexedDBStorage,
+  reportStorageError,
+  hydrationErrorMessage,
+} from "../helpers/IndexedDBStorage";
+import { MAX_CARDS } from "../helpers/CardInfoHelper";
+import { notify } from "./notifications";
 import type { CardOption } from "../types/Card";
 
 type Store = {
   // ---------- persisted ----------
   cards: CardOption[];
-
-  cachedImageUrls: Record<string, string>;
-  setCachedImageUrls: (images: Record<string, string>) => void;
-  appendCachedImageUrls: (newImages: Record<string, string>) => void;
-  clearCachedForCard: (uuid: string) => void;
-  clearCachedForMany: (uuids: string[]) => void;
-  resetCachedImageUrls: () => void;
 
   globalLanguage: string;
   setGlobalLanguage: (lang: string) => void;
@@ -38,14 +40,6 @@ type Store = {
   setOriginalSelectedImages: (images: Record<string, string>) => void;
   appendOriginalSelectedImages: (newImages: Record<string, string>) => void;
 
-  uploadedImages: Record<string, string>;
-  setUploadedImages: (images: Record<string, string>) => void;
-  appendUploadedImages: (newImages: Record<string, string>) => void;
-
-  uploadedOriginalImages: Record<string, string>;
-  setUploadedOriginalImages: (images: Record<string, string>) => void;
-  appendUploadedOriginalImages: (newImages: Record<string, string>) => void;
-
   uploadedFiles: Record<string, File>;
   setUploadedFiles: (files: Record<string, File>) => void;
   appendUploadedFiles: (newFiles: Record<string, File>) => void;
@@ -58,423 +52,180 @@ type Store = {
   setOriginalSelectedBackImages: (images: Record<string, string>) => void;
   appendOriginalSelectedBackImages: (newImages: Record<string, string>) => void;
 
+  clearAll: () => void;
   removeCardAt: (pos: number) => void;
   duplicateCardAt: (pos: number) => void;
-  clearVolatileForCard: (uuid: string) => void;
   removeCardsByUuid: (uuids: string[]) => void;
 };
 
+const emptyImages = () => ({
+  selectedImages: {},
+  selectedBackFaceImages: {},
+  originalSelectedImages: {},
+  uploadedFiles: {},
+  uploadedBackFiles: {},
+  originalSelectedBackImages: {},
+});
+
+function strip<T>(map: Record<string, T>, ids: Set<string>) {
+  return Object.fromEntries(Object.entries(map).filter(([id]) => !ids.has(id)));
+}
+
+function removeImages(state: Store, ids: Set<string>) {
+  return {
+    selectedImages: strip(state.selectedImages, ids),
+    selectedBackFaceImages: strip(state.selectedBackFaceImages, ids),
+    originalSelectedImages: strip(state.originalSelectedImages, ids),
+    uploadedFiles: strip(state.uploadedFiles, ids),
+    uploadedBackFiles: strip(state.uploadedBackFiles, ids),
+    originalSelectedBackImages: strip(state.originalSelectedBackImages, ids),
+  };
+}
+
 export const useCardsStore = create<Store>()(
   persist(
-    (set, _) => ({
-      // ---------- persisted ----------
+    (set, get) => ({
+      ...emptyImages(),
       cards: [],
-
-      cachedImageUrls: {},
-      setCachedImageUrls: (images) => set({ cachedImageUrls: images }),
-      appendCachedImageUrls: (newImages) =>
-        set((state) => ({
-          cachedImageUrls: { ...state.cachedImageUrls, ...newImages },
-        })),
-      clearCachedForCard: (uuid) =>
-        set((state) => {
-          if (!state.cachedImageUrls?.[uuid]) return {};
-          const next = { ...state.cachedImageUrls };
-          delete next[uuid];
-          return { cachedImageUrls: next };
-        }),
-      clearCachedForMany: (uuids) =>
-        set((state) => {
-          if (!uuids?.length) return {};
-          const next = { ...state.cachedImageUrls };
-          for (const id of uuids) delete next[id];
-          return { cachedImageUrls: next };
-        }),
-      resetCachedImageUrls: () => set({ cachedImageUrls: {} }),
-
       globalLanguage: "en",
-      setGlobalLanguage: (lang) => set({ globalLanguage: lang }),
-
+      setGlobalLanguage: (globalLanguage) => set({ globalLanguage }),
       setCards: (cards) => set({ cards }),
       appendCards: (newCards) =>
-        set((state) => ({ cards: [...state.cards, ...newCards] })),
-      updateCard: (pos, updatedCard) =>
-        set((state) => ({
-          cards: state.cards.map((card, index) =>
-            index === pos ? { ...card, ...updatedCard } : card
+        set((s) => ({ cards: [...s.cards, ...newCards] })),
+      updateCard: (pos, patch) =>
+        set((s) => ({
+          cards: s.cards.map((c, i) => (i === pos ? { ...c, ...patch } : c)),
+        })),
+      clearAll: () => set({ cards: [], ...emptyImages() }),
+      setSelectedImages: (selectedImages) => set({ selectedImages }),
+      appendSelectedImages: (images) =>
+        set((s) => ({ selectedImages: { ...s.selectedImages, ...images } })),
+      setSelectedBackFaceImages: (selectedBackFaceImages) =>
+        set({ selectedBackFaceImages }),
+      appendSelectedBackFaceImages: (images) =>
+        set((s) => ({
+          selectedBackFaceImages: { ...s.selectedBackFaceImages, ...images },
+        })),
+      setOriginalSelectedImages: (originalSelectedImages) =>
+        set({ originalSelectedImages }),
+      appendOriginalSelectedImages: (images) =>
+        set((s) => ({
+          originalSelectedImages: { ...s.originalSelectedImages, ...images },
+        })),
+      setUploadedFiles: (uploadedFiles) => set({ uploadedFiles }),
+      appendUploadedFiles: (images) =>
+        set((s) => ({ uploadedFiles: { ...s.uploadedFiles, ...images } })),
+      setUploadedBackFiles: (uploadedBackFiles) => set({ uploadedBackFiles }),
+      appendUploadedBackFiles: (images) =>
+        set((s) => ({
+          uploadedBackFiles: { ...s.uploadedBackFiles, ...images },
+        })),
+      setOriginalSelectedBackImages: (originalSelectedBackImages) =>
+        set({ originalSelectedBackImages }),
+      appendOriginalSelectedBackImages: (images) =>
+        set((s) => ({
+          originalSelectedBackImages: {
+            ...s.originalSelectedBackImages,
+            ...images,
+          },
+        })),
+      clearSelectedImage: (id) =>
+        set((s) => ({
+          selectedImages: strip(s.selectedImages, new Set([id])),
+        })),
+      clearManySelectedImages: (ids) =>
+        set((s) => ({ selectedImages: strip(s.selectedImages, new Set(ids)) })),
+      clearSelectedBackFaceImage: (id) =>
+        set((s) => ({
+          selectedBackFaceImages: strip(
+            s.selectedBackFaceImages,
+            new Set([id])
           ),
         })),
-
-      // ---------- volatile ----------
-      selectedImages: {},
-      setSelectedImages: (images) => set({ selectedImages: images }),
-      appendSelectedImages: (newImages) =>
-        set((state) => ({
-          selectedImages: { ...state.selectedImages, ...newImages },
+      removeCardsByUuid: (ids) =>
+        set((s) => ({
+          cards: s.cards.filter((c) => !ids.includes(c.uuid)),
+          ...removeImages(s, new Set(ids)),
         })),
-      clearSelectedImage: (uuid) =>
-        set((state) => {
-          const newSelected = { ...state.selectedImages };
-          delete newSelected[uuid];
-          return { selectedImages: newSelected };
-        }),
-      clearManySelectedImages: (uuids) =>
-        set((state) => {
-          const newSelected = { ...state.selectedImages };
-          for (const uuid of uuids) delete newSelected[uuid];
-          return { selectedImages: newSelected };
-        }),
-
-      selectedBackFaceImages: {},
-      setSelectedBackFaceImages: (images) => set({ selectedBackFaceImages: images }),
-      appendSelectedBackFaceImages: (newImages) =>
-        set((state) => ({
-          selectedBackFaceImages: { ...state.selectedBackFaceImages, ...newImages },
-        })),
-      clearSelectedBackFaceImage: (uuid) =>
-        set((state) => {
-          const newSelected = { ...state.selectedBackFaceImages };
-          delete newSelected[uuid];
-          return { selectedBackFaceImages: newSelected };
-        }),
-
-      originalSelectedImages: {},
-      setOriginalSelectedImages: (images) =>
-        set({ originalSelectedImages: images }),
-      appendOriginalSelectedImages: (newImages) =>
-        set((state) => ({
-          originalSelectedImages: {
-            ...state.originalSelectedImages,
-            ...newImages,
-          },
-        })),
-
-      uploadedImages: {},
-      setUploadedImages: (images) => set({ uploadedImages: images }),
-      appendUploadedImages: (newImages) =>
-        set((state) => ({
-          uploadedImages: { ...state.uploadedImages, ...newImages },
-        })),
-
-      uploadedOriginalImages: {},
-      setUploadedOriginalImages: (images) =>
-        set({ uploadedOriginalImages: images }),
-      appendUploadedOriginalImages: (newImages) =>
-        set((state) => ({
-          uploadedOriginalImages: {
-            ...state.uploadedOriginalImages,
-            ...newImages,
-          },
-        })),
-
-      uploadedFiles: {},
-      setUploadedFiles: (files) => set({ uploadedFiles: files }),
-      appendUploadedFiles: (newFiles) =>
-        set((state) => ({
-          uploadedFiles: { ...state.uploadedFiles, ...newFiles },
-        })),
-
-      uploadedBackFiles: {},
-      setUploadedBackFiles: (files) => set({ uploadedBackFiles: files }),
-      appendUploadedBackFiles: (newFiles) =>
-        set((state) => ({
-          uploadedBackFiles: { ...state.uploadedBackFiles, ...newFiles },
-        })),
-
-      originalSelectedBackImages: {},
-      setOriginalSelectedBackImages: (images) =>
-        set({ originalSelectedBackImages: images }),
-      appendOriginalSelectedBackImages: (newImages) =>
-        set((state) => ({
-          originalSelectedBackImages: {
-            ...state.originalSelectedBackImages,
-            ...newImages,
-          },
-        })),
-
-      // helpers
-      removeCardAt: (pos) =>
-        set((state) => {
-          const cards = [...state.cards];
-          const [removed] = cards.splice(pos, 1);
-          if (removed?.uuid) {
-            const uuid = removed.uuid;
-            const {
-              selectedImages,
-              selectedBackFaceImages,
-              originalSelectedImages,
-              uploadedImages,
-              uploadedOriginalImages,
-              uploadedFiles,
-              uploadedBackFiles,
-              originalSelectedBackImages,
-              cachedImageUrls,
-            } = state;
-
-            delete selectedImages[uuid];
-            delete selectedBackFaceImages[uuid];
-            delete originalSelectedImages[uuid];
-            delete uploadedImages[uuid];
-            delete uploadedOriginalImages[uuid];
-            delete uploadedFiles[uuid];
-            delete uploadedBackFiles[uuid];
-            delete originalSelectedBackImages[uuid];
-            delete cachedImageUrls[uuid];
-
-            return {
-              cards,
-              selectedImages: { ...selectedImages },
-              selectedBackFaceImages: { ...selectedBackFaceImages },
-              originalSelectedImages: { ...originalSelectedImages },
-              uploadedImages: { ...uploadedImages },
-              uploadedOriginalImages: { ...uploadedOriginalImages },
-              uploadedFiles: { ...uploadedFiles },
-              uploadedBackFiles: { ...uploadedBackFiles },
-              originalSelectedBackImages: { ...originalSelectedBackImages },
-              cachedImageUrls: { ...cachedImageUrls },
-            };
-          }
-          return { cards };
-        }),
-
+      removeCardAt: (pos) => {
+        const card = get().cards[pos];
+        if (card) get().removeCardsByUuid([card.uuid]);
+      },
       duplicateCardAt: (pos) =>
         set((state) => {
-          const cards = [...state.cards];
-          const cardToDuplicate = cards[pos];
-          if (!cardToDuplicate) return {};
-
-          const newUuid = crypto.randomUUID();
-          const duplicatedCard: CardOption = {
-            ...cardToDuplicate,
-            uuid: newUuid,
-          };
-
-          // Insert the duplicate right after the original
-          cards.splice(pos + 1, 0, duplicatedCard);
-
-          // Copy over all associated data with the new UUID
-          const oldUuid = cardToDuplicate.uuid;
-          const {
-            selectedImages,
-            selectedBackFaceImages,
-            originalSelectedImages,
-            uploadedImages,
-            uploadedOriginalImages,
-            uploadedFiles,
-            uploadedBackFiles,
-            originalSelectedBackImages,
-            cachedImageUrls,
-          } = state;
-
-          const updates: any = { cards };
-
-          if (selectedImages[oldUuid]) {
-            updates.selectedImages = {
-              ...selectedImages,
-              [newUuid]: selectedImages[oldUuid],
-            };
-          }
-          if (selectedBackFaceImages[oldUuid]) {
-            updates.selectedBackFaceImages = {
-              ...selectedBackFaceImages,
-              [newUuid]: selectedBackFaceImages[oldUuid],
-            };
-          }
-          if (originalSelectedImages[oldUuid]) {
-            const originalValue = originalSelectedImages[oldUuid];
-            updates.originalSelectedImages = {
-              ...originalSelectedImages,
-              [newUuid]: isUploadedFileToken(originalValue)
-                ? makeUploadedFileToken(newUuid)
-                : originalValue,
-            };
-          }
-          if (uploadedImages[oldUuid]) {
-            updates.uploadedImages = {
-              ...uploadedImages,
-              [newUuid]: uploadedImages[oldUuid],
-            };
-          }
-          if (uploadedOriginalImages[oldUuid]) {
-            updates.uploadedOriginalImages = {
-              ...uploadedOriginalImages,
-              [newUuid]: uploadedOriginalImages[oldUuid],
-            };
-          }
-          if (uploadedFiles[oldUuid]) {
-            updates.uploadedFiles = {
-              ...uploadedFiles,
-              [newUuid]: uploadedFiles[oldUuid],
-            };
-          }
-          if (uploadedBackFiles[oldUuid]) {
-            updates.uploadedBackFiles = {
-              ...uploadedBackFiles,
-              [newUuid]: uploadedBackFiles[oldUuid],
-            };
-          }
-          if (originalSelectedBackImages[oldUuid]) {
-            const originalBackValue = originalSelectedBackImages[oldUuid];
-            updates.originalSelectedBackImages = {
-              ...originalSelectedBackImages,
-              [newUuid]: isUploadedFileToken(originalBackValue)
-                ? makeUploadedFileToken(newUuid)
-                : originalBackValue,
-            };
-          }
-          if (cachedImageUrls[oldUuid]) {
-            updates.cachedImageUrls = {
-              ...cachedImageUrls,
-              [newUuid]: cachedImageUrls[oldUuid],
-            };
-          }
-
-          return updates;
-        }),
-
-      clearVolatileForCard: (uuid) =>
-        set((state) => {
-          const {
-            selectedImages,
-            selectedBackFaceImages,
-            originalSelectedImages,
-            uploadedImages,
-            uploadedOriginalImages,
-            uploadedFiles,
-            uploadedBackFiles,
-            originalSelectedBackImages,
-            cachedImageUrls,
-          } = state;
-          delete selectedImages[uuid];
-          delete selectedBackFaceImages[uuid];
-          delete originalSelectedImages[uuid];
-          delete uploadedImages[uuid];
-          delete uploadedOriginalImages[uuid];
-          delete uploadedFiles[uuid];
-          delete uploadedBackFiles[uuid];
-          delete originalSelectedBackImages[uuid];
-          delete cachedImageUrls[uuid];
-
-          return {
-            selectedImages: { ...selectedImages },
-            selectedBackFaceImages: { ...selectedBackFaceImages },
-            originalSelectedImages: { ...originalSelectedImages },
-            uploadedImages: { ...uploadedImages },
-            uploadedOriginalImages: { ...uploadedOriginalImages },
-            uploadedFiles: { ...uploadedFiles },
-            uploadedBackFiles: { ...uploadedBackFiles },
-            originalSelectedBackImages: { ...originalSelectedBackImages },
-            cachedImageUrls: { ...cachedImageUrls },
-          };
-        }),
-
-      removeCardsByUuid: (uuids) =>
-        set((state) => {
-          if (!uuids?.length) return {};
-          const removeSet = new Set(uuids);
-          const cards = state.cards.filter((card) => !removeSet.has(card.uuid));
-          if (cards.length === state.cards.length) {
+          const card = state.cards[pos];
+          if (!card) return {};
+          if (state.cards.length >= MAX_CARDS) {
+            notify(
+              "This workspace holds up to 1,000 cards. Remove some cards before duplicating.",
+              "error"
+            );
             return {};
           }
-
-          const strip = (map: Record<string, any>) => {
-            if (!map) return map;
-            const clone = { ...map };
-            for (const id of removeSet) {
-              delete clone[id];
-            }
-            return clone;
-          };
-
+          const uuid = crypto.randomUUID();
+          const cards = [...state.cards];
+          cards.splice(pos + 1, 0, { ...card, uuid });
+          const copy = <T>(map: Record<string, T>) =>
+            map[card.uuid] === undefined
+              ? map
+              : { ...map, [uuid]: map[card.uuid] };
+          const copyOriginal = (map: Record<string, string>) =>
+            !map[card.uuid]
+              ? map
+              : {
+                  ...map,
+                  [uuid]: isUploadedFileToken(map[card.uuid])
+                    ? makeUploadedFileToken(uuid)
+                    : map[card.uuid],
+                };
           return {
             cards,
-            selectedImages: strip(state.selectedImages),
-            selectedBackFaceImages: strip(state.selectedBackFaceImages),
-            originalSelectedImages: strip(state.originalSelectedImages),
-            uploadedImages: strip(state.uploadedImages),
-            uploadedOriginalImages: strip(state.uploadedOriginalImages),
-            uploadedFiles: strip(state.uploadedFiles),
-            uploadedBackFiles: strip(state.uploadedBackFiles),
-            originalSelectedBackImages: strip(state.originalSelectedBackImages),
-            cachedImageUrls: strip(state.cachedImageUrls),
+            selectedImages: copy(state.selectedImages),
+            selectedBackFaceImages: copy(state.selectedBackFaceImages),
+            originalSelectedImages: copyOriginal(state.originalSelectedImages),
+            uploadedFiles: copy(state.uploadedFiles),
+            uploadedBackFiles: copy(state.uploadedBackFiles),
+            originalSelectedBackImages: copyOriginal(
+              state.originalSelectedBackImages
+            ),
           };
         }),
     }),
     {
+      onRehydrateStorage: () => (_state, error) =>
+        reportStorageError("hydrate:cards", hydrationErrorMessage(error)),
       name: "proxxied:cards:v7",
-      version: 7,
-
-      partialize: (state) => {
-        const persistedState: Partial<Store> = {
-          cards: state.cards,
-          cachedImageUrls: state.cachedImageUrls,
-          globalLanguage: state.globalLanguage,
+      version: 8,
+      storage: createIndexedDBStorage<Partial<Store>>(["proxxied:cards:v6"]),
+      partialize: (s) => ({
+        cards: s.cards,
+        globalLanguage: s.globalLanguage,
+        originalSelectedImages: s.originalSelectedImages,
+        originalSelectedBackImages: s.originalSelectedBackImages,
+        uploadedFiles: s.uploadedFiles,
+        uploadedBackFiles: s.uploadedBackFiles,
+      }),
+      migrate: (value) => (value ?? {}) as Partial<Store>,
+      merge: (value, current) => {
+        const saved = (value ?? {}) as Partial<Store> & {
+          cachedImageUrls?: Record<string, string>;
         };
-
-        const filteredOriginalSelectedImages: Record<string, string> = {};
-        for (const uuid in state.originalSelectedImages) {
-          const imageUrl = state.originalSelectedImages[uuid];
-          if (imageUrl && !imageUrl.startsWith("data:")) {
-            filteredOriginalSelectedImages[uuid] = imageUrl;
-          }
-        }
-
-        persistedState.originalSelectedImages = filteredOriginalSelectedImages;
-
-        return persistedState;
+        return {
+          ...current,
+          cards: Array.isArray(saved.cards) ? saved.cards : [],
+          globalLanguage:
+            typeof saved.globalLanguage === "string"
+              ? saved.globalLanguage
+              : "en",
+          originalSelectedImages: {
+            ...saved.cachedImageUrls,
+            ...saved.originalSelectedImages,
+          },
+          originalSelectedBackImages: saved.originalSelectedBackImages ?? {},
+          uploadedFiles: saved.uploadedFiles ?? {},
+          uploadedBackFiles: saved.uploadedBackFiles ?? {},
+        };
       },
-
-      storage: createJSONStorage(() => indexedDBStorage),
-
-      migrate: (persistedState: any, prevVersion) => {
-        if (!persistedState) {
-          return {
-            cards: [],
-            cachedImageUrls: {},
-            globalLanguage: "en",
-            originalSelectedImages: {},
-          };
-        }
-        if (prevVersion < 6) {
-          return {
-            ...persistedState,
-            originalSelectedImages: persistedState.originalSelectedImages || {},
-          };
-        }
-        if (prevVersion < 7) {
-          // Version 7: Migrated to IndexedDB, no structural changes
-          return persistedState;
-        }
-        return persistedState;
-      },
-
-      // After rehydrate, migrate from localStorage and cleanup
-      onRehydrateStorage: () => async (_state, error) => {
-        if (error) {
-          console.error("[Store] Rehydration error:", error);
-          return;
-        }
-
-        // Migrate from localStorage to IndexedDB
-        try {
-          await migrateFromLocalStorage("proxxied:cards:v6");
-
-          // Clean up old localStorage keys
-          const toRemove: string[] = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith("proxxied:")) {
-              toRemove.push(k);
-            }
-          }
-          toRemove.forEach(k => {
-            console.log("[Store] Removing legacy localStorage key:", k);
-            localStorage.removeItem(k);
-          });
-        } catch (err) {
-          console.error("[Store] Migration error:", err);
-        }
-      }
     }
   )
 );

@@ -1,90 +1,46 @@
 import { useSettingsStore } from "@/store";
-import type { LayoutPreset, PageOrientation } from "@/store/settings";
-import { Button, Label, Select, TextInput } from "flowbite-react";
-import { RefreshCw } from "lucide-react";
-
-type PresetOption = {
-  name: LayoutPreset;
-  width: number;
-  height: number;
-  unit: "in" | "mm";
-};
-
-const layoutPresets: PresetOption[] = [
-  { name: "Letter", width: 8.5, height: 11, unit: "in" },
-  { name: "Legal", width: 14, height: 8.5, unit: "in" },
-  { name: "Tabloid", width: 11, height: 17, unit: "in" },
-  { name: "SuperB", width: 13, height: 19, unit: "in" },
-  { name: "ArchA", width: 9, height: 12, unit: "in" },
-  { name: "ArchB", width: 18, height: 12, unit: "in" },
-  { name: "A4", width: 210, height: 297, unit: "mm" },
-  { name: "A3", width: 297, height: 420, unit: "mm" },
-  { name: "A2", width: 420, height: 594, unit: "mm" },
-  { name: "A1", width: 594, height: 841, unit: "mm" },
+import type { LayoutPreset } from "@/store/settings";
+const presets: LayoutPreset[] = [
+  "Letter",
+  "A4",
+  "Legal",
+  "Tabloid",
+  "A3",
+  "SuperB",
+  "ArchA",
+  "ArchB",
+  "A2",
+  "A1",
 ];
-
-const getPresetLabel = (preset: PresetOption, orientation: PageOrientation) => {
-  const size =
-    orientation === "landscape"
-      ? `${preset.height}${preset.unit} × ${preset.width}${preset.unit}`
-      : `${preset.width}${preset.unit} × ${preset.height}${preset.unit}`;
-
-  return `${preset.name} (${size})`;
-};
-
 export function PageSizeControl() {
-  const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
-  const pageOrientation = useSettingsStore((state) => state.pageOrientation);
-
-  const pageSizePreset = useSettingsStore((state) => state.pageSizePreset);
-  const pageWidthIn = useSettingsStore((state) => state.pageWidth);
-  const pageHeightIn = useSettingsStore((state) => state.pageHeight);
-
-  const setPageSizePreset = useSettingsStore(
-    (state) => state.setPageSizePreset
-  );
-  const swapPageOrientation = useSettingsStore(
-    (state) => state.swapPageOrientation
-  );
-
+  const s = useSettingsStore();
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        {/* <div>
-          <Label >Page size</Label>
-        </div> */}
-        <div />
-        <div />
-        <Select
-          value={pageSizePreset}
-          className="w-full col-span-2"
-          onChange={(e) => {
-            const value = e.target.value as LayoutPreset;
-            setPageSizePreset(value);
-          }}
+    <>
+      <div className="field">
+        <label htmlFor="paper-size">Paper size</label>
+        <select
+          id="paper-size"
+          value={s.pageSizePreset}
+          onChange={(e) => s.setPageSizePreset(e.target.value as LayoutPreset)}
         >
-          {layoutPresets.map((preset) => (
-            <option key={preset.name} value={preset.name}>
-              {getPresetLabel(preset, pageOrientation)}
-            </option>
+          {presets.map((preset) => (
+            <option key={preset}>{preset}</option>
           ))}
-        </Select>
-        <Button className="w-full" color="blue" onClick={swapPageOrientation}>
-          <RefreshCw className="size-4 mr-2" />
-          Swap
-        </Button>
+        </select>
       </div>
-      <div className="grid grid-cols-[1fr_min-content_1fr] gap-x-2 gap-y-1 items-center">
-        <Label>Page width ({pageSizeUnit})</Label>
-        <div />
-        <Label>Page height ({pageSizeUnit})</Label>
-
-        <TextInput disabled value={pageWidthIn} />
-        <div className="text-white">×</div>
-        <TextInput disabled value={pageHeightIn} />
+      <div className="orientation-row">
+        <span className="hint tabular-nums">
+          {s.pageWidth} × {s.pageHeight} {s.pageSizeUnit}
+        </span>
+        <button
+          type="button"
+          className="text-button"
+          onClick={s.swapPageOrientation}
+          aria-label={`Switch to ${s.pageOrientation === "portrait" ? "landscape" : "portrait"}`}
+        >
+          ↻ {s.pageOrientation === "portrait" ? "Portrait" : "Landscape"}
+        </button>
       </div>
-
-
-    </div>
+    </>
   );
 }

@@ -1,202 +1,155 @@
 import { buildDecklist, downloadDecklist } from "@/helpers/DecklistHelper";
-import { useCardsStore } from "@/store/cards";
-import { useLoadingStore } from "@/store/loading";
-import { useSettingsStore } from "@/store/settings";
-import { Button, Spinner } from "flowbite-react";
+import { useCardsStore, useLoadingStore, useSettingsStore } from "@/store";
+import type { LoadingTask } from "@/store/loading";
+import { errorMessage, notify } from "@/store/notifications";
+import { Download, Files, Copy, FileText } from "lucide-react";
 
 export function ExportActions() {
-  const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
-  const setLoadingProgress = useLoadingStore((state) => state.setLoadingProgress);
-
-  const cards = useCardsStore((state) => state.cards);
-  const originalSelectedImages = useCardsStore(
-    (state) => state.originalSelectedImages
-  );
-  const cachedImageUrls = useCardsStore((state) => state.cachedImageUrls);
-  const uploadedFiles = useCardsStore((state) => state.uploadedFiles);
-  const originalSelectedBackImages = useCardsStore((state) => state.originalSelectedBackImages);
-  const uploadedBackFiles = useCardsStore((state) => state.uploadedBackFiles);
-
-  const isProcessing = useSettingsStore((state) => state.isProcessing);
-  const pageOrientation = useSettingsStore((state) => state.pageOrientation);
-  const pageSizePreset = useSettingsStore((state) => state.pageSizePreset);
-  const pageSizeUnit = useSettingsStore((state) => state.pageSizeUnit);
-  const pageWidth = useSettingsStore((state) => state.pageWidth);
-  const pageHeight = useSettingsStore((state) => state.pageHeight);
-  const columns = useSettingsStore((state) => state.columns);
-  const rows = useSettingsStore((state) => state.rows);
-  const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
-  const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
-  const guideColor = useSettingsStore((state) => state.guideColor);
-  const guideWidth = useSettingsStore((state) => state.guideWidth);
-  const cardSpacingMm = useSettingsStore((state) => state.cardSpacingMm);
-  const exportDpi = useSettingsStore((state) => state.exportDpi);
-  const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
-  const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
-  const useExportBatching = useSettingsStore((state) => state.useExportBatching);
-  const exportBatchSize = useSettingsStore((state) => state.exportBatchSize);
-  const processingProgress = useSettingsStore((state) => state.processingProgress);
-  const includeDoubleFacesInZip = useSettingsStore((state) => state.includeDoubleFacesInZip);
-  const customCardbackUrl = useSettingsStore((state) => state.customCardbackUrl);
-  const customCardbackHasBleed = useSettingsStore((state) => state.customCardbackHasBleed);
-  const disableBackPageGuides = useSettingsStore((state) => state.disableBackPageGuides);
-  const exportCollated = useSettingsStore((state) => state.exportCollated);
-  const useOriginalCardNames = useSettingsStore((state) => state.useOriginalCardNames);
-  const prefixIndexToExportNames = useSettingsStore((state) => state.prefixIndexToExportNames);
-
-  const handleCopyDecklist = async () => {
-    const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
-    await navigator.clipboard.writeText(text);
-  };
-
-  const handleDownloadDecklist = () => {
-    const text = buildDecklist(cards, { style: "withSetNum", sort: "alpha" });
-    const date = new Date().toISOString().slice(0, 10);
-    downloadDecklist(`decklist_${date}.txt`, text);
-  };
-
-  const handleExport = async (isBackSide = false) => {
-    if (!cards.length) return;
-    if (isProcessing) return;
-
+  const cards = useCardsStore((s) => s.cards);
+  const busy = useLoadingStore((s) => s.loadingTask);
+  const s = useSettingsStore();
+  async function run(
+    task: LoadingTask,
+    work: (signal: AbortSignal) => Promise<void>
+  ) {
+    if (useLoadingStore.getState().loadingTask || !cards.length) return;
     const controller = new AbortController();
-    const cancelHandler = () => controller.abort();
-
-    const taskName = exportCollated ? "Generating Collated PDF" : (isBackSide ? "Generating Cardback PDF" : "Generating PDF");
-    setLoadingTask(taskName, {
-      onCancel: cancelHandler,
-      cancelLabel: "Cancel export",
-    });
-    setLoadingProgress({ reset: true, overall: 0, pageProgress: null, currentPage: null, totalPages: null });
-    try {
-      const { exportProxyPagesToPdf } = await import("@/helpers/ExportProxyPageToPdf");
-      await exportProxyPagesToPdf({
-        cards,
-        originalSelectedImages,
-        cachedImageUrls,
-        uploadedFiles,
-        originalSelectedBackImages,
-        uploadedBackFiles,
-        useCornerGuides: isBackSide && disableBackPageGuides ? false : useCornerGuides,
-        bleedEdgeWidthMm: bleedEdgeWidth,
-        guideColor,
-        guideWidthPx: guideWidth,
-        pageOrientation,
-        pageSizePreset,
-        pageSizeUnit,
-        pageWidth,
-        pageHeight,
-        columns,
-        rows,
-        cardSpacingMm,
-        exportDpi,
-        roundedCornerGuides,
-        cornerGuideOffsetMm,
-        useBatching: useExportBatching,
-        pagesPerBatch: exportBatchSize,
-        onProgress: (value: any) => setLoadingProgress(value),
-        abortSignal: controller.signal,
-        isBackSide,
-        customCardbackUrl: customCardbackUrl || undefined,
-        customCardbackHasBleed,
-        exportCollated,
-        disableBackPageGuides,
+    useLoadingStore
+      .getState()
+      .setLoadingTask(task, {
+        onCancel: () => controller.abort(),
+        cancelLabel: "Cancel export",
       });
-    } catch (err) {
-      if (controller.signal.aborted || (err as any)?.name === "AbortError") {
-        // Swallow cancellation
-      } else {
-        console.error("Export failed:", err);
-      }
+    try {
+      await work(controller.signal);
+      notify("Export ready. Your download has started.", "success");
+    } catch (error) {
+      notify(
+        controller.signal.aborted
+          ? "Export cancelled. Any batches already downloaded are kept."
+          : `Export stopped. ${errorMessage(error)}`,
+        controller.signal.aborted ? "info" : "error"
+      );
     } finally {
-      setLoadingTask(null);
+      useLoadingStore.getState().setLoadingTask(null);
     }
-  };
-
+  }
+  async function exportPdf(back = false) {
+    await run(
+      s.exportCollated
+        ? "Generating Collated PDF"
+        : back
+          ? "Generating Cardback PDF"
+          : "Generating PDF",
+      async (signal) => {
+        const { exportProxyPagesToPdf } = await import(
+          "@/helpers/ExportProxyPageToPdf"
+        );
+        const images = useCardsStore.getState();
+        await exportProxyPagesToPdf({
+          ...s,
+          ...images,
+          bleedEdgeWidthMm: s.bleedEdgeWidth,
+          guideWidthPx: s.guideWidth,
+          useBatching: s.useExportBatching,
+          pagesPerBatch: s.exportBatchSize,
+          isBackSide: back,
+          customCardbackUrl: s.customCardbackUrl ?? undefined,
+          onProgress: useLoadingStore.getState().setLoadingProgress,
+          abortSignal: signal,
+        });
+      }
+    );
+  }
+  const disabled = !cards.length || !!busy;
   return (
-    <div className="flex flex-col gap-2">
-      {!exportCollated ? (
-        <>
-          <Button color="green" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
-            {isProcessing ? (
-              <span className="flex items-center gap-2">
-                <Spinner size="md" color="purple" />
-                <span className="whitespace-nowrap">
-                  Processing {processingProgress}%
-                </span>
-              </span>
-            ) : (
-              <span>Export Fronts to PDF</span>
-            )}
-          </Button>
-
-          <Button color="purple" onClick={() => handleExport(true)} disabled={!cards.length || isProcessing}>
-            {isProcessing ? (
-              <span className="flex items-center gap-2">
-                <Spinner size="md" color="purple" />
-                <span className="whitespace-nowrap">
-                  Processing {processingProgress}%
-                </span>
-              </span>
-            ) : (
-              <span>Export Backs to PDF</span>
-            )}
-          </Button>
-        </>
-      ) : (
-        <Button color="blue" onClick={() => handleExport(false)} disabled={!cards.length || isProcessing}>
-          {isProcessing ? (
-            <span className="flex items-center gap-2">
-              <Spinner size="md" color="purple" />
-              <span className="whitespace-nowrap">
-                Processing {processingProgress}%
-              </span>
-            </span>
-          ) : (
-            <span>Export PDF (Collated)</span>
-          )}
-        </Button>
-      )}
-
-      <Button
-        color="indigo"
-        onClick={async () => {
-          const { ExportImagesZip } = await import("@/helpers/ExportImagesZip");
-          ExportImagesZip({
-            cards,
-            originalSelectedImages,
-            cachedImageUrls,
-            uploadedFiles,
-            originalSelectedBackImages,
-            uploadedBackFiles,
-            fileBaseName: "card_images",
-            includeDoubleFaces: includeDoubleFacesInZip,
-            useOriginalCardNames,
-            prefixIndexToExportNames,
-          });
-        }}
-        disabled={!cards.length}
+    <section className="export-actions" aria-labelledby="export-heading">
+      <div className="export-heading">
+        <h3 id="export-heading">Ready to print</h3>
+        <span className="hint">{s.exportDpi} DPI</span>
+      </div>
+      <button
+        className="primary-button w-full"
+        disabled={disabled}
+        onClick={() => void exportPdf()}
       >
-        Export Card Images (.zip)
-      </Button>
-
-      <Button color="cyan" onClick={handleCopyDecklist} disabled={!cards.length}>
-        Copy Decklist
-      </Button>
-
-      <Button color="blue" onClick={handleDownloadDecklist} disabled={!cards.length}>
-        Download Decklist (.txt)
-      </Button>
-
+        <Download size={18} aria-hidden="true" />
+        {s.exportCollated ? "Export collated PDF" : "Export fronts PDF"}
+      </button>
+      {!s.exportCollated && (
+        <button
+          className="secondary-button w-full"
+          disabled={disabled}
+          onClick={() => void exportPdf(true)}
+        >
+          <Files size={17} aria-hidden="true" />
+          Export backs PDF
+        </button>
+      )}
+      <button
+        className="secondary-button w-full"
+        disabled={disabled}
+        onClick={() =>
+          void run("Generating ZIP", async (signal) => {
+            const { ExportImagesZip } = await import(
+              "@/helpers/ExportImagesZip"
+            );
+            await ExportImagesZip({
+              ...useCardsStore.getState(),
+              includeDoubleFaces: s.includeDoubleFacesInZip,
+              useOriginalCardNames: s.useOriginalCardNames,
+              prefixIndexToExportNames: s.prefixIndexToExportNames,
+              signal,
+              onProgress: useLoadingStore.getState().setLoadingProgress,
+            });
+          })
+        }
+      >
+        <FileText size={17} aria-hidden="true" />
+        Download original images · ZIP
+      </button>
+      <div className="field-grid">
+        <button
+          className="text-button"
+          disabled={disabled}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(
+                buildDecklist(cards, { style: "withSetNum", sort: "none" })
+              );
+              notify("Decklist copied.", "success");
+            } catch {
+              notify(
+                "Clipboard is unavailable. Use Download list to save the decklist.",
+                "error"
+              );
+            }
+          }}
+        >
+          <Copy size={14} aria-hidden="true" />
+          Copy list
+        </button>
+        <button
+          className="text-button"
+          disabled={disabled}
+          onClick={() =>
+            downloadDecklist(
+              "proxxied-decklist.txt",
+              buildDecklist(cards, { style: "withSetNum", sort: "none" })
+            )
+          }
+        >
+          Download list
+        </button>
+      </div>
       <a
+        className="project-link"
         href="https://buymeacoffee.com/kaiserclipston"
         target="_blank"
-        rel="noopener noreferrer"
+        rel="noreferrer"
       >
-        <Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 w-full">
-          Buy Me a Coffee
-        </Button>
+        Support Proxxied ↗
       </a>
-    </div>
+    </section>
   );
 }

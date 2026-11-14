@@ -1,7 +1,23 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  createIndexedDBStorage,
+  reportStorageError,
+  hydrationErrorMessage,
+} from "../helpers/IndexedDBStorage";
+import { finiteClamp, fitLayout } from "../helpers/printLayout";
 
-export type LayoutPreset = "A4" | "A3" | "Letter" | "Tabloid" | "Legal" | "ArchA" | "ArchB" | "SuperB" | "A2" | "A1";
+export type LayoutPreset =
+  | "A4"
+  | "A3"
+  | "Letter"
+  | "Tabloid"
+  | "Legal"
+  | "ArchA"
+  | "ArchB"
+  | "SuperB"
+  | "A2"
+  | "A1";
 export type PageOrientation = "portrait" | "landscape";
 export type ExportDpi = 600 | 900 | 1200;
 export type ViewMode = "front" | "back";
@@ -14,6 +30,10 @@ type Store = {
   pageWidth: number;
   pageHeight: number;
   swapPageOrientation: () => void;
+  gridMode: "auto" | "custom";
+  preferredColumns: number;
+  preferredRows: number;
+  fitMaximumCards: () => void;
   columns: number;
   setColumns: (value: number) => void;
   rows: number;
@@ -31,10 +51,6 @@ type Store = {
   resetSettings: () => void;
   cardSpacingMm: number;
   setCardSpacingMm: (mm: number) => void;
-  cardPositionX: number;
-  setCardPositionX: (mm: number) => void;
-  cardPositionY: number;
-  setCardPositionY: (mm: number) => void;
   exportDpi: ExportDpi;
   setExportDpi: (dpi: ExportDpi) => void;
   useExportBatching: boolean;
@@ -69,12 +85,15 @@ type Store = {
   setUseHighQualityPreviews: (value: boolean) => void;
 };
 
-const defaultPageSettings = {
+export const defaultPageSettings = {
   pageSizeUnit: "in",
   pageOrientation: "portrait",
   pageSizePreset: "Letter",
   pageWidth: 8.5,
   pageHeight: 11,
+  gridMode: "auto",
+  preferredColumns: 3,
+  preferredRows: 3,
   columns: 3,
   rows: 3,
   bleedEdgeWidth: 2,
@@ -82,8 +101,6 @@ const defaultPageSettings = {
   guideColor: "#39FF14",
   guideWidth: 0.5,
   cardSpacingMm: 0,
-  cardPositionX: 0,
-  cardPositionY: 0,
   zoom: 1,
   exportDpi: 600,
   useExportBatching: false,
@@ -119,154 +136,179 @@ const layoutPresetsSizes: Record<
   A1: { pageWidth: 594, pageHeight: 841, pageSizeUnit: "mm" },
 };
 
+function fitPreferredGrid(s: Store): Store {
+  return fitLayout({
+    ...s,
+    columns: s.gridMode === "auto" ? 20 : s.preferredColumns,
+    rows: s.gridMode === "auto" ? 20 : s.preferredRows,
+  });
+}
+
+function restoreSettings(value: unknown): Partial<Store> {
+  const saved =
+    value && typeof value === "object" ? (value as Partial<Store>) : {};
+  const result = { ...defaultPageSettings };
+  for (const key of Object.keys(defaultPageSettings) as (keyof Store)[]) {
+    const candidate = saved[key];
+    if (
+      candidate !== undefined &&
+      typeof candidate === typeof defaultPageSettings[key]
+    ) {
+      Object.assign(result, { [key]: candidate });
+    }
+  }
+  const preset =
+    saved.pageSizePreset &&
+    Object.hasOwn(layoutPresetsSizes, saved.pageSizePreset)
+      ? saved.pageSizePreset
+      : "Letter";
+  const size = layoutPresetsSizes[preset];
+  const landscape = saved.pageOrientation === "landscape";
+  Object.assign(result, {
+    gridMode:
+      saved.gridMode === "auto"
+        ? "auto"
+        : saved.gridMode === "custom" || saved.columns !== undefined
+          ? "custom"
+          : "auto",
+    preferredColumns: Math.floor(
+      finiteClamp(saved.preferredColumns ?? saved.columns ?? 3, 1, 20, 3)
+    ),
+    preferredRows: Math.floor(
+      finiteClamp(saved.preferredRows ?? saved.rows ?? 3, 1, 20, 3)
+    ),
+    pageSizePreset: preset,
+    pageOrientation: landscape ? "landscape" : "portrait",
+    pageSizeUnit: size.pageSizeUnit,
+    pageWidth: landscape ? size.pageHeight : size.pageWidth,
+    pageHeight: landscape ? size.pageWidth : size.pageHeight,
+    bleedEdgeWidth: finiteClamp(result.bleedEdgeWidth, 0, 5, 2),
+    guideWidth: finiteClamp(result.guideWidth, 0.1, 4, 0.5),
+    guideColor: /^#[0-9a-f]{6}$/i.test(result.guideColor)
+      ? result.guideColor
+      : "#39FF14",
+    zoom: finiteClamp(result.zoom, 0.1, 3, 1),
+    exportDpi: [600, 900, 1200].includes(result.exportDpi)
+      ? result.exportDpi
+      : 600,
+    exportBatchSize: Math.round(finiteClamp(result.exportBatchSize, 1, 20, 20)),
+    cornerGuideOffsetMm: finiteClamp(result.cornerGuideOffsetMm, -2, 2, -0.5),
+    customCardbackUrl:
+      typeof saved.customCardbackUrl === "string" &&
+      !saved.customCardbackUrl.startsWith("blob:")
+        ? saved.customCardbackUrl
+        : null,
+    viewMode: saved.viewMode === "back" ? "back" : "front",
+    isProcessing: false,
+    processingProgress: 0,
+  });
+  return fitPreferredGrid(result);
+}
+
 export const useSettingsStore = create<Store>()(
   persist(
-    (set, _) => ({
+    (set) => ({
       ...defaultPageSettings,
-
       setPageSizePreset: (value) =>
-        set(() => {
-          const { pageWidth, pageHeight, pageSizeUnit } = layoutPresetsSizes[value];
-          return {
+        set((s) =>
+          fitPreferredGrid({
+            ...s,
+            ...layoutPresetsSizes[value],
             pageSizePreset: value,
-            pageOrientation: "portrait", // always reset
-            pageWidth,
-            pageHeight,
-            pageSizeUnit,
-          };
-        }),
-
+            pageOrientation: "portrait",
+          })
+        ),
       swapPageOrientation: () =>
-        set((state) => ({
-          pageOrientation:
-            state.pageOrientation === "portrait" ? "landscape" : "portrait",
-          pageWidth: state.pageHeight,
-          pageHeight: state.pageWidth,
-        })),
-
-      setColumns: (columns) => set({ columns }),
-      setRows: (rows) => set({ rows }),
-      setBleedEdgeWidth: (value) => set({ bleedEdgeWidth: value }),
-      setUseCornerGuides: (value) => set({ useCornerGuides: value }),
-      setGuideColor: (value) => set({ guideColor: value }),
-      setGuideWidth: (value) => set({ guideWidth: value }),
-      setZoom: (value) => set({ zoom: value }),
-      setCardSpacingMm: (mm) => set({ cardSpacingMm: Math.max(0, mm) }),
-      setCardPositionX: (mm) => set({ cardPositionX: mm }),
-      setCardPositionY: (mm) => set({ cardPositionY: mm }),
-      setExportDpi: (dpi) => set({ exportDpi: dpi }),
-      setUseExportBatching: (value) => set({ useExportBatching: value }),
-      setExportBatchSize: (size) => set({ exportBatchSize: size }),
+        set((s) =>
+          fitPreferredGrid({
+            ...s,
+            pageOrientation:
+              s.pageOrientation === "portrait" ? "landscape" : "portrait",
+            pageWidth: s.pageHeight,
+            pageHeight: s.pageWidth,
+          })
+        ),
+      fitMaximumCards: () =>
+        set((s) => fitPreferredGrid({ ...s, gridMode: "auto" })),
+      setColumns: (columns) =>
+        set((s) =>
+          fitPreferredGrid({
+            ...s,
+            gridMode: "custom",
+            preferredColumns: Math.floor(
+              finiteClamp(columns, 1, 20, s.columns)
+            ),
+            preferredRows: s.gridMode === "auto" ? s.rows : s.preferredRows,
+          })
+        ),
+      setRows: (rows) =>
+        set((s) =>
+          fitPreferredGrid({
+            ...s,
+            gridMode: "custom",
+            preferredRows: Math.floor(finiteClamp(rows, 1, 20, s.rows)),
+            preferredColumns:
+              s.gridMode === "auto" ? s.columns : s.preferredColumns,
+          })
+        ),
+      setBleedEdgeWidth: (value) =>
+        set((s) =>
+          fitPreferredGrid({
+            ...s,
+            bleedEdgeWidth: finiteClamp(value, 0, 5, 2),
+          })
+        ),
+      setCardSpacingMm: (cardSpacingMm) =>
+        set((s) => fitPreferredGrid({ ...s, cardSpacingMm })),
+      setUseCornerGuides: (useCornerGuides) => set({ useCornerGuides }),
+      setGuideColor: (guideColor) => set({ guideColor }),
+      setGuideWidth: (value) =>
+        set({ guideWidth: finiteClamp(value, 0.1, 4, 0.5) }),
+      setZoom: (value) => set({ zoom: finiteClamp(value, 0.1, 3, 1) }),
+      setExportDpi: (exportDpi) => set({ exportDpi }),
+      setUseExportBatching: (useExportBatching) => set({ useExportBatching }),
+      setExportBatchSize: (value) =>
+        set({ exportBatchSize: Math.round(finiteClamp(value, 1, 20, 20)) }),
       setProcessingProgress: (value) =>
-        set({ processingProgress: Math.max(0, Math.min(100, value)) }),
-      setRoundedCornerGuides: (value) => set({ roundedCornerGuides: value }),
-      setCornerGuideOffsetMm: (mm) => set({ cornerGuideOffsetMm: mm }),
+        set({ processingProgress: finiteClamp(value, 0, 100) }),
+      setRoundedCornerGuides: (roundedCornerGuides) =>
+        set({ roundedCornerGuides }),
+      setCornerGuideOffsetMm: (value) =>
+        set({ cornerGuideOffsetMm: finiteClamp(value, -2, 2, -0.5) }),
       resetSettings: () => set({ ...defaultPageSettings }),
-      setIsProcessing: (value) => set({ isProcessing: value }),
-      setIncludeDoubleFacesInZip: (value) => set({ includeDoubleFacesInZip: value }),
-      setUseOriginalCardNames: (value) => set({ useOriginalCardNames: value }),
-      setPrefixIndexToExportNames: (value) => set({ prefixIndexToExportNames: value }),
-      setViewMode: (mode) => set({ viewMode: mode }),
-      setCustomCardbackUrl: (url) => set({ customCardbackUrl: url }),
-      setCustomCardbackHasBleed: (value) => set({ customCardbackHasBleed: value }),
-      setDisableBackPageGuides: (value) => set({ disableBackPageGuides: value }),
-      setExportCollated: (value) => set({ exportCollated: value }),
-      setUseHighQualityPreviews: (value) => set({ useHighQualityPreviews: value }),
+      setIsProcessing: (isProcessing) => set({ isProcessing }),
+      setIncludeDoubleFacesInZip: (includeDoubleFacesInZip) =>
+        set({ includeDoubleFacesInZip }),
+      setUseOriginalCardNames: (useOriginalCardNames) =>
+        set({ useOriginalCardNames }),
+      setPrefixIndexToExportNames: (prefixIndexToExportNames) =>
+        set({ prefixIndexToExportNames }),
+      setViewMode: (viewMode) => set({ viewMode }),
+      setCustomCardbackUrl: (customCardbackUrl) => set({ customCardbackUrl }),
+      setCustomCardbackHasBleed: (customCardbackHasBleed) =>
+        set({ customCardbackHasBleed }),
+      setDisableBackPageGuides: (disableBackPageGuides) =>
+        set({ disableBackPageGuides }),
+      setExportCollated: (exportCollated) => set({ exportCollated }),
+      setUseHighQualityPreviews: (useHighQualityPreviews) =>
+        set({ useHighQualityPreviews }),
     }),
     {
+      onRehydrateStorage: () => (_state, error) =>
+        reportStorageError("hydrate:settings", hydrationErrorMessage(error)),
       name: "proxxied:layout-settings:v2",
-      version: 1,
-
+      version: 3,
+      storage: createIndexedDBStorage<Partial<Store>>(),
       partialize: (state) => {
-        const persisted = {
-          // Persist all settings except:
-          // - Page dimensions (recalculated from preset)
-          // - Transient state (isProcessing, processingProgress)
-          // - Setter functions (explicitly excluded)
-          pageSizePreset: state.pageSizePreset,
-          columns: state.columns,
-          rows: state.rows,
-          bleedEdgeWidth: state.bleedEdgeWidth,
-          useCornerGuides: state.useCornerGuides,
-          guideColor: state.guideColor,
-          guideWidth: state.guideWidth,
-          zoom: state.zoom,
-          cardSpacingMm: state.cardSpacingMm,
-          exportDpi: state.exportDpi,
-          useExportBatching: state.useExportBatching,
-          exportBatchSize: state.exportBatchSize,
-          roundedCornerGuides: state.roundedCornerGuides,
-          cornerGuideOffsetMm: state.cornerGuideOffsetMm,
-          includeDoubleFacesInZip: state.includeDoubleFacesInZip,
-          useOriginalCardNames: state.useOriginalCardNames,
-          prefixIndexToExportNames: state.prefixIndexToExportNames,
-          viewMode: state.viewMode,
-          customCardbackUrl: state.customCardbackUrl,
-          customCardbackHasBleed: state.customCardbackHasBleed,
-          disableBackPageGuides: state.disableBackPageGuides,
-          exportCollated: state.exportCollated,
-          useHighQualityPreviews: state.useHighQualityPreviews,
-        };
-        console.log("[Settings] Persisting state:", persisted);
-        return persisted;
-      },
-
-      migrate: (persistedState: any, _version) => {
-        console.log("[Settings] Migrating from version", _version, "state:", persistedState);
-        // Return only properties that exist in the persisted state
-        // Missing properties will use defaults from initial state
-        const state = persistedState ?? {};
-        const migrated: any = {};
-
-        // Only include properties that are defined
-        if (state.pageSizePreset !== undefined) migrated.pageSizePreset = state.pageSizePreset;
-        if (state.columns !== undefined) migrated.columns = state.columns;
-        if (state.rows !== undefined) migrated.rows = state.rows;
-        if (state.bleedEdgeWidth !== undefined) migrated.bleedEdgeWidth = state.bleedEdgeWidth;
-        if (state.useCornerGuides !== undefined) migrated.useCornerGuides = state.useCornerGuides;
-        if (state.guideColor !== undefined) migrated.guideColor = state.guideColor;
-        if (state.guideWidth !== undefined) migrated.guideWidth = state.guideWidth;
-        if (state.zoom !== undefined) migrated.zoom = state.zoom;
-        if (state.cardSpacingMm !== undefined) migrated.cardSpacingMm = state.cardSpacingMm;
-        if (state.exportDpi !== undefined) migrated.exportDpi = state.exportDpi;
-        if (state.useExportBatching !== undefined) migrated.useExportBatching = state.useExportBatching;
-        if (state.exportBatchSize !== undefined) migrated.exportBatchSize = state.exportBatchSize;
-        if (state.roundedCornerGuides !== undefined) migrated.roundedCornerGuides = state.roundedCornerGuides;
-        if (state.cornerGuideOffsetMm !== undefined) migrated.cornerGuideOffsetMm = state.cornerGuideOffsetMm;
-        if (state.includeDoubleFacesInZip !== undefined) migrated.includeDoubleFacesInZip = state.includeDoubleFacesInZip;
-        if (state.useOriginalCardNames !== undefined) migrated.useOriginalCardNames = state.useOriginalCardNames;
-        if (state.prefixIndexToExportNames !== undefined) migrated.prefixIndexToExportNames = state.prefixIndexToExportNames;
-        if (state.viewMode !== undefined) migrated.viewMode = state.viewMode;
-        if (state.customCardbackUrl !== undefined) migrated.customCardbackUrl = state.customCardbackUrl;
-        if (state.customCardbackHasBleed !== undefined) migrated.customCardbackHasBleed = state.customCardbackHasBleed;
-        if (state.disableBackPageGuides !== undefined) migrated.disableBackPageGuides = state.disableBackPageGuides;
-        if (state.exportCollated !== undefined) migrated.exportCollated = state.exportCollated;
-        if (state.useHighQualityPreviews !== undefined) migrated.useHighQualityPreviews = state.useHighQualityPreviews;
-
-        console.log("[Settings] Migration result:", migrated);
-        return migrated;
-      },
-
-      onRehydrateStorage: () => (state, error) => {
-        console.log("[Settings] Rehydrating storage, error:", error, "state:", state);
-        if (error) {
-          console.error("[Settings] Rehydration error:", error);
-          return;
+        const saved: Partial<Store> = {};
+        for (const key of Object.keys(defaultPageSettings) as (keyof Store)[]) {
+          if (key !== "isProcessing" && key !== "processingProgress")
+            Object.assign(saved, { [key]: state[key] });
         }
-        // Manually set page dimensions without triggering persist
-        // This avoids the setPageSizePreset call which would overwrite other settings
-        if (state) {
-          const preset = state.pageSizePreset ?? "Letter";
-          const { pageWidth, pageHeight, pageSizeUnit } = layoutPresetsSizes[preset];
-          console.log("[Settings] Restoring page dimensions for preset:", preset);
-          // Directly mutate the state without triggering persist
-          state.pageWidth = pageWidth;
-          state.pageHeight = pageHeight;
-          state.pageSizeUnit = pageSizeUnit;
-          state.pageOrientation = "portrait";
-        }
+        return saved;
       },
+      migrate: restoreSettings,
+      merge: (saved, current) => ({ ...current, ...restoreSettings(saved) }),
     }
   )
-
 );

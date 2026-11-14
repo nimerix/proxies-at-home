@@ -1,6 +1,7 @@
 export interface CardFace {
   name: string;
   imageUrl: string;
+  thumbUrl?: string;
   faceIndex: number;
 }
 
@@ -11,6 +12,8 @@ export interface CardOption {
   isUserUpload: boolean;
   hasBakedBleed?: boolean;
   hasBackImage?: boolean;
+  backHasBakedBleed?: boolean;
+  query?: { name: string; set?: string; number?: string };
   set?: string;
   number?: string;
   lang?: string;

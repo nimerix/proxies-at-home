@@ -1,20 +1,8 @@
-import fullLogo from "@/assets/fullLogo.png";
 import { API_BASE, LANGUAGE_OPTIONS } from "@/constants";
+import { cardKey, MAX_CARDS, parseDeckToInfos } from "@/helpers/CardInfoHelper";
 import {
-  cardKey,
-  parseDeckToInfos,
-  type CardInfo,
-} from "@/helpers/CardInfoHelper";
-import {
-  addBleedEdgeSmartly,
-  computeCardPreviewPixels,
-  createPreviewDataUrl,
-  getLocalBleedImageUrl,
-  processWithConcurrency,
   makeUploadedFileToken,
-  revokeIfBlobUrl,
-  resolveImageProcessingConcurrency,
-  PREVIEW_CARD_DPI,
+  processWithConcurrency,
 } from "@/helpers/ImageHelper";
 import {
   getMpcImageUrl,
@@ -22,685 +10,383 @@ import {
   parseMpcText,
   tryParseMpcSchemaXml,
 } from "@/helpers/Mpc";
-import { useCardsStore, useLoadingStore, useSettingsStore } from "@/store";
+import { useCardsStore, useLoadingStore } from "@/store";
+import { errorMessage, notify } from "@/store/notifications";
+import { useStorageStatus } from "@/helpers/IndexedDBStorage";
+import { copyUpload } from "@/helpers/uploads";
 import type { CardOption } from "@/types/Card";
 import axios from "axios";
-import {
-  Button,
-  HelperText,
-  HR,
-  List,
-  ListItem,
-  Select,
-  Textarea,
-} from "flowbite-react";
-import { ExternalLink } from "lucide-react";
-import React, { useCallback, useState } from "react";
+import { FileImage, ListPlus, Upload, Trash2 } from "lucide-react";
+import { useState, type ChangeEvent } from "react";
 
-const HIGH_QUALITY_PREVIEW_DPI = 300;
-
-async function readText(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const r = new FileReader();
-    r.onloadend = () => resolve(String(r.result || ""));
-    r.readAsText(file);
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+function commitCards(
+  cards: CardOption[],
+  originals: Record<string, string>,
+  files: Record<string, File> = {},
+  backs: Record<string, string> = {}
+) {
+  const previous = useCardsStore.getState();
+  if (previous.cards.length + cards.length > MAX_CARDS)
+    throw new Error(
+      "This workspace holds up to 1,000 cards. Export or clear some cards before adding more."
+    );
+  useCardsStore.setState({
+    cards: [...previous.cards, ...cards],
+    originalSelectedImages: {
+      ...previous.originalSelectedImages,
+      ...originals,
+    },
+    originalSelectedBackImages: {
+      ...previous.originalSelectedBackImages,
+      ...backs,
+    },
+    uploadedFiles: { ...previous.uploadedFiles, ...files },
   });
 }
-
 export function UploadSection() {
+  const pendingSave = useStorageStatus((s) => s.pending > 0);
+  const saveError = useStorageStatus((s) => s.error);
+  const savingDisabled = useStorageStatus((s) => s.savingDisabled);
   const [deckText, setDeckText] = useState("");
-  const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
-  const cards = useCardsStore((state) => state.cards);
+  const cards = useCardsStore((s) => s.cards);
+  const language = useCardsStore((s) => s.globalLanguage);
+  const setLanguage = useCardsStore((s) => s.setGlobalLanguage);
+  const loading = useLoadingStore((s) => s.loadingTask);
 
-  const setLoadingTask = useLoadingStore((state) => state.setLoadingTask);
-  const setLoadingProgress = useLoadingStore((state) => state.setLoadingProgress);
-  const appendCards = useCardsStore((state) => state.appendCards);
-  const setCards = useCardsStore((state) => state.setCards);
-  const setSelectedImages = useCardsStore((state) => state.setSelectedImages);
-  const appendSelectedImages = useCardsStore(
-    (state) => state.appendSelectedImages
-  );
-  const setOriginalSelectedImages = useCardsStore(
-    (state) => state.setOriginalSelectedImages
-  );
-  const appendOriginalSelectedImages = useCardsStore(
-    (state) => state.appendOriginalSelectedImages
-  );
-  const appendUploadedFiles = useCardsStore((state) => state.appendUploadedFiles);
-  const setUploadedFiles = useCardsStore((state) => state.setUploadedFiles);
-  const removeCardsByUuid = useCardsStore((state) => state.removeCardsByUuid);
-
-  const globalLanguage = useCardsStore((s) => s.globalLanguage ?? "en");
-  const setGlobalLanguage = useCardsStore((s) => s.setGlobalLanguage ?? (() => { }));
-  const columns = useSettingsStore((state) => state.columns);
-  const rows = useSettingsStore((state) => state.rows);
-  const useExportBatching = useSettingsStore((state) => state.useExportBatching);
-  const setUseExportBatching = useSettingsStore((state) => state.setUseExportBatching);
-
-  const maybeEnableBatching = useCallback(
-    (totalCards: number) => {
-      const perPage = Math.max(1, columns * rows || 0);
-      if (perPage <= 0) return;
-      const totalPages = Math.ceil(totalCards / perPage);
-      if (totalPages > 20) {
-        if (!useExportBatching) {
-          setUseExportBatching(true);
-        }
+  async function importDeck() {
+    if (loading) return;
+    const controller = new AbortController();
+    try {
+      const infos = parseDeckToInfos(deckText);
+      if (!infos.length) {
+        notify("Paste at least one card name to start.");
+        return;
       }
-    },
-    [columns, rows, useExportBatching, setUseExportBatching]
-  );
-
-  async function buildPreviewFromFile(
-    file: File,
-    opts: { hasBakedBleed: boolean }
-  ) {
-    const tempUrl = URL.createObjectURL(file);
-    let processedUrl: string | null = null;
-    try {
-      processedUrl = await addBleedEdgeSmartly(tempUrl, bleedEdgeWidth, {
-        unit: "mm",
-        bleedEdgeWidth,
-        hasBakedBleed: opts.hasBakedBleed,
-      });
-      const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
-      const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
-      const { width, height } = computeCardPreviewPixels(bleedEdgeWidth, dpi);
-      return await createPreviewDataUrl(processedUrl, {
-        maxWidth: width,
-        maxHeight: height,
-        mimeType: "image/jpeg",
-        quality: 0.82,
-        background: "#FFFFFF",
-      });
-    } finally {
-      URL.revokeObjectURL(tempUrl);
-      revokeIfBlobUrl(processedUrl);
-    }
-  }
-
-  async function addUploadedFiles(
-    files: FileList,
-    opts: { hasBakedBleed: boolean; signal?: AbortSignal }
-  ) {
-    if (opts.signal?.aborted) {
-      throw new DOMException("Upload cancelled", "AbortError");
-    }
-    const fileArray = Array.from(files);
-    const startIndex = cards.length;
-
-    if (fileArray.length > 0) {
-      setLoadingProgress(0);
-    }
-
-    const newCards: CardOption[] = fileArray.map((file, i) => ({
-      name:
-        inferCardNameFromFilename(file.name) ||
-        `Custom Art ${startIndex + i + 1}`,
-      imageUrls: [],
-      uuid: crypto.randomUUID(),
-      isUserUpload: true,
-      hasBakedBleed: opts.hasBakedBleed,
-    }));
-
-    appendCards(newCards);
-
-    const newCardIds = newCards.map((card) => card.uuid);
-    const originalsUpdate: Record<string, string> = {};
-    const processedUpdate: Record<string, string> = {};
-    const uploadedFilesUpdate: Record<string, File> = {};
-
-    let processedCount = 0;
-    const totalFiles = fileArray.length;
-    const concurrency = resolveImageProcessingConcurrency();
-    let committed = false;
-
-    try {
-      await processWithConcurrency(
-        fileArray,
-        async (file: File, i: number) => {
-          if (opts.signal?.aborted) {
-            return;
-          }
-
-          const id = newCards[i].uuid;
-          uploadedFilesUpdate[id] = file;
-          originalsUpdate[id] = makeUploadedFileToken(id);
-          try {
-            processedUpdate[id] = await buildPreviewFromFile(file, opts);
-          } catch (err) {
-            console.warn(`[Upload] Failed to process ${file.name}:`, err);
-          } finally {
-            if (totalFiles > 0) {
-              processedCount += 1;
-              setLoadingProgress((processedCount / totalFiles) * 100);
-            }
-          }
-        },
-        concurrency,
-        opts.signal
+      if (cards.length + infos.length > MAX_CARDS)
+        throw new Error(
+          "This workspace holds up to 1,000 cards. Reduce the list or clear some cards first."
+        );
+      const unique = [
+        ...new Map(infos.map((ci) => [cardKey(ci), ci])).values(),
+      ];
+      const batches = Array.from(
+        { length: Math.ceil(unique.length / 75) },
+        (_, i) => unique.slice(i * 75, (i + 1) * 75)
       );
-
-      if (opts.signal?.aborted) {
-        throw new DOMException("Upload cancelled", "AbortError");
-      }
-
-      appendUploadedFiles(uploadedFilesUpdate);
-      appendOriginalSelectedImages(originalsUpdate);
-      appendSelectedImages(processedUpdate);
-
-      if (fileArray.length > 0) {
-        setLoadingProgress(100);
-      }
-
-      maybeEnableBatching(cards.length + newCards.length);
-      committed = true;
+      useLoadingStore.getState().setLoadingTask("Fetching cards", {
+        onCancel: () => controller.abort(),
+        cancelLabel: "Cancel import",
+      });
+      const results = new Map<string, CardOption>();
+      let completed = 0;
+      await processWithConcurrency(
+        batches,
+        async (batch) => {
+          const response = await axios.post<CardOption[]>(
+            `${API_BASE}/api/cards/images`,
+            { cardQueries: batch, language, cardArt: "art" },
+            { signal: controller.signal, timeout: 180000 }
+          );
+          for (const [i, card] of response.data.entries())
+            results.set(cardKey(card.query ?? batch[i]), card);
+          useLoadingStore
+            .getState()
+            .setLoadingProgress((++completed / batches.length) * 100);
+        },
+        2,
+        controller.signal
+      );
+      controller.signal.throwIfAborted();
+      const originals: Record<string, string> = {};
+      const newCards = infos.map((ci) => {
+        const result = results.get(cardKey(ci));
+        const card: CardOption = {
+          ...result,
+          name: ci.name,
+          uuid: crypto.randomUUID(),
+          imageUrls: result?.imageUrls ?? [],
+          isUserUpload: false,
+          hasBakedBleed: false,
+          currentFaceIndex: 0,
+        };
+        const source = card.imageUrls[0] || card.faces?.[0]?.imageUrl;
+        if (source) originals[card.uuid] = source;
+        return card;
+      });
+      commitCards(newCards, originals);
+      const missing = newCards.filter((c) => !originals[c.uuid]);
+      setDeckText("");
+      notify(
+        missing.length
+          ? `Added ${newCards.length} cards. ${missing.length} need artwork: ${missing
+              .slice(0, 4)
+              .map((c) => c.name)
+              .join(", ")}. Select each missing card to search again.`
+          : `Added ${newCards.length} cards. Select a card to change its artwork.`,
+        missing.length ? "info" : "success"
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) notify(errorMessage(error), "error");
     } finally {
-      if (!committed && newCardIds.length) {
-        removeCardsByUuid(newCardIds);
-      }
+      useLoadingStore.getState().setLoadingTask(null);
     }
   }
 
-  const handleUploadMpcFill = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = e.target.files;
-    if (!files || !files.length) {
-      return;
-    }
-
+  async function uploadImages(
+    event: ChangeEvent<HTMLInputElement>,
+    hasBakedBleed: boolean
+  ) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    if (useLoadingStore.getState().loadingTask) return;
     const controller = new AbortController();
-    const cancelHandler = () => controller.abort();
-    setLoadingTask("Uploading Images", {
-      onCancel: cancelHandler,
-      cancelLabel: "Cancel upload",
-    });
-
     try {
-      await addUploadedFiles(files, {
-        hasBakedBleed: true,
-        signal: controller.signal,
-      });
-    } catch (err: any) {
-      if (controller.signal.aborted || err?.name === "AbortError") {
-        // Swallow cancellation
-      } else {
-        console.error("[Upload MPC Fill] Error", err);
-      }
-    } finally {
-      if (e.target) e.target.value = "";
-      setLoadingTask(null);
-    }
-  };
-
-  const handleUploadStandard = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = e.target.files;
-    if (!files || !files.length) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const cancelHandler = () => controller.abort();
-    setLoadingTask("Uploading Images", {
-      onCancel: cancelHandler,
-      cancelLabel: "Cancel upload",
-    });
-    try {
-      await addUploadedFiles(files, {
-        hasBakedBleed: false,
-        signal: controller.signal,
-      });
-    } catch (err: any) {
-      if (controller.signal.aborted || err?.name === "AbortError") {
-        // cancellation, ignore
-      } else {
-        console.error("[Upload] Error", err);
-      }
-    } finally {
-      if (e.target) e.target.value = "";
-      setLoadingTask(null);
-    }
-  };
-
-  const handleImportMpcXml = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const raw = await readText(file);
-      const schemaItems = tryParseMpcSchemaXml(raw);
-      const items =
-        schemaItems && schemaItems.length ? schemaItems : parseMpcText(raw);
-
-  const newCards: CardOption[] = [];
-      const newOriginals: Record<string, string> = {};
-
-      for (const it of items) {
-        for (let i = 0; i < (it.qty || 1); i++) {
+      if (files.length + useCardsStore.getState().cards.length > MAX_CARDS)
+        throw new Error("This workspace holds up to 1,000 cards.");
+      if (
+        files.some(
+          (file) =>
+            !/^image\/(png|jpeg|webp|gif|avif)$/.test(file.type) ||
+            file.size > MAX_IMAGE_BYTES
+        )
+      )
+        throw new Error(
+          "Choose PNG, JPEG, WebP, GIF or AVIF images up to 30 MB each."
+        );
+      const originals: Record<string, string> = {},
+        uploaded: Record<string, File> = {};
+      useLoadingStore
+        .getState()
+        .setLoadingTask("Uploading Images", {
+          onCancel: () => controller.abort(),
+          cancelLabel: "Cancel upload",
+        });
+      const added: CardOption[] = new Array(files.length);
+      let completed = 0;
+      await processWithConcurrency(
+        files,
+        async (source, index) => {
+          const file = await copyUpload(source);
           const uuid = crypto.randomUUID();
-          const name =
-            it.name ||
-            (it.filename
-              ? inferCardNameFromFilename(it.filename)
-              : "Custom Art");
-
-          newCards.push({
+          originals[uuid] = makeUploadedFileToken(uuid);
+          uploaded[uuid] = file;
+          added[index] = {
             uuid,
-            name,
+            name: inferCardNameFromFilename(file.name),
+            imageUrls: [],
+            isUserUpload: true,
+            hasBakedBleed,
+          };
+          useLoadingStore
+            .getState()
+            .setLoadingProgress((++completed / files.length) * 100);
+        },
+        3,
+        controller.signal
+      );
+      controller.signal.throwIfAborted();
+      commitCards(added, originals, uploaded);
+      notify(
+        `Added ${added.length} image${added.length === 1 ? "" : "s"}. Original files stay in this browser.`,
+        "success"
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) notify(errorMessage(error), "error");
+    } finally {
+      useLoadingStore.getState().setLoadingTask(null);
+    }
+  }
+
+  async function importMpc(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      if (file.size > 2 * 1024 * 1024)
+        throw new Error("Choose an MPC XML or text file under 2 MB.");
+      const raw = await file.text();
+      const items = tryParseMpcSchemaXml(raw) ?? parseMpcText(raw);
+      if (!items.length || items.some((item) => !item.frontId))
+        throw new Error(
+          "No usable MPC images found. Choose an MPCFill XML with public Google Drive image IDs."
+        );
+      const count = items.reduce((sum, item) => sum + item.qty, 0);
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 1 ||
+        count + cards.length > MAX_CARDS
+      )
+        throw new Error(
+          "Import up to 1,000 cards in this workspace. Check the MPC file quantities."
+        );
+      const originals: Record<string, string> = {},
+        backs: Record<string, string> = {};
+      const added: CardOption[] = [];
+      for (const item of items)
+        for (let i = 0; i < item.qty; i++) {
+          const uuid = crypto.randomUUID();
+          originals[uuid] = getMpcImageUrl(item.frontId)!;
+          if (item.backId) backs[uuid] = getMpcImageUrl(item.backId)!;
+          added.push({
+            uuid,
+            name: item.name,
             imageUrls: [],
             isUserUpload: true,
             hasBakedBleed: true,
+            hasBackImage: !!item.backId,
+            backHasBakedBleed: true,
           });
-
-          const mpcUrl = getMpcImageUrl(it.frontId);
-          if (mpcUrl) {
-            newOriginals[uuid] = mpcUrl;
-          }
         }
-      }
-
-      appendCards(newCards);
-  maybeEnableBatching(cards.length + newCards.length);
-      if (Object.keys(newOriginals).length) {
-        appendOriginalSelectedImages(newOriginals);
-      }
-    } finally {
-      if (e.target) e.target.value = "";
+      commitCards(added, originals, {}, backs);
+      notify(
+        `Imported ${added.length} MPC cards, including their assigned backs.`,
+        "success"
+      );
+    } catch (error) {
+      notify(errorMessage(error), "error");
     }
-  };
-
-  const handleSubmit = async () => {
-    const infos = parseDeckToInfos(deckText || "");
-    if (!infos.length) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const cancelHandler = () => controller.abort();
-    setLoadingTask("Fetching cards", {
-      onCancel: cancelHandler,
-      cancelLabel: "Cancel import",
-    });
-
-    const uniqueMap = new Map<string, CardInfo>();
-    for (const ci of infos) uniqueMap.set(cardKey(ci), ci);
-    const uniqueInfos = Array.from(uniqueMap.values());
-    const uniqueNames = Array.from(new Set(uniqueInfos.map((ci) => ci.name)));
-
-    let appendedCardIds: string[] = [];
-
-    try {
-      try {
-        await axios.delete(`${API_BASE}/api/cards/images`, {
-          timeout: 15000,
-          signal: controller.signal,
-        });
-      } catch (e) {
-        if (controller.signal.aborted) {
-          throw new DOMException("Import cancelled", "AbortError");
-        }
-        console.warn("[FetchCards] DELETE failed (continuing):", e);
-      }
-
-      let response: { data: CardOption[] } | null = null;
-      try {
-        response = await axios.post<CardOption[]>(
-          `${API_BASE}/api/cards/images`,
-          {
-            cardQueries: uniqueInfos,
-            cardNames: uniqueNames,
-            cardArt: "art",
-            language: globalLanguage,
-          },
-          { timeout: 800000, signal: controller.signal }
-        );
-      } catch (e: any) {
-        if (controller.signal.aborted || e?.code === "ERR_CANCELED" || e?.name === "CanceledError") {
-          throw new DOMException("Import cancelled", "AbortError");
-        }
-        console.error("[FetchCards] POST failed:", e);
-        throw new Error(
-          e?.response?.data?.error ||
-            e?.message ||
-            "Failed to fetch cards. Check network/CORS."
-        );
-      }
-
-      if (controller.signal.aborted) {
-        throw new DOMException("Import cancelled", "AbortError");
-      }
-
-      const data = Array.isArray(response?.data) ? response!.data : [];
-      if (!data.length) {
-        throw new Error("No images found for the provided list.");
-      }
-
-      const optionByKey: Record<string, CardOption> = {};
-      for (const opt of data) {
-        if (!opt?.name) continue;
-        const k = `${opt.name.toLowerCase()}|${opt.set ?? ""}|${opt.number ?? ""}`;
-        optionByKey[k] = opt;
-        const nameOnlyKey = `${opt.name.toLowerCase()}||`;
-        if (!optionByKey[nameOnlyKey]) optionByKey[nameOnlyKey] = opt;
-      }
-
-      const expandedCards: CardOption[] = infos.map((ci) => {
-        const k = cardKey(ci);
-        const fallbackK = `${ci.name.toLowerCase()}||`;
-        const card = optionByKey[k] ?? optionByKey[fallbackK];
-
-        if (!card) {
-          return {
-            name: ci.name,
-            imageUrls: [],
-            uuid: crypto.randomUUID(),
-            isUserUpload: false,
-          } as CardOption;
-        }
-
-        // Ensure imageUrls is populated from faces if needed
-        let imageUrls = card.imageUrls ?? [];
-        if (imageUrls.length === 0 && card.faces && card.faces.length > 0) {
-          imageUrls = card.faces.map(face => face.imageUrl).filter(Boolean);
-        }
-
-        return {
-          ...card,
-          imageUrls,
-          uuid: crypto.randomUUID(),
-          currentFaceIndex: 0,
-        } as CardOption;
-      });
-
-      appendCards(expandedCards);
-      appendedCardIds = expandedCards.map((card) => card.uuid);
-      maybeEnableBatching(cards.length + expandedCards.length);
-
-      if (controller.signal.aborted) {
-        throw new DOMException("Import cancelled", "AbortError");
-      }
-
-      const newOriginals: Record<string, string> = {};
-      for (const card of expandedCards) {
-        let firstImageUrl: string | undefined;
-
-        // Try to get image from imageUrls first
-        if (card?.imageUrls?.length > 0) {
-          firstImageUrl = card.imageUrls[0];
-        }
-        // Fallback to faces array for double-faced cards
-        else if (card?.faces && card.faces.length > 0) {
-          firstImageUrl = card.faces[0]?.imageUrl;
-        }
-
-        if (firstImageUrl) {
-          newOriginals[card.uuid] = firstImageUrl;
-        }
-      }
-      if (Object.keys(newOriginals).length) {
-        appendOriginalSelectedImages(newOriginals);
-      }
-
-      const processed: Record<string, string> = {};
-      const useHighQuality = useSettingsStore.getState().useHighQualityPreviews;
-      const dpi = useHighQuality ? HIGH_QUALITY_PREVIEW_DPI : PREVIEW_CARD_DPI;
-      const previewDims = computeCardPreviewPixels(bleedEdgeWidth, dpi);
-      const totalPreviews = Object.keys(newOriginals).length;
-      let completed = 0;
-      if (totalPreviews > 0) {
-        setLoadingTask("Processing Images", {
-          onCancel: cancelHandler,
-          cancelLabel: "Cancel import",
-        });
-        setLoadingProgress(0);
-      }
-
-      for (const [uuid, url] of Object.entries(newOriginals)) {
-        if (controller.signal.aborted) {
-          throw new DOMException("Import cancelled", "AbortError");
-        }
-
-        let bleedImageUrl: string | null = null;
-        try {
-          const proxiedUrl = getLocalBleedImageUrl(url);
-          bleedImageUrl = await addBleedEdgeSmartly(proxiedUrl, bleedEdgeWidth, {
-            unit: "mm",
-            bleedEdgeWidth,
-            hasBakedBleed: false,
-          });
-          processed[uuid] = await createPreviewDataUrl(bleedImageUrl, {
-            maxWidth: previewDims.width,
-            maxHeight: previewDims.height,
-            mimeType: "image/jpeg",
-            quality: 0.82,
-            background: "#FFFFFF",
-          });
-        } catch (e) {
-          console.warn(`[Bleed] Failed for ${uuid}:`, e);
-        } finally {
-          revokeIfBlobUrl(bleedImageUrl);
-          if (totalPreviews > 0) {
-            completed += 1;
-            setLoadingProgress((completed / totalPreviews) * 100);
-          }
-        }
-      }
-
-      if (controller.signal.aborted) {
-        throw new DOMException("Import cancelled", "AbortError");
-      }
-
-      if (totalPreviews > 0) {
-        setLoadingProgress(100);
-      }
-      if (Object.keys(processed).length) appendSelectedImages(processed);
-
-      setDeckText("");
-    } catch (err: any) {
-      if (
-        controller.signal.aborted ||
-        err?.name === "AbortError" ||
-        err?.code === "ERR_CANCELED"
-      ) {
-        if (appendedCardIds.length) {
-          removeCardsByUuid(appendedCardIds);
-        }
-        return;
-      }
-
-      console.error("[FetchCards] Error:", err);
-      alert(err?.message || "Something went wrong while fetching cards.");
-      if (appendedCardIds.length) {
-        removeCardsByUuid(appendedCardIds);
-      }
-    } finally {
-      setLoadingTask(null);
-    }
-  };
-
-  const handleClear = async () => {
-    setLoadingTask("Clearing Images");
-
-    try {
-      setCards([]);
-      setSelectedImages({});
-      setOriginalSelectedImages({});
-      setUploadedFiles({});
-
-      try {
-        await axios.delete(`${API_BASE}/api/cards/images`, { timeout: 15000 });
-      } catch (e) {
-        console.warn("[Clear] Server cache clear failed (UI already cleared):", e);
-      }
-    } catch (err: any) {
-      console.error("[Clear] Error:", err);
-      alert(err?.message || "Failed to clear images.");
-    } finally {
-      setLoadingTask(null);
-    }
-  };
-
+  }
 
   return (
-    <div className="w-1/5 dark:bg-gray-700 bg-gray-100 flex flex-col">
-      <img src={fullLogo} alt="Proxxied Logo" />
-
-      <div className="flex-1 flex flex-col overflow-y-auto gap-6 px-4 pb-4">
-        <div className="flex flex-col gap-4">
-          <div className="space-y-1">
-            <h6 className="font-medium dark:text-white">
-              Upload MPC Images (
-              <a
-                href="https://mpcfill.com"
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-blue-600 dark:hover:text-blue-400"
-              >
-                MPC Autofill
-                <ExternalLink className="inline-block size-4 ml-1" />
-              </a>
-              )
-            </h6>
-
-            <label
-              htmlFor="upload-mpc"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose Files
-            </label>
-            <input
-              id="upload-mpc"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleUploadMpcFill}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <h6 className="font-medium dark:text-white">
-              Import MPC Text (XML)
-            </h6>
-
-            <label
-              htmlFor="import-mpc-xml"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose File
-            </label>
-            <input
-              id="import-mpc-xml"
-              type="file"
-              accept=".xml,.txt,.csv,.log,text/xml,text/plain"
-              onChange={handleImportMpcXml}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <h6 className="font-medium dark:text-white">Upload Other Images</h6>
-            <label
-              htmlFor="upload-standard"
-              className="inline-block w-full text-center cursor-pointer rounded-md bg-gray-300 dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-            >
-              Choose Files
-            </label>
-            <input
-              id="upload-standard"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleUploadStandard}
-              onClick={(e) => ((e.target as HTMLInputElement).value = "")}
-              className="hidden"
-            />
-            <HelperText>
-              You can upload images from mtgcardsmith, custom designs, etc.
-            </HelperText>
-          </div>
-        </div>
-
-        <HR className="my-0 dark:bg-gray-500" />
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <h6 className="font-medium dark:text-white">
-              Add Cards (
-              <a
-                href="https://scryfall.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-blue-600 dark:hover:text-blue-400"
-              >
-                Scryfall
-                <ExternalLink className="inline-block size-4 ml-1" />
-              </a>
-              )
-            </h6>
-
-            <Textarea
-              className="h-64"
-              placeholder={`1x Sol Ring
-2x Counterspell
-For specific art include set / CN
-eg. Strionic Resonator (lcc)
-or Repurposing Bay (dft) 380`}
-              value={deckText}
-              onChange={(e) => setDeckText(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Button color="blue" onClick={handleSubmit}>
-              Fetch Cards
-            </Button>
-            <Button color="red" onClick={handleClear}>
-              Clear Cards
-            </Button>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <h6 className="font-medium dark:text-white">Language</h6>
-            </div>
-            <HelperText>Used for Scryfall lookups</HelperText>
-
-            <Select
-              className="w-full rounded-md bg-gray-300 dark:bg-gray-600 my-2 text-sm text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500"
-              value={globalLanguage}
-              onChange={(e) => setGlobalLanguage(e.target.value)}
-            >
-              {LANGUAGE_OPTIONS.map((o) => (
-                <option key={o.code} value={o.code}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <h6 className="font-medium dark:text-white">Tips:</h6>
-
-            <List className="text-sm dark:text-white/60">
-              <ListItem>To change a card art - click it</ListItem>
-              <ListItem>
-                To move a card - drag from the box at the top right
-              </ListItem>
-              <ListItem>
-                To duplicate or delete a card - right click it
-              </ListItem>
-            </List>
-          </div>
-        </div>
-
-        <HR className="my-0 dark:bg-gray-500" />
+    <aside
+      className="workspace-panel import-panel"
+      aria-labelledby="add-heading"
+      id="add-panel"
+    >
+      <div className="panel-heading">
+        <span className="eyebrow">01 / Build your deck</span>
+        <h2 id="add-heading">Add cards</h2>
+        <p>Bring your next deck to the table.</p>
       </div>
-    </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void importDeck();
+        }}
+        className="space-y-4"
+      >
+        <div className="field">
+          <label htmlFor="decklist">Decklist</label>
+          <textarea
+            id="decklist"
+            rows={8}
+            placeholder={
+              "1 Sol Ring\n2 Counterspell\n1 Lightning Bolt (m11) 146"
+            }
+            value={deckText}
+            onChange={(e) => setDeckText(e.target.value)}
+            aria-describedby="deck-hint"
+          />
+          <p id="deck-hint" className="hint">
+            One card per line. Include a quantity, set or collector number if
+            you like.
+          </p>
+        </div>
+        <div className="field">
+          <label htmlFor="language">Card language</label>
+          <select
+            id="language"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            {LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          className="primary-button w-full"
+          disabled={!deckText.trim() || !!loading}
+        >
+          <ListPlus size={18} aria-hidden="true" /> Add to deck
+        </button>
+      </form>
+      <div className="section-divider">
+        <span>Or use your own art</span>
+      </div>
+      <div className="upload-options">
+        <label className="upload-option">
+          <FileImage size={20} aria-hidden="true" />
+          <span>
+            <strong>Card images</strong>
+            <small>Standard artwork without bleed</small>
+          </span>
+          <input
+            aria-label="Upload card images"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+            multiple
+            disabled={!!loading}
+            onChange={(e) => void uploadImages(e, false)}
+          />
+        </label>
+        <label className="upload-option">
+          <Upload size={20} aria-hidden="true" />
+          <span>
+            <strong>MPC images</strong>
+            <small>Artwork with 3 mm baked bleed</small>
+          </span>
+          <input
+            aria-label="Upload MPC images"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            disabled={!!loading}
+            onChange={(e) => void uploadImages(e, true)}
+          />
+        </label>
+        <div className="field">
+          <label htmlFor="mpc-xml">MPCFill XML or text</label>
+          <input
+            id="mpc-xml"
+            type="file"
+            accept=".xml,.txt,.csv,.log"
+            disabled={!!loading}
+            onChange={(e) => void importMpc(e)}
+          />
+        </div>
+      </div>
+      <div className="tip-box">
+        <strong>Make it yours</strong>
+        <p>
+          Select a card to choose art. Use its drag handle to reorder, or its
+          menu to duplicate, move or remove it.
+        </p>
+      </div>
+      <div className="panel-footer">
+        <span className="tabular-nums">
+          {cards.length} / {MAX_CARDS} cards
+        </span>
+        <button
+          className="text-button danger"
+          disabled={!cards.length || !!loading}
+          onClick={() => {
+            if (
+              window.confirm(
+                `Remove all ${cards.length} cards and their uploaded images from this workspace?`
+              )
+            ) {
+              useCardsStore.getState().clearAll();
+              notify("Deck cleared. Your print settings are unchanged.");
+            }
+          }}
+        >
+          <Trash2 size={15} aria-hidden="true" /> Clear deck
+        </button>
+      </div>
+      <p className="hint" aria-live="polite">
+        {savingDisabled
+          ? "Temporary workspace · saving disabled"
+          : saveError
+            ? "Changes not saved"
+            : pendingSave
+              ? "Saving workspace…"
+              : "Saved in this browser"}
+      </p>
+    </aside>
   );
 }

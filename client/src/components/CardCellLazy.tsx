@@ -21,6 +21,10 @@ const CardCellLazy = memo(function CardCellLazy({
   const attemptedRef = useRef(false);
   const prevHasImageRef = useRef(hasImage);
 
+  useEffect(() => {
+    attemptedRef.current = false;
+  }, [card, ensureProcessed]);
+
   // Reset attemptedRef when hasImage changes from true to false (image was cleared)
   useEffect(() => {
     if (prevHasImageRef.current && !hasImage) {
@@ -31,7 +35,7 @@ const CardCellLazy = memo(function CardCellLazy({
 
   useEffect(() => {
     // Only attempt to process once - don't retry automatically when in error state
-    if (visible && !hasImage && state !== "error" && !attemptedRef.current) {
+    if (visible && !hasImage && !attemptedRef.current) {
       attemptedRef.current = true;
       void ensureProcessed(card);
     }
@@ -46,7 +50,8 @@ const CardCellLazy = memo(function CardCellLazy({
       )}
       {state === "error" && !hasImage && (
         <div className="absolute inset-0 grid place-items-center z-10 pointer-events-none">
-          <div
+          <button
+            type="button"
             className="px-2 py-1 text-xs bg-red-600 text-white rounded cursor-pointer pointer-events-auto"
             onClick={(e) => {
               e.stopPropagation();
@@ -54,8 +59,8 @@ const CardCellLazy = memo(function CardCellLazy({
               void ensureProcessed(card);
             }}
           >
-            load failed — click to retry
-          </div>
+            Load failed · retry
+          </button>
         </div>
       )}
       {children}

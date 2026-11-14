@@ -1,533 +1,237 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
-const fsPromises = require("fs").promises;
-const axios = require("axios");
-const multer = require("multer");
-const crypto = require("crypto");
-const logger = require("../utils/logger.js");
-
 const {
-  getScryfallPngImagesForCard,
   getImagesForCardInfo,
-  getScryfallPngImagesForCardPrints,
+  fetchCardsByQuery,
+  SCRYFALL_HOST,
+  quoted,
 } = require("../utils/getCardImagesPaged");
-
-// --- add under your existing requires ---
-const AX = axios.create({
-  timeout: 12000,                                  // 12s per outbound request
-  headers: { "User-Agent": "Proxxied/1.0 (+contact@example.com)" },
-  validateStatus: (s) => s >= 200 && s < 500,      // surface 4xx/429 to logic
-});
-
-// Retry logic with exponential backoff for 429 / transient errors
-async function getWithRetry(url, opts = {}, tries = 5) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      if (process.env.LOG_ALL_REQUESTS === "true") {
-        logger.info(`[GET] ${url}`);
-      }
-      const res = await AX.get(url, opts);
-
-      // Success
-      if (res.status >= 200 && res.status < 300) return res;
-
-      // Handle rate limiting - retry with backoff
-      if (res.status === 429) {
-        const retryAfter = Number(res.headers["retry-after"] || 0);
-        const wait = retryAfter > 0 ? retryAfter : Math.min(60, Math.pow(2, i));
-        logger.warn(`[429] Rate limited on ${url}, waiting ${wait}s before retry ${i + 1}/${tries}`);
-        await new Promise(r => setTimeout(r, wait * 1000));
-        continue;
-      }
-
-      // Client errors (4xx except 429) should NOT be retried (404, etc.)
-      if (res.status >= 400 && res.status < 500) {
-        const err = new Error(`HTTP ${res.status}`);
-        err.status = res.status;
-        err.response = res;
-        throw err;
-      }
-
-      // Server errors (5xx) - will be retried below
-      throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      lastErr = e;
-
-      // Don't retry client errors (4xx except 429)
-      // Check both e.status (from our custom throw) and e.response.status (from axios)
-      const status = e.status || (e.response && e.response.status);
-      if (status >= 400 && status < 500 && status !== 429) {
-        throw e;
-      }
-
-      // Retry network errors and server errors (5xx) with exponential backoff
-      if (i < tries - 1) {
-        const backoff = 500 * Math.pow(2, i);
-        await new Promise(r => setTimeout(r, backoff));
-      }
-    }
-  }
-  throw lastErr;
-}
-
-// Tiny p-limit (cap parallel Scryfall calls)
-function pLimit(concurrency, delayMs = 0) {
-  const q = [];
-  let active = 0;
-  const run = async (fn, resolve, reject) => {
-    active++;
-    try {
-      const result = await fn();
-      // Add delay between requests to avoid rate limiting
-      if (delayMs > 0 && q.length > 0) {
-        await new Promise(r => setTimeout(r, delayMs));
-      }
-      resolve(result);
-    }
-    catch (e) { reject(e); }
-    finally {
-      active--;
-      if (q.length) {
-        const [fn, res, rej] = q.shift();
-        run(fn, res, rej);
-      }
-    }
-  };
-  return (fn) => new Promise((resolve, reject) => {
-    if (active < concurrency) run(fn, resolve, reject);
-    else q.push([fn, resolve, reject]);
-  });
-}
-// Scryfall rate limit is ~10 requests/second
-// Use 2 concurrent with 150ms delay = ~6.6 requests/second (safe margin)
-const limit = pLimit(2, 150);
-
-// -------------------- cache helpers --------------------
-
+const { scryfallGet } = require("../utils/http");
+const {
+  allowedImageUrl,
+  downloadImage,
+  cachedImage,
+} = require("../utils/imageCache");
 const imageRouter = express.Router();
-
-const cacheDir = path.join(__dirname, "..", "cached-images");
-const uploadDir = path.join(__dirname, "..", "uploaded-images");
-
-// Initialize directories asynchronously
-(async () => {
-  try {
-    await fsPromises.mkdir(cacheDir, { recursive: true });
-    await fsPromises.mkdir(uploadDir, { recursive: true });
-  } catch (err) {
-    console.error("Failed to create cache/upload directories:", err);
-  }
-})();
-
-const upload = multer({ dest: uploadDir });
-
-// Make a stable cache filename from the FULL raw URL (path + query)
-function cachePathFromUrl(originalUrl) {
-  const hash = crypto.createHash("sha1").update(originalUrl).digest("hex");
-
-  // try to preserve the real extension; default to .png
-  let ext = ".png";
-  try {
-    const u = new URL(originalUrl);
-    const m = u.pathname.match(/\.(png|jpg|jpeg|webp)$/i);
-    if (m) ext = m[0].toLowerCase();
-  } catch {
-    // ignore; keep .png
-  }
-  return path.join(cacheDir, `${hash}${ext}`);
-}
-
-// -------------------- API: fetch images for cards --------------------
-
-imageRouter.post("/", async (req, res) => {
-  const cardQueries = Array.isArray(req.body.cardQueries) ? req.body.cardQueries : null;
-  const cardNames = Array.isArray(req.body.cardNames) ? req.body.cardNames : null;
-
-  const unique = req.body.cardArt || "art";
-  const language = (req.body.language || "en").toLowerCase();
-  const fallbackToEnglish =
-    typeof req.body.fallbackToEnglish === "boolean" ? req.body.fallbackToEnglish : true;
-
-  if (!cardQueries && !cardNames) {
-    return res.status(400).json({ error: "Provide cardQueries (preferred) or cardNames." });
-  }
-
-  const infos = cardQueries
-    ? cardQueries.map((q) => ({
-      name: q.name,
-      set: q.set,
+const languages = new Set([
+  "en",
+  "es",
+  "fr",
+  "de",
+  "it",
+  "pt",
+  "ja",
+  "ko",
+  "ru",
+  "zhs",
+  "zht",
+]);
+let activeImports = 0;
+function validateQueries(body) {
+  if (!body || typeof body !== "object")
+    throw new Error("Provide cardQueries or cardNames.");
+  if (body.language != null && typeof body.language !== "string")
+    throw new Error("Invalid card language.");
+  const unique = body.cardArt ?? "art";
+  const language =
+    typeof body.language === "string" ? body.language.toLowerCase() : "en";
+  if (!["art", "prints"].includes(unique) || !languages.has(language))
+    throw new Error("Invalid artwork mode or language.");
+  const raw = Array.isArray(body.cardQueries)
+    ? body.cardQueries
+    : Array.isArray(body.cardNames)
+      ? body.cardNames.map((name) => ({ name }))
+      : null;
+  if (!raw?.length || raw.length > (unique === "prints" ? 5 : 100))
+    throw new Error(
+      "Provide 1–100 card queries, or up to 5 names for all printings."
+    );
+  const infos = raw.map((q) => {
+    if (
+      !q ||
+      typeof q.name !== "string" ||
+      !q.name.trim() ||
+      q.name.length > 200 ||
+      (q.set != null &&
+        (typeof q.set !== "string" || !/^[a-z0-9]{2,8}$/i.test(q.set))) ||
+      (q.number != null &&
+        (typeof q.number !== "string" || q.number.length > 30))
+    )
+      throw new Error(
+        "Each card needs a valid name, optional set code and collector number."
+      );
+    const lang =
+      q.language == null
+        ? language
+        : typeof q.language === "string"
+          ? q.language.toLowerCase()
+          : "";
+    if (!languages.has(lang)) throw new Error("Invalid card language.");
+    return {
+      name: q.name.trim(),
+      set: q.set?.toLowerCase(),
       number: q.number,
-      language: (q.language || language || "en").toLowerCase(),
-    }))
-    : cardNames.map((name) => ({ name, language }));
-
-  const started = Date.now();
-
+      language: lang,
+    };
+  });
+  return { infos, unique, fallback: body.fallbackToEnglish !== false };
+}
+imageRouter.post("/", async (req, res) => {
+  let input;
   try {
-    // When fetching all prints, we need to return multiple cards per name
-    if (unique === "prints") {
-      const allResults = [];
-
-      for (const ci of infos) {
-        try {
-          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("scryfall-timeout")), 20000));
-          const task = (async () => {
-            // For prints, fetch all printings directly
-            const { fetchCardsByQuery } = require("../utils/getCardImagesPaged");
-            const q = `!"${ci.name}" include:extras unique:prints lang:${(ci.language || "en").toLowerCase()}`;
-            logger.debug(`[Prints] Querying: ${q}`);
-            let cards = await fetchCardsByQuery(q);
-
-            if (!cards.length && fallbackToEnglish && ci.language !== "en") {
-              const qEn = `!"${ci.name}" include:extras unique:prints lang:en`;
-              logger.debug(`[Prints] Fallback query: ${qEn}`);
-              cards = await fetchCardsByQuery(qEn);
-            }
-
-            logger.info(`[Prints] Found ${cards.length} printings for "${ci.name}"`);
-
-            return cards.map(cardData => {
-              // Ensure imageUrls is populated from faces if needed
-              let imageUrls = cardData.imageUrls || [];
-              if (imageUrls.length === 0 && cardData.faces && cardData.faces.length > 0) {
-                imageUrls = cardData.faces.map(face => face.imageUrl).filter(Boolean);
-              }
-
-              return {
-                name: ci.name,
-                set: cardData.set,
-                number: cardData.collector_number,
-                imageUrls,
-                language: ci.language,
-                layout: cardData.layout,
-                faces: cardData.faces,
-              };
-            });
-          })();
-
-          const result = await Promise.race([task, timeout]);
-          allResults.push(...result);
-        } catch (err) {
-          // On timeout/error, return empty object
-          logger.error(`[Prints] Error fetching prints for "${ci.name}":`, err?.message);
-          allResults.push({
-            name: ci.name,
-            set: ci.set,
-            number: ci.number,
-            imageUrls: [],
-            language: ci.language,
-            layout: null,
-            faces: null,
-          });
-        }
-      }
-
-      logger.info(`[Prints] Returning ${allResults.length} total results`);
-      return res.json(allResults);
+    input = validateQueries(req.body);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  if (activeImports >= 8)
+    return res
+      .status(503)
+      .json({ error: "The card service is busy. Try again shortly." });
+  activeImports++;
+  const controller = new AbortController();
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(175000),
+  ]);
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  try {
+    const results = [];
+    for (const info of input.infos) {
+      signal.throwIfAborted();
+      let cards;
+      if (input.unique === "prints") {
+        cards = await fetchCardsByQuery(
+          `!${quoted(info.name)} include:extras game:paper unique:prints lang:${info.language}`,
+          signal
+        );
+        if (!cards.length && input.fallback && info.language !== "en")
+          cards = await fetchCardsByQuery(
+            `!${quoted(info.name)} include:extras game:paper unique:prints lang:en`,
+            signal
+          );
+      } else
+        cards = [
+          await getImagesForCardInfo(
+            info,
+            "art",
+            info.language,
+            input.fallback,
+            signal
+          ),
+        ];
+      results.push(
+        ...cards.map((card) => ({
+          ...card,
+          name: card.name || info.name,
+          number: card.collector_number || info.number,
+          language: info.language,
+          query: info,
+        }))
+      );
     }
-
-    // For unique:art (default), return one card per name
-    const results = await Promise.all(
-      infos.map((ci) =>
-        limit(async () => {
-          // 20s safety timeout per card so one slow POP can't hang everything
-          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("scryfall-timeout")), 20000));
-          const task = (async () => {
-            const cardData = await getImagesForCardInfo(ci, unique, ci.language, fallbackToEnglish);
-            return {
-              name: ci.name,
-              set: cardData.set || ci.set,
-              number: cardData.collector_number || ci.number,
-              imageUrls: cardData.imageUrls || [],
-              language: ci.language,
-              layout: cardData.layout,
-              faces: cardData.faces,
-            };
-          })();
-          try {
-            return await Promise.race([task, timeout]);
-          } catch {
-            // On timeout/error, return empty list (UI won't spin forever)
-            return {
-              name: ci.name,
-              set: ci.set,
-              number: ci.number,
-              imageUrls: [],
-              language: ci.language,
-              layout: null,
-              faces: null,
-            };
-          }
-        })
-      )
-    );
-
     return res.json(results);
-  } catch (err) {
-    console.error("Fetch error:", err?.message);
-    return res.status(500).json({ error: "Failed to fetch images from Scryfall." });
+  } catch (error) {
+    if (!res.destroyed)
+      return res
+        .status(502)
+        .json({
+          error: signal.aborted
+            ? "Card lookup timed out. Try a smaller list."
+            : error.message,
+        });
   } finally {
-    logger.info(`[POST /images] ${infos.length} cards in ${Date.now() - started}ms`);
+    activeImports--;
   }
 });
-
-imageRouter.post("/images-stream", async (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
-
-  const cardQueries = Array.isArray(req.body.cardQueries)
-    ? req.body.cardQueries
-    : [];
-
-  const unique = req.body.cardArt || "art";
-  const language = (req.body.language || "en").toLowerCase();
-  const fallbackToEnglish =
-    typeof req.body.fallbackToEnglish === "boolean"
-      ? req.body.fallbackToEnglish
-      : true;
-
-  const infos = cardQueries.map((q) => ({
-    name: q.name,
-    set: q.set,
-    number: q.number,
-    language: (q.language || language || "en").toLowerCase(),
-  }));
-
-  const total = infos.length;
-  let count = 0;
-
-  for (const ci of infos) {
-    try {
-      const imageUrls = await getImagesForCardInfo(
-        ci,
-        unique,
-        ci.language,
-        fallbackToEnglish
-      );
-      const card = {
-        name: ci.name,
-        set: ci.set,
-        number: ci.number,
-        imageUrls,
-        language: ci.language,
-      };
-      res.write(`event: card\ndata: ${JSON.stringify(card)}\n\n`);
-    } catch (e) {
-      console.error(`[SSE] failed to fetch ${ci.name}:`, e);
-      // Send an error event for this card
-      res.write(
-        `event: card-error\ndata: ${JSON.stringify({ name: ci.name })}\n\n`
-      );
-    } finally {
-      count++;
-      res.write(
-        `event: progress\ndata: ${JSON.stringify({ progress: count, total })}\n\n`
-      );
-    }
-  }
-
-  res.write("event: end\ndata: Stream ended\n\n");
-  res.end();
-});
-
-// -------------------- proxy (cached) --------------------
-
+function sendImage(res, image) {
+  res.set({
+    "Content-Type": image.type,
+    "Cache-Control": "public, max-age=86400",
+    "X-Content-Type-Options": "nosniff",
+  });
+  return res.send(image.data);
+}
 imageRouter.get("/proxy", async (req, res) => {
-  const url = req.query.url;
-  if (!url || typeof url !== "string") {
-    return res.status(400).json({ error: "Missing or invalid ?url" });
-  }
-
-  const originalUrl = (() => {
-    try { return decodeURIComponent(url); } catch { return url; }
-  })();
-
-  const localPath = cachePathFromUrl(originalUrl);
-
+  let url;
   try {
-    // Check if file exists using async access
-    try {
-      await fsPromises.access(localPath);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      return res.sendFile(localPath);
-    } catch {
-      // File doesn't exist, proceed to download
-    }
-
-    const response = await getWithRetry(originalUrl, { responseType: "arraybuffer", timeout: 12000, maxContentLength: 50 * 1024 * 1024 }, 3);
-    if (response.status >= 400 || !response.data) {
-      return res.status(502).json({ error: "Upstream error", status: response.status });
-    }
-
-    const ct = String(response.headers["content-type"] || "").toLowerCase();
-    if (!ct.startsWith("image/")) {
-      return res.status(502).json({ error: "Upstream not image", ct });
-    }
-
-    await fsPromises.writeFile(localPath, Buffer.from(response.data));
-
-    res.setHeader("Content-Type", ct);
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    return res.sendFile(localPath);
-  } catch (err) {
-    console.error("Proxy error:", { message: err.message, from: originalUrl });
-    return res.status(502).json({ error: "Failed to download image", from: originalUrl });
+    if (typeof req.query.url !== "string") throw new Error();
+    url = allowedImageUrl(req.query.url);
+  } catch {
+    return res
+      .status(400)
+      .json({ error: "Use a supported Scryfall HTTPS image URL." });
   }
-});
-
-// -------------------- maintenance & uploads --------------------
-
-imageRouter.delete("/", async (req, res) => {
-  const started = Date.now();
   try {
-    const files = await fsPromises.readdir(cacheDir);
-
-    // Respond right away so the client UI never looks stuck
-    res.json({ message: "Cached images clearing started.", count: files.length });
-
-    if (!files.length) {
-      logger.info(`[DELETE /images] no files (0ms)`);
-      return;
-    }
-
-    // Delete files in parallel using Promise.all
-    await Promise.all(
-      files.map(async (file) => {
-        const filePath = path.join(cacheDir, file);
-        try {
-          await fsPromises.unlink(filePath);
-        } catch (unlinkErr) {
-          logger.warn(`Failed to delete ${filePath}:`, unlinkErr.message);
-        }
-      })
-    );
-
-    logger.info(`[DELETE /images] removed ${files.length} in ${Date.now() - started}ms`);
-  } catch (err) {
-    logger.error("Error reading cache directory:", err.message);
-    if (!res.headersSent) {
-      return res.status(500).json({ error: "Failed to read cache directory" });
-    }
-  }
-});
-
-imageRouter.post("/upload", upload.array("images"), (req, res) => {
-  return res.json({
-    uploaded: req.files.map((file) => ({
-      name: file.originalname,
-      path: file.filename,
-    })),
-  });
-});
-
-imageRouter.get("/diag", (req, res) => {
-  res.json({
-    ok: true,
-    now: new Date().toISOString(),
-    ua: req.headers["user-agent"],
-    origin: req.headers.origin || null,
-    ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
-  });
-});
-
-// -------------------- Autocomplete --------------------
-
-imageRouter.get("/autocomplete", async (req, res) => {
-  const query = req.query.q;
-  if (!query || typeof query !== "string") {
-    return res.status(400).json({ error: "Missing or invalid ?q parameter" });
-  }
-
-  const trimmedQuery = query.trim();
-  if (trimmedQuery.length < 2) {
-    return res.json({ data: [] });
-  }
-
-  try {
-    const scryfallHost = process.env.SCRYFALL_HOST || "https://api.scryfall.com";
-    const response = await getWithRetry(
-      `${scryfallHost}/cards/autocomplete?q=${encodeURIComponent(trimmedQuery)}`,
-      { timeout: 5000 },
-      2
-    );
-
-    if (response.status >= 400 || !response.data) {
-      logger.warn(`[Autocomplete] Scryfall returned ${response.status}`);
-      return res.json({ data: [] });
-    }
-
-    return res.json(response.data);
-  } catch (err) {
-    logger.error("[Autocomplete] Error:", err.message);
-    return res.status(500).json({ error: "Failed to fetch autocomplete suggestions" });
-  }
-});
-
-// -------------------- Sets --------------------
-
-imageRouter.get("/sets", async (req, res) => {
-  try {
-    const scryfallHost = process.env.SCRYFALL_HOST || "https://api.scryfall.com";
-    const response = await getWithRetry(
-      `${scryfallHost}/sets`,
-      { timeout: 10000 },
-      2
-    );
-
-    if (response.status >= 400 || !response.data) {
-      logger.warn(`[Sets] Scryfall returned ${response.status}`);
-      return res.status(502).json({ error: "Failed to fetch sets from Scryfall" });
-    }
-
-    return res.json(response.data);
-  } catch (err) {
-    logger.error("[Sets] Error:", err.message);
-    return res.status(500).json({ error: "Failed to fetch sets" });
-  }
-});
-
-// -------------------- Google Drive helper --------------------
-
-imageRouter.get("/front", async (req, res) => {
-  const id = String(req.query.id || "").trim();
-  if (!id) return res.status(400).send("Missing id");
-
-  // Try a couple of GDrive URL shapes; only accept image/* responses
-  const candidates = [
-    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`,
-    `https://drive.google.com/uc?export=view&id=${encodeURIComponent(id)}`,
-    `https://drive.google.com/open?id=${encodeURIComponent(id)}`,
-  ];
-
-  for (const url of candidates) {
-    try {
-      const r = await axios.get(url, {
-        responseType: "stream",
-        maxRedirects: 5,
-        headers: { "User-Agent": "Mozilla/5.0" },
-        validateStatus: () => true,
+    return sendImage(res, await cachedImage(url, () => downloadImage(url)));
+  } catch {
+    return res
+      .status(502)
+      .json({
+        error: "Could not download the image. Retry or choose another artwork.",
       });
-
-      const ct = (r.headers["content-type"] || "").toLowerCase();
-      // Only pipe if GDrive actually gave us an image
-      if (!ct.startsWith("image/")) {
-        // Not an image (likely HTML interstitial); try next candidate
-        continue;
-      }
-
-      res.setHeader("Content-Type", ct);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      return r.data.pipe(res);
-    } catch (_) {
-      // try next candidate
-    }
   }
-
-  return res.status(502).send("Could not fetch Google Drive image");
 });
-
-module.exports = { imageRouter };
+imageRouter.get("/front", async (req, res) => {
+  const id = req.query.id;
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{12,200}$/.test(id))
+    return res.status(400).json({ error: "Invalid Google Drive image ID." });
+  try {
+    const url = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`;
+    return sendImage(
+      res,
+      await cachedImage(`drive:${id}`, () => downloadImage(url, true))
+    );
+  } catch {
+    return res
+      .status(502)
+      .json({
+        error:
+          "Could not fetch this Drive image. It must be shared publicly and be under 30 MB.",
+      });
+  }
+});
+imageRouter.get("/autocomplete", async (req, res) => {
+  const q = req.query.q;
+  if (typeof q !== "string" || q.length > 200)
+    return res
+      .status(400)
+      .json({ error: "Enter a card name under 200 characters." });
+  if (q.trim().length < 2) return res.json({ data: [] });
+  try {
+    return res.json(
+      (await scryfallGet(
+        `${SCRYFALL_HOST}/cards/autocomplete?q=${encodeURIComponent(q.trim())}`,
+        AbortSignal.timeout(12000)
+      )) || { data: [] }
+    );
+  } catch {
+    return res
+      .status(502)
+      .json({
+        error: "Suggestions are unavailable. You can still search by name.",
+      });
+  }
+});
+let setsCache;
+imageRouter.get("/sets", async (_req, res) => {
+  try {
+    if (!setsCache || setsCache.expires < Date.now())
+      setsCache = {
+        data: await scryfallGet(
+          `${SCRYFALL_HOST}/sets`,
+          AbortSignal.timeout(20000)
+        ),
+        expires: Date.now() + 86400000,
+      };
+    return res.json(setsCache.data);
+  } catch {
+    return res
+      .status(502)
+      .json({
+        error: "Set names are unavailable. Filter by set code instead.",
+      });
+  }
+});
+imageRouter.get("/diag", (_req, res) => res.json({ ok: true }));
+module.exports = { imageRouter, validateQueries };

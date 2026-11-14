@@ -1,398 +1,310 @@
-import { useMemo, memo, useCallback, useRef } from "react";
+import { memo, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useArtworkModalStore, useSettingsStore } from "../store";
-import { useCardsStore } from "../store/cards";
-import type { CardOption } from "../types/Card";
 import {
-  addBleedEdgeSmartly,
-  computeCardPreviewPixels,
-  createPreviewDataUrl,
-  makeUploadedFileToken,
-  revokeIfBlobUrl,
-} from "../helpers/ImageHelper";
+  GripVertical,
+  MoreHorizontal,
+  RotateCw,
+  ImagePlus,
+} from "lucide-react";
+import {
+  useArtworkModalStore,
+  useSettingsStore,
+  useCardsStore,
+} from "../store";
+import { makeUploadedFileToken } from "../helpers/ImageHelper";
+import { errorMessage, notify } from "../store/notifications";
+import { copyUpload } from "../helpers/uploads";
+import { cornerGuideLines } from "../helpers/printGuides";
+import { GuideOverlay } from "./GuideOverlay";
+import type { CardOption } from "../types/Card";
 
-type SortableCardProps = {
+type Props = {
   card: CardOption;
-  index: number;
   globalIndex: number;
   imageSrc: string;
   totalCardWidth: number;
   totalCardHeight: number;
-  guideOffset: number | string;
-  setContextMenu: (menu: {
-    visible: boolean;
-    x: number;
-    y: number;
-    cardIndex: number;
-  }) => void;
   viewMode: "front" | "back";
-  customCardbackUrl: string | null;
-  customCardbackHasBleed: boolean;
   disableBackPageGuides: boolean;
 };
-
 const SortableCard = memo(function SortableCard({
   card,
-  index,
   globalIndex,
   imageSrc,
   totalCardWidth,
   totalCardHeight,
-  guideOffset,
-  setContextMenu,
   viewMode,
-  customCardbackUrl,
-  customCardbackHasBleed,
   disableBackPageGuides,
-}: SortableCardProps) {
-  const useCornerGuides = useSettingsStore((state) => state.useCornerGuides);
-  const guideWidth = useSettingsStore((state) => state.guideWidth);
-  const guideColor = useSettingsStore((state) => state.guideColor);
-  const roundedCornerGuides = useSettingsStore((state) => state.roundedCornerGuides);
-  const cornerGuideOffsetMm = useSettingsStore((state) => state.cornerGuideOffsetMm);
-  const bleedEdgeWidth = useSettingsStore((state) => state.bleedEdgeWidth);
-
-  // Determine if we should show guides
-  const shouldShowGuides = useCornerGuides && !(viewMode === "back" && disableBackPageGuides);
-
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: card.uuid });
-
-  const openArtworkModal = useArtworkModalStore((state) => state.openModal);
-  const duplicateCardAt = useCardsStore((state) => state.duplicateCardAt);
-  const updateCard = useCardsStore((state) => state.updateCard);
-  const appendOriginalSelectedImages = useCardsStore((state) => state.appendOriginalSelectedImages);
-  const clearSelectedImage = useCardsStore((state) => state.clearSelectedImage);
-  const clearSelectedBackFaceImage = useCardsStore((state) => state.clearSelectedBackFaceImage);
-  const appendUploadedBackFiles = useCardsStore((state) => state.appendUploadedBackFiles);
-  const appendOriginalSelectedBackImages = useCardsStore((state) => state.appendOriginalSelectedBackImages);
-  const appendSelectedBackFaceImages = useCardsStore((state) => state.appendSelectedBackFaceImages);
-
-  const backImageInputRef = useRef<HTMLInputElement>(null);
-
-  const handleBackImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const tempUrl = URL.createObjectURL(file);
-    let processedUrl: string | null = null;
-    try {
-      processedUrl = await addBleedEdgeSmartly(tempUrl, bleedEdgeWidth, {
-        unit: "mm",
-        bleedEdgeWidth,
-        hasBakedBleed: card.hasBakedBleed ?? false,
-      });
-
-      const { width, height } = computeCardPreviewPixels(bleedEdgeWidth, 300);
-      const preview = await createPreviewDataUrl(processedUrl, {
-        maxWidth: width,
-        maxHeight: height,
-        mimeType: "image/jpeg",
-        quality: 0.82,
-        background: "#FFFFFF",
-      });
-
-      appendUploadedBackFiles({ [card.uuid]: file });
-      appendOriginalSelectedBackImages({ [card.uuid]: makeUploadedFileToken(card.uuid) });
-      appendSelectedBackFaceImages({ [card.uuid]: preview });
-      updateCard(globalIndex, { hasBackImage: true });
-    } catch (err) {
-      console.error("[BackImageUpload] Failed to process back image:", err);
-    } finally {
-      URL.revokeObjectURL(tempUrl);
-      revokeIfBlobUrl(processedUrl);
-      if (e.target) e.target.value = "";
-    }
-  }, [card.uuid, card.hasBakedBleed, bleedEdgeWidth, globalIndex, appendUploadedBackFiles, appendOriginalSelectedBackImages, appendSelectedBackFaceImages, updateCard]);
-
-  const handleBackImageClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    backImageInputRef.current?.click();
-  }, []);
-
-  // Check if card has multiple faces (is reversible)
-  const isReversible = card.faces && card.faces.length > 1;
-  const currentFaceIndex = card.currentFaceIndex ?? 0;
-
-  const handleFlipCard = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isReversible || !card.faces) return;
-
-    const nextFaceIndex = (currentFaceIndex + 1) % card.faces.length;
-    const nextFace = card.faces[nextFaceIndex];
-
-    if (nextFace?.imageUrl) {
-      // Update the card's current face index
-      updateCard(globalIndex, { currentFaceIndex: nextFaceIndex });
-
-      // Update the original selected image to point to the new face
-      appendOriginalSelectedImages({ [card.uuid]: nextFace.imageUrl });
-
-      // Clear the processed previews so they get regenerated
-      clearSelectedImage(card.uuid);
-      clearSelectedBackFaceImage(card.uuid);
-    }
-  }, [isReversible, currentFaceIndex, card.faces, card.uuid, globalIndex, updateCard, appendOriginalSelectedImages, clearSelectedImage, clearSelectedBackFaceImage]);
-
-  // Determine what image to show based on view mode
-  const displayImageSrc = useMemo(() => {
-    if (viewMode === "back") {
-      // If we have a processed image (either back face or front), use it
-      if (imageSrc) {
-        return imageSrc;
-      }
-
-      // Otherwise show cardback (custom or default)
-      return customCardbackUrl || "/cardback.png";
-    }
-
-    // Front view - show normal image, or fallback to placeholder if empty
-    return imageSrc || "/cardback.png";
-  }, [viewMode, imageSrc, customCardbackUrl]);
-
+}: Props) {
+  const {
+    useCornerGuides,
+    guideWidth,
+    guideColor,
+    roundedCornerGuides,
+    cornerGuideOffsetMm,
+    bleedEdgeWidth,
+  } = useSettingsStore(
+    useShallow((s) => ({
+      useCornerGuides: s.useCornerGuides,
+      guideWidth: s.guideWidth,
+      guideColor: s.guideColor,
+      roundedCornerGuides: s.roundedCornerGuides,
+      cornerGuideOffsetMm: s.cornerGuideOffsetMm,
+      bleedEdgeWidth: s.bleedEdgeWidth,
+    }))
+  );
+  const shouldShowGuides =
+    useCornerGuides && !(viewMode === "back" && disableBackPageGuides);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: card.uuid });
+  const menu = useRef<HTMLDetailsElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const currentIndex = () =>
+    useCardsStore.getState().cards.findIndex((c) => c.uuid === card.uuid);
+  const flip = () => {
+    const index = (card.currentFaceIndex ?? 0) === 0 ? 1 : 0;
+    const state = useCardsStore.getState();
+    const face = card.faces?.[index];
+    if (!face) return;
+    state.updateCard(currentIndex(), { currentFaceIndex: index });
+    state.appendOriginalSelectedImages({ [card.uuid]: face.imageUrl });
+    state.clearSelectedImage(card.uuid);
+    state.clearSelectedBackFaceImage(card.uuid);
+  };
+  const move = (direction: number) => {
+    const state = useCardsStore.getState();
+    const from = currentIndex();
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= state.cards.length) return;
+    const cards = [...state.cards];
+    const [selected] = cards.splice(from, 1);
+    cards.splice(to, 0, selected);
+    if (menu.current) menu.current.open = false;
+    state.setCards(cards);
+    requestAnimationFrame(() =>
+      menu.current?.querySelector("summary")?.focus()
+    );
+  };
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     width: `${totalCardWidth}mm`,
     height: `${totalCardHeight}mm`,
   };
-
-  const cornerStyles = useMemo(() => {
-    const CORNER_RADIUS_MM = 2.5;
-    const dxdy = Math.abs(cornerGuideOffsetMm) / Math.SQRT2;
-    const validCornerPosition =
-      cornerGuideOffsetMm <= 0 &&
-      cornerGuideOffsetMm >= -(bleedEdgeWidth / Math.SQRT2 + guideWidth / 2);
-    const archRadius =
-      cornerGuideOffsetMm > 0
-        ? CORNER_RADIUS_MM + guideWidth
-        : CORNER_RADIUS_MM + guideWidth + Math.abs(cornerGuideOffsetMm);
-    const arcPos = bleedEdgeWidth + cornerGuideOffsetMm - guideWidth / 2;
-    const arcBorder = `${guideWidth}mm solid ${guideColor}`;
-    const arcBaseStyle = {
-      width: `${CORNER_RADIUS_MM - dxdy}mm`,
-      height: `${CORNER_RADIUS_MM - dxdy}mm`,
-      position: "absolute" as const,
-    };
-
-    return {
-      validCornerPosition,
-      arcLeftUpper: {
-        ...arcBaseStyle,
-        top: `${arcPos}mm`,
-        left: `${arcPos}mm`,
-        borderTop: arcBorder,
-        borderLeft: arcBorder,
-        borderTopLeftRadius: `${archRadius}mm`,
-        borderBottom: "none",
-        borderRight: "none",
-      },
-      arcRightLower: {
-        ...arcBaseStyle,
-        bottom: `${arcPos}mm`,
-        right: `${arcPos}mm`,
-        borderBottom: arcBorder,
-        borderRight: arcBorder,
-        borderBottomRightRadius: `${archRadius}mm`,
-        borderTop: "none",
-        borderLeft: "none",
-      },
-      arcLeftLower: {
-        ...arcBaseStyle,
-        bottom: `${arcPos}mm`,
-        left: `${arcPos}mm`,
-        borderBottom: arcBorder,
-        borderLeft: arcBorder,
-        borderBottomLeftRadius: `${archRadius}mm`,
-        borderTop: "none",
-        borderRight: "none",
-      },
-      arcRightUpper: {
-        ...arcBaseStyle,
-        top: `${arcPos}mm`,
-        right: `${arcPos}mm`,
-        borderTop: arcBorder,
-        borderRight: arcBorder,
-        borderTopRightRadius: `${archRadius}mm`,
-        borderBottom: "none",
-        borderLeft: "none",
-      },
-    };
-  }, [cornerGuideOffsetMm, bleedEdgeWidth, guideWidth, guideColor]);
-
   return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      key={`${card.uuid}-${index}`}
-      className="bg-black relative group"
-      style={style}
-      onClick={(e) => {
-        if (e.ctrlKey || e.metaKey) {
-          e.stopPropagation();
-          duplicateCardAt(globalIndex);
-        } else {
-          openArtworkModal({ card, index: globalIndex, autoFetchPrints: e.shiftKey });
-        }
-      }}
-    >
-      <img
-        src={displayImageSrc}
-        className="cursor-pointer block"
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: customCardbackHasBleed && viewMode === "back" && displayImageSrc === customCardbackUrl ? "cover" : "contain"
-        }}
+    <div ref={setNodeRef} className="sortable-card" style={style}>
+      <button
+        className="card-art"
+        aria-label={`${card.name}, change artwork`}
         onContextMenu={(e) => {
           e.preventDefault();
-          setContextMenu({
-            visible: true,
-            x: e.clientX,
-            y: e.clientY,
-            cardIndex: globalIndex,
-          });
+          if (menu.current) menu.current.open = true;
         }}
-      />
-
-      {/* ⠿ Drag Handle */}
-      <div
-        {...listeners}
-        className="absolute right-[4px] top-1 w-4 h-4 bg-white text-green text-xs rounded-sm flex items-center justify-center cursor-move group-hover:opacity-100 opacity-50"
-        title="Drag"
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey)
+            useCardsStore.getState().duplicateCardAt(currentIndex());
+          else
+            useArtworkModalStore.getState().openModal({
+              card,
+              index: currentIndex(),
+              autoFetchPrints: true,
+            });
+        }}
       >
-        ⠿
-      </div>
-
-      {/* Flip Indicator for reversible cards */}
-      {isReversible && (
-        <div
-          onClick={handleFlipCard}
-          className="absolute left-1 top-1 w-6 h-6 bg-blue-600 text-white text-xs rounded-sm flex items-center justify-center cursor-pointer group-hover:opacity-100 opacity-75 hover:bg-blue-700 transition-colors"
-          title={`Flip to ${card.faces?.[currentFaceIndex === 0 ? 1 : 0]?.name || "other side"}`}
+        {imageSrc ? (
+          <img src={imageSrc} alt={card.name} draggable={false} />
+        ) : (
+          <span className="missing-art">
+            <strong>{card.name}</strong>
+            <span>Choose artwork</span>
+          </span>
+        )}
+      </button>
+      <button
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        className="card-control drag-handle"
+        aria-label={`Reorder ${card.name}`}
+        title="Drag to reorder, or press Space and use arrow keys"
+      >
+        <GripVertical size={17} />
+      </button>
+      {(card.faces?.length ?? 0) > 1 && (
+        <button
+          className="card-control flip-card"
+          aria-label={`Flip ${card.name}`}
+          onClick={flip}
         >
-          ⇄
-        </div>
+          <RotateCw size={16} />
+        </button>
       )}
-
-      {/* Upload Back Image button for user uploads */}
+      <details
+        ref={menu}
+        className="card-menu"
+        name="card-actions"
+        onToggle={(e) => {
+          const details = e.currentTarget;
+          if (!details.open) return;
+          const panel = details.querySelector("div");
+          const scroller = details.closest(".sheet-scroller");
+          if (!panel || !scroller) return;
+          const bounds = scroller.getBoundingClientRect();
+          const left = Math.max(8, bounds.left + 8);
+          const right = Math.min(innerWidth - 8, bounds.right - 8);
+          const top = Math.max(8, bounds.top + 8);
+          const bottom = Math.min(innerHeight - 8, bounds.bottom - 8);
+          panel.style.transform = "";
+          panel.style.maxHeight = `${Math.max(32, bottom - top)}px`;
+          const rect = panel.getBoundingClientRect();
+          const x = Math.max(left - rect.left, Math.min(0, right - rect.right));
+          const y = Math.max(top - rect.top, Math.min(0, bottom - rect.bottom));
+          panel.style.transform = `translate(${x}px, ${y}px)`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            if (menu.current) {
+              menu.current.open = false;
+              menu.current.querySelector("summary")?.focus();
+            }
+          }
+        }}
+      >
+        <summary aria-label={`Actions for ${card.name}`}>
+          <MoreHorizontal size={18} />
+        </summary>
+        <div>
+          <strong>{card.name}</strong>
+          {(card.faces?.length ?? 0) > 1 && (
+            <button
+              onClick={() => {
+                flip();
+                if (menu.current) menu.current.open = false;
+              }}
+            >
+              Flip card
+            </button>
+          )}
+          {card.isUserUpload && (
+            <button
+              onClick={() => {
+                fileInput.current?.click();
+                if (menu.current) menu.current.open = false;
+              }}
+            >
+              Upload back image
+            </button>
+          )}
+          <button
+            onClick={() => {
+              useCardsStore.getState().duplicateCardAt(currentIndex());
+              if (menu.current) menu.current.open = false;
+            }}
+          >
+            Duplicate
+          </button>
+          <button disabled={globalIndex === 0} onClick={() => move(-1)}>
+            Move earlier
+          </button>
+          <button
+            disabled={globalIndex === useCardsStore.getState().cards.length - 1}
+            onClick={() => move(1)}
+          >
+            Move later
+          </button>
+          <button
+            className="danger"
+            onClick={() => {
+              if (window.confirm(`Remove “${card.name}” from the deck?`))
+                useCardsStore.getState().removeCardAt(currentIndex());
+            }}
+          >
+            Remove card
+          </button>
+        </div>
+      </details>
       {card.isUserUpload && (
         <>
-          <div
-            onClick={handleBackImageClick}
-            className="absolute left-1 bottom-1 w-6 h-6 bg-purple-600 text-white text-xs rounded-sm flex items-center justify-center cursor-pointer group-hover:opacity-100 opacity-75 hover:bg-purple-700 transition-colors"
-            title={card.hasBackImage ? "Change back side image" : "Add back side image"}
+          <button
+            className="card-control back-upload"
+            aria-label={`Upload back for ${card.name}`}
+            onClick={() => fileInput.current?.click()}
           >
-            {card.hasBackImage ? "✓" : "+"}
-          </div>
+            <ImagePlus size={16} />
+          </button>
           <input
-            ref={backImageInputRef}
+            ref={fileInput}
             type="file"
-            accept="image/*"
-            onChange={handleBackImageUpload}
-            className="hidden"
+            className="sr-only"
+            tabIndex={-1}
+            aria-label={`Back image for ${card.name}`}
+            accept="image/png,image/jpeg,image/webp"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              if (
+                !/^image\/(png|jpeg|webp)$/.test(file.type) ||
+                file.size > 30 * 1024 * 1024
+              ) {
+                notify(
+                  "Choose a PNG, JPEG or WebP back image up to 30 MB.",
+                  "error"
+                );
+                return;
+              }
+              try {
+                const copied = await copyUpload(file);
+                const state = useCardsStore.getState();
+                if (state.cards.find((c) => c.uuid === card.uuid) !== card) {
+                  notify(
+                    "Back image not added: the card changed while the file was loading. Choose the image again."
+                  );
+                  return;
+                }
+                state.appendUploadedBackFiles({ [card.uuid]: copied });
+                state.appendOriginalSelectedBackImages({
+                  [card.uuid]: makeUploadedFileToken(card.uuid),
+                });
+                state.clearSelectedBackFaceImage(card.uuid);
+                state.updateCard(currentIndex(), {
+                  hasBackImage: true,
+                  backHasBakedBleed: false,
+                });
+                notify(
+                  "Back image added. Upload a standard image without baked bleed.",
+                  "success"
+                );
+              } catch (error) {
+                notify(errorMessage(error), "error");
+              }
+            }}
           />
         </>
       )}
-
-      {shouldShowGuides && roundedCornerGuides && cornerStyles.validCornerPosition && (
-        <>
-          <div style={cornerStyles.arcLeftUpper} />
-          <div style={cornerStyles.arcRightUpper} />
-          <div style={cornerStyles.arcLeftLower} />
-          <div style={cornerStyles.arcRightLower} />
-        </>
-      )}
-      {shouldShowGuides && !roundedCornerGuides && (
-        <>
-          <div
-            style={{
-              position: "absolute",
-              top: guideOffset,
-              left: guideOffset,
-              width: `${guideWidth}px`,
-              height: "2mm",
-              backgroundColor: guideColor,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: guideOffset,
-              left: guideOffset,
-              width: "2mm",
-              height: `${guideWidth}px`,
-              backgroundColor: guideColor,
-            }}
-          />
-
-          <div
-            style={{
-              position: "absolute",
-              top: guideOffset,
-              right: guideOffset,
-              width: `${guideWidth}px`,
-              height: "2mm",
-              backgroundColor: guideColor,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: guideOffset,
-              right: guideOffset,
-              width: "2mm",
-              height: `${guideWidth}px`,
-              backgroundColor: guideColor,
-            }}
-          />
-
-          <div
-            style={{
-              position: "absolute",
-              bottom: guideOffset,
-              left: guideOffset,
-              width: `${guideWidth}px`,
-              height: "2mm",
-              backgroundColor: guideColor,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              bottom: guideOffset,
-              left: guideOffset,
-              width: "2mm",
-              height: `${guideWidth}px`,
-              backgroundColor: guideColor,
-            }}
-          />
-
-          <div
-            style={{
-              position: "absolute",
-              bottom: guideOffset,
-              right: guideOffset,
-              width: `${guideWidth}px`,
-              height: "2mm",
-              backgroundColor: guideColor,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              bottom: guideOffset,
-              right: guideOffset,
-              width: "2mm",
-              height: `${guideWidth}px`,
-              backgroundColor: guideColor,
-            }}
-          />
-        </>
+      {shouldShowGuides && (
+        <GuideOverlay
+          lines={cornerGuideLines(
+            bleedEdgeWidth,
+            roundedCornerGuides,
+            cornerGuideOffsetMm
+          )}
+          width={totalCardWidth}
+          height={totalCardHeight}
+          color={guideColor}
+          strokeWidth={(guideWidth * 25.4) / 96}
+        />
       )}
     </div>
   );
 });
-
 export default SortableCard;

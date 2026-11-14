@@ -3,11 +3,13 @@ import { create } from "zustand";
 export type LoadingTask =
   | "Fetching cards"
   | "Processing Images"
+  | "Generating ZIP"
   | "Generating PDF"
   | "Generating Cardback PDF"
   | "Generating Collated PDF"
   | "Uploading Images"
   | "Clearing Images"
+  | "Clearing workspace"
   | null;
 
 export type LoadingProgressState = {
@@ -32,7 +34,10 @@ type Store = {
   loadingProgress: LoadingProgressState | null;
   cancelLabel: string | null;
   cancelAction: (() => void) | null;
-  setLoadingTask: (loadingTask: LoadingTask, options?: LoadingTaskOptions) => void;
+  setLoadingTask: (
+    loadingTask: LoadingTask,
+    options?: LoadingTaskOptions
+  ) => void;
   setLoadingProgress: (progress: LoadingProgressInput) => void;
   requestCancel: () => void;
 };
@@ -42,7 +47,9 @@ function clampPercent(value: number | null | undefined) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function normalizeProgress(input?: Partial<LoadingProgressState> | null): LoadingProgressState {
+function normalizeProgress(
+  input?: Partial<LoadingProgressState> | null
+): LoadingProgressState {
   return {
     overall: clampPercent(input?.overall ?? null),
     pageProgress: clampPercent(input?.pageProgress ?? null),
@@ -60,7 +67,9 @@ export const useLoadingStore = create<Store>((set) => ({
     set(() => ({
       loadingTask,
       loadingProgress: null,
-      cancelLabel: options?.onCancel ? options?.cancelLabel ?? "Cancel" : null,
+      cancelLabel: options?.onCancel
+        ? (options?.cancelLabel ?? "Cancel")
+        : null,
       cancelAction: options?.onCancel ?? null,
     })),
   setLoadingProgress: (progress) =>
@@ -93,11 +102,6 @@ export const useLoadingStore = create<Store>((set) => ({
           console.error("Loading cancel handler threw", err);
         }
       }
-      return {
-        loadingTask: null,
-        loadingProgress: null,
-        cancelAction: null,
-        cancelLabel: null,
-      } as any;
+      return { cancelAction: null, cancelLabel: "Cancelling…" };
     }),
 }));
