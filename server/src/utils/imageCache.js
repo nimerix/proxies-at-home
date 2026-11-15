@@ -50,7 +50,7 @@ async function downloadImage(raw, drive = false) {
       maxRedirects: 0,
       validateStatus: () => true,
       headers: {
-        "User-Agent": "Proxxied/1.0",
+        "User-Agent": "OopsAllProxies/1.0 (https://www.oopsallproxies.com)",
         Accept: "image/png,image/jpeg,image/webp,image/avif,image/gif",
       },
     });

@@ -12,7 +12,7 @@ const api = axios.create({
   maxRedirects: 0,
   maxContentLength: 12 * 1024 * 1024,
   headers: {
-    "User-Agent": "Proxxied/1.0 (https://github.com/kclipsto/proxies-at-home)",
+    "User-Agent": "OopsAllProxies/1.0 (https://www.oopsallproxies.com)",
     Accept: "application/json",
   },
   validateStatus: () => true,

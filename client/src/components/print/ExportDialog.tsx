@@ -316,7 +316,7 @@ function ExportPanel() {
               disabled={disabled}
               onClick={() =>
                 start(() =>
-                  downloadDecklist("proxxied-decklist.txt", decklist())
+                  downloadDecklist("oops-all-proxies-decklist.txt", decklist())
                 )
               }
             >

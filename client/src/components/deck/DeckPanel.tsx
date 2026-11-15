@@ -156,7 +156,7 @@ function DeckHead({ empty }: { empty: boolean }) {
               <button
                 onClick={() => {
                   close();
-                  downloadDecklist("proxxied-decklist.txt", decklist());
+                  downloadDecklist("oops-all-proxies-decklist.txt", decklist());
                 }}
               >
                 Download decklist

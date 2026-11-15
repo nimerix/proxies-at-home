@@ -41,7 +41,7 @@ function getDB(): Promise<IDBDatabase> {
         request.result.createObjectStore(STORE_NAME);
       request.onerror = () => fail(request.error);
       request.onblocked = () =>
-        fail(new Error("Close other Proxxied tabs, then retry."));
+        fail(new Error("Close other Oops, All Proxies tabs, then retry."));
       request.onsuccess = () => {
         const db = request.result;
         if (settled) {

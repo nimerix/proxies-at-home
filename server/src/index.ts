@@ -14,7 +14,7 @@ app.use(
 const allowedOrigins = new Set(
   (
     process.env.CORS_ORIGINS ||
-    "http://localhost:5173,http://127.0.0.1:5173,https://proxxied.com,https://www.proxxied.com"
+    "http://localhost:5173,http://127.0.0.1:5173,https://oopsallproxies.com,https://www.oopsallproxies.com"
   )
     .split(",")
     .map((s) => s.trim())

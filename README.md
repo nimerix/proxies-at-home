@@ -1,6 +1,8 @@
-# Proxxied
+# Oops, All Proxies
 
 A browser workspace for building Magic: The Gathering proxy sheets. Paste a decklist, choose printings, upload your own artwork, arrange the deck, and download a PDF for printing at home.
+
+Use it at [www.oopsallproxies.com](https://www.oopsallproxies.com).
 
 The workspace has three parts. **Deck** lists the cards with their quantities. The **sheet** in the middle shows each page as it will print. **Print setup** holds paper, sides, cutting and card-back choices. **Export** is in the top bar at every screen size.
 
@@ -66,7 +68,7 @@ npm run dev
 
 The client runs at `http://127.0.0.1:5173`; Vite forwards `/api` to the Express server at `http://127.0.0.1:3001`. No Scryfall API key is required. Uploaded files stay in the browser; the server fetches only Scryfall and public MPC Google Drive images.
 
-PowerShell users can also run `./proxxied.ps1 install` and `./proxxied.ps1 dev`.
+PowerShell users can also run `./oops-all-proxies.ps1 install` and `./oops-all-proxies.ps1 dev`.
 
 ## Validate
 
@@ -94,15 +96,15 @@ Client build configuration (`client/.env.local`):
 
 Server configuration (`server/.env.local` or environment variables):
 
-| Variable          | Default                                      | Purpose                                                                   |
-| ----------------- | -------------------------------------------- | ------------------------------------------------------------------------- |
-| `PORT`            | `3001`                                       | HTTP listen port.                                                         |
-| `CORS_ORIGINS`    | Local development and `proxxied.com` origins | Comma-separated allowed browser origins when using a separate API origin. |
-| `IMAGE_CACHE_DIR` | `cached-images` next to the compiled server  | Writable image cache directory.                                           |
-| `LOG_LEVEL`       | `info`                                       | Pino log level.                                                           |
-| `SCRYFALL_HOST`   | `https://api.scryfall.com`                   | Upstream API origin; overridden in server tests.                          |
+| Variable          | Default                                            | Purpose                                                                   |
+| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
+| `PORT`            | `3001`                                             | HTTP listen port.                                                         |
+| `CORS_ORIGINS`    | Local development and `oopsallproxies.com` origins | Comma-separated allowed browser origins when using a separate API origin. |
+| `IMAGE_CACHE_DIR` | `cached-images` next to the compiled server        | Writable image cache directory.                                           |
+| `LOG_LEVEL`       | `info`                                             | Pino log level.                                                           |
+| `SCRYFALL_HOST`   | `https://api.scryfall.com`                         | Upstream API origin; overridden in server tests.                          |
 
-Build with `npm run build`. Serve `client/dist` as static files and route `/api/*` to `npm start --prefix server`. The existing `client/netlify.toml` contains the project's Koyeb API redirect; update that host for a different deployment. The server container can be built from the repository root with `docker build -f server/dockerfile .`.
+Build with `npm run build`. Serve `client/dist` as static files and route `/api/*` to `npm start --prefix server`. The server container can be built from the repository root with `docker build -f server/dockerfile .`.
 
 The server limits API batches and concurrent upstream work, enforces request/download timeouts and image size limits, validates image hosts and every redirect, writes cache entries atomically, and prunes the cache to a seven-day/512 MB retention policy. It has no public upload or cache-deletion endpoint. A deployment should provide a writable cache directory and its usual edge traffic controls.
 
@@ -118,6 +120,11 @@ The server limits API batches and concurrent upstream work, enforces request/dow
 
 - [Scryfall](https://scryfall.com/docs/api) — card images and metadata.
 - [MPCFill](https://mpcfill.com/) — community artwork workflow.
+- [acoreyj/proxies-at-home](https://github.com/acoreyj/proxies-at-home) — the project this is based on, as of commit [`b465915`](https://github.com/acoreyj/proxies-at-home/commit/b465915395e401bf29169b01d5dd2166a22a8c0e).
 - [alex-taxiera/proxy-print](https://github.com/alex-taxiera/proxy-print) — original project inspiration.
 
-Package manifests currently declare ISC; the repository does not include a standalone license file.
+## License
+
+MIT © 2025–2026 Michael Pearce. See [LICENSE](LICENSE).
+
+Oops, All Proxies is based on [proxies-at-home](https://github.com/acoreyj/proxies-at-home) by acoreyj at commit [`b465915`](https://github.com/acoreyj/proxies-at-home/commit/b465915395e401bf29169b01d5dd2166a22a8c0e). Code derived from it keeps its upstream ISC notice; see [NOTICE](NOTICE).

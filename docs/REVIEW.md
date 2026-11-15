@@ -1,4 +1,4 @@
-# Proxxied maintenance review
+# Oops, All Proxies maintenance review
 
 Reviewed the application source, persistence, image processing, import/export flows, UI, package dependencies, and build/deployment configuration. The working tree started clean at `3165420e`. Changes are local; no deployment or production configuration was modified.
 

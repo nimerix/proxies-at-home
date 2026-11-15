@@ -432,7 +432,7 @@ export async function exportProxyPagesToPdf({
         : "";
     const bytesCopy = pdfBytes.slice();
     const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
-    saveAs(blob, `proxxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`);
+    saveAs(blob, `oops-all-proxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`);
   }
 
   onProgress?.({

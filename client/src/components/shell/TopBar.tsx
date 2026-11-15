@@ -10,10 +10,10 @@ export function TopBar() {
   const sheets = Math.ceil(count / perSheet);
   return (
     <header className="top-bar">
-      <a href="#" className="brand" aria-label="Proxxied home">
+      <a href="#" className="brand" aria-label="Oops, All Proxies home">
         <Layers3 size={22} aria-hidden="true" />
         <span className="brand-name">
-          proxxied<span className="brand-dot">.</span>
+          Oops<span className="brand-accent">,</span> All Proxies
         </span>
       </a>
       <p className="deck-summary">

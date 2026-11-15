@@ -41,7 +41,7 @@
   border-radius: var(--radius-control);
 }
 .brand svg,
-.brand-dot {
+.brand-accent {
   color: var(--accent);
 }
 .deck-summary {
@@ -242,7 +242,7 @@ main[tabindex="-1"]:focus {
     font-weight: 600;
   }
 }
-@media (max-width: 359px) {
+@media (max-width: 459px) {
   .brand-name {
     display: none;
   }

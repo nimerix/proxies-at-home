@@ -61,7 +61,7 @@ function App() {
   }, []);
   return (
     <>
-      <h1 className="sr-only">Proxxied — Magic card proxy builder</h1>
+      <h1 className="sr-only">Oops, All Proxies — Magic card proxy builder</h1>
       {(storageError || savingDisabled) && (
         <div role="alert" className="storage-error">
           {savingDisabled

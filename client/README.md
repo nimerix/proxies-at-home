@@ -1,4 +1,4 @@
-# Proxxied client
+# Oops, All Proxies client
 
 See the [project README](../README.md) for setup, features, configuration and print instructions.
 

@@ -360,18 +360,11 @@ export function PrintSetupPanel() {
         </div>
         <div className="footer-actions">
           <a
-            href="https://github.com/kclipsto/proxies-at-home"
+            href="https://github.com/nimerix/proxies-at-home"
             target="_blank"
             rel="noreferrer"
           >
-            Proxxied on GitHub
-          </a>
-          <a
-            href="https://buymeacoffee.com/kaiserclipston"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Support Proxxied
+            Oops, All Proxies on GitHub
           </a>
         </div>
       </footer>
