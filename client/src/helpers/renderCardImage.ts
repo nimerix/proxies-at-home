@@ -21,6 +21,7 @@ type RenderOptions = CardRenderOptions & {
   type?: "image/jpeg" | "image/png";
 };
 type QueuedRender = {
+  ticket: number;
   run: () => Promise<RenderedImage>;
   resolve: (result: RenderedImage) => void;
   reject: (error: unknown) => void;
@@ -35,6 +36,7 @@ let rendering = false;
 let sharedWorker: Worker | undefined;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 let nextRequestId = 1;
+let nextTicket = 1;
 const WORKER_IDLE_MS = 30000;
 const WORKER_TIMEOUT_MS = 60000;
 
@@ -61,10 +63,17 @@ function startNextRender() {
   })();
 }
 
-function queueRender(run: QueuedRender["run"], signal?: AbortSignal) {
+// Downloads finish in any order; the slot takes the earliest request that is
+// ready, so cards asked for first (the visible ones) render first.
+function queueRender(
+  run: QueuedRender["run"],
+  ticket: number,
+  signal?: AbortSignal
+) {
   signal?.throwIfAborted();
   return new Promise<RenderedImage>((resolve, reject) => {
     const job: QueuedRender = {
+      ticket,
       run,
       resolve,
       reject,
@@ -76,7 +85,8 @@ function queueRender(run: QueuedRender["run"], signal?: AbortSignal) {
       },
     };
     signal?.addEventListener("abort", job.abort, { once: true });
-    waiting.push(job);
+    const at = waiting.findIndex((other) => other.ticket > ticket);
+    waiting.splice(at < 0 ? waiting.length : at, 0, job);
     startNextRender();
   });
 }
@@ -363,9 +373,11 @@ export async function renderCardImage(
   options: RenderOptions = {}
 ): Promise<RenderedImage> {
   options.signal?.throwIfAborted();
+  const ticket = nextTicket++;
   const blob = await fetchImageBlob(src, options.signal);
   return queueRender(
     () => renderFetchedImage(blob, bleedMm, hasBakedBleed, dpi, options),
+    ticket,
     options.signal
   );
 }

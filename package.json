@@ -5,12 +5,14 @@
   "main": "index.js",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
-    "build": "npm run build --prefix client && npm run build --prefix server",
+    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix worker\"",
+    "build": "npm run build --prefix client",
     "lint": "npm run lint --prefix client",
-    "test": "npm run test --prefix client && npm run test --prefix server",
+    "test": "npm run test --prefix client && npm run typecheck --prefix worker && npm run test --prefix worker",
     "test:e2e": "playwright test",
-    "check": "npm run lint && npm test && npm run build"
+    "check": "npm run lint && npm test && npm run build",
+    "deploy": "npm run build && npm run deploy --prefix worker",
+    "bench": "node bench/perf.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

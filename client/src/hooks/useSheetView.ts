@@ -94,7 +94,11 @@ export function useCurrentSheet(
 }
 
 // Scrolls a card asked for by the deck panel into view and marks it briefly.
-export function useFocusRequest(scroller: HTMLElement | null, scale: number) {
+export function useFocusRequest(
+  scroller: HTMLElement | null,
+  scale: number,
+  ready = true
+) {
   const request = useUiStore((s) => s.focusRequest);
   const [located, setLocated] = useState<string | null>(null);
   const pending = useRef<{ uuid: string; until: number } | null>(null);
@@ -127,6 +131,6 @@ export function useFocusRequest(scroller: HTMLElement | null, scale: number) {
         })
     );
     return () => cancelAnimationFrame(frame);
-  }, [scroller, request, scale]);
+  }, [scroller, request, scale, ready]);
   return located;
 }

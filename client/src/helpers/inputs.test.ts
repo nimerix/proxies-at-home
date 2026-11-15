@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { parseDeckToInfos } from "./CardInfoHelper";
-import { toProxied } from "./imageUtils";
+import { resolveImageUrl } from "./imageUtils";
 import { bakedBleedCrop } from "./canvasProcessing";
 import { guessBucketDpiFromHeight } from "./dpiHelpers";
 import { cardSource } from "./cardSources";
@@ -19,23 +19,29 @@ it("parses quantities, printings and split cards while skipping section headings
   ]);
   expect(() => parseDeckToInfos("99999999999 Sol Ring")).toThrow(/1,000/);
 });
-it("does not proxy local, uploaded or already proxied images twice", () => {
+it("loads card images directly and keeps MPC images on this site's API", () => {
   for (const src of [
     "/cardback.png",
     "/api/cards/images/front?id=abc",
     "blob:abc",
     "data:image/png;base64,abc",
-    "/api/cards/images/proxy?url=abc",
+    "https://cards.scryfall.io/test.png",
   ])
-    expect(toProxied(src)).toBe(src);
-  const proxied = toProxied("https://cards.scryfall.io/test.png");
-  expect(toProxied(proxied)).toBe(proxied);
+    expect(resolveImageUrl(src)).toBe(src);
   expect(getMpcImageUrl("public-drive-id")).toBe(
     "/api/cards/images/front?id=public-drive-id"
   );
   expect(
-    toProxied("https://old-api.example/api/cards/images/front?id=abc")
+    resolveImageUrl("https://old-api.example/api/cards/images/front?id=abc")
   ).toBe("/api/cards/images/front?id=abc");
+});
+it("reads the original card image out of proxy paths saved by older versions", () => {
+  const original = "https://cards.scryfall.io/Sol%20Ring-c21.png";
+  for (const saved of [
+    `/api/cards/images/proxy?url=${encodeURIComponent(original)}`,
+    `https://old-api.example/api/cards/images/proxy?url=${encodeURIComponent(original)}`,
+  ])
+    expect(resolveImageUrl(saved)).toBe(original);
 });
 it("preserves the physical trim box for MPC images at zero and smaller bleed", () => {
   for (const desired of [0, 1, 2, 3]) {

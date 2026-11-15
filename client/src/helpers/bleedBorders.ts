@@ -105,6 +105,10 @@ function createEdgeSampler(
   dimensions: { width: number; height: number }
 ): EdgeSampler {
   const horizontal = edge === "top" || edge === "bottom";
+  // Neighboring points sample the same pixels many times.
+  const classified: (ColorSample | undefined)[] = new Array(
+    image.width * image.height
+  );
   return (along, depth) => {
     const mx = horizontal
       ? along
@@ -127,7 +131,8 @@ function createEdgeSampler(
         Math.floor((my * region.fullHeight) / dimensions.height)
       ) - region.y;
     if (x < 0 || y < 0 || x >= image.width || y >= image.height) return null;
-    return classifySample(image.data, (y * image.width + x) * 4);
+    const index = y * image.width + x;
+    return (classified[index] ??= classifySample(image.data, index * 4));
   };
 }
 
@@ -153,16 +158,33 @@ function sampleChroma(sample: ColorSample) {
     Math.min(sample.r, sample.g, sample.b)
   );
 }
+const histogram = new Uint16Array(256);
+// Channels are bytes, so counting finds the sorted middle value directly.
+function medianChannel(
+  samples: readonly ColorSample[],
+  channel: "r" | "g" | "b"
+) {
+  histogram.fill(0);
+  for (const sample of samples) histogram[sample[channel]]++;
+  let remaining = Math.floor(samples.length / 2);
+  for (let value = 0; ; value++) {
+    remaining -= histogram[value];
+    if (remaining < 0) return value;
+  }
+}
 function medianReference(columns: readonly (ColorSample | null)[][]) {
-  const samples = columns
-    .flatMap((column) => column.slice(0, 3))
-    .filter((s): s is ColorSample => !!s?.opaque);
+  const samples: ColorSample[] = [];
+  for (const column of columns)
+    for (let depth = 0; depth < 3 && depth < column.length; depth++) {
+      const sample = column[depth];
+      if (sample?.opaque) samples.push(sample);
+    }
   if (samples.length < 3) return null;
-  const median = (channel: "r" | "g" | "b") =>
-    samples.map((s) => s[channel]).sort((a, b) => a - b)[
-      Math.floor(samples.length / 2)
-    ];
-  const reference = classifyColor(median("r"), median("g"), median("b"));
+  const reference = classifyColor(
+    medianChannel(samples, "r"),
+    medianChannel(samples, "g"),
+    medianChannel(samples, "b")
+  );
   // A median near the aged-color threshold still has sampling uncertainty.
   // Keep raw pixel limits strict; only the robust local reference gets slack.
   reference.aged =
@@ -383,14 +405,18 @@ export function detectBorderProfile(
   for (let i = 0; i < count; i++) {
     const along = (i * lengthMm) / (count - 1);
     if (along < tangent || along > lengthMm - tangent) continue;
-    const columns = Array.from({ length: 11 }, (_, offset) =>
-      Array.from({ length: BAND_DEPTH_SAMPLES }, (_, depth) =>
-        sample(
-          along + (offset - 5) * SAMPLE_STEP_MM,
-          insetMm + (depth + 1) * SAMPLE_STEP_MM
-        )
-      )
-    );
+    const columns: (ColorSample | null)[][] = [];
+    for (let offset = 0; offset < 11; offset++) {
+      const column: (ColorSample | null)[] = [];
+      for (let depth = 0; depth < BAND_DEPTH_SAMPLES; depth++)
+        column.push(
+          sample(
+            along + (offset - 5) * SAMPLE_STEP_MM,
+            insetMm + (depth + 1) * SAMPLE_STEP_MM
+          )
+        );
+      columns.push(column);
+    }
     const reference = medianReference(columns);
     const agedBoundaries = columns.map((column, offset) =>
       agedInnerBoundary(

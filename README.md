@@ -62,23 +62,25 @@ Requires **Node.js 22.12 or newer** and npm.
 ```sh
 npm ci
 npm ci --prefix client
-npm ci --prefix server
+npm ci --prefix worker
 npm run dev
 ```
 
-The client runs at `http://127.0.0.1:5173`; Vite forwards `/api` to the Express server at `http://127.0.0.1:3001`. No Scryfall API key is required. Uploaded files stay in the browser; the server fetches only Scryfall and public MPC Google Drive images.
+The client runs at `http://127.0.0.1:5173`. The browser searches Scryfall and loads card images from Scryfall directly; no Scryfall API key is required. Vite forwards `/api` to the Cloudflare Worker at `http://127.0.0.1:8787`, which only fetches public MPC Google Drive images. Uploaded files stay in the browser.
 
 PowerShell users can also run `./oops-all-proxies.ps1 install` and `./oops-all-proxies.ps1 dev`.
 
 ## Validate
 
 ```sh
-npm run check                 # client lint, unit tests, server HTTP tests, both builds
+npm run check                 # client lint and unit tests, Worker typecheck and tests, client build
 npx playwright install chromium webkit
 npm run test:e2e              # production-build browser, PDF, ZIP and accessibility tests
 ```
 
 Run `npm run build --prefix client` before `test:e2e` after client changes. Browser tests run in Chromium and WebKit and use controlled Scryfall/Drive responses; they do not establish live provider availability. See [docs/REVIEW.md](docs/REVIEW.md) for review findings and validation limits.
+
+`npm run bench` measures import, preview, export and load performance on the production build against an emulated Scryfall that enforces Scryfall's rate limits; pass `--baseline <file>` to compare with an earlier run. See the header of [bench/perf.mjs](bench/perf.mjs).
 
 Bleed-specific fixtures, pixel comparisons, performance measurements and review
 iterations are recorded in [docs/BLEED_REVIEW.md](docs/BLEED_REVIEW.md). Firefox
@@ -90,31 +92,30 @@ environment, so it is not counted as verified.
 
 Client build configuration (`client/.env.local`):
 
-| Variable        | Default | Purpose                                                                                     |
-| --------------- | ------- | ------------------------------------------------------------------------------------------- |
-| `VITE_API_BASE` | empty   | API origin when the client and server are hosted separately. Empty uses same-origin `/api`. |
+| Variable             | Default                    | Purpose                                                                                         |
+| -------------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE`      | empty                      | Origin of the Worker when it is hosted separately from the site. Empty uses same-origin `/api`. |
+| `VITE_SCRYFALL_HOST` | `https://api.scryfall.com` | Scryfall API origin.                                                                            |
 
-Server configuration (`server/.env.local` or environment variables):
+The site deploys to Cloudflare as one Worker on the free plan: the built client is served as static assets, and only `/api/*` runs Worker code.
 
-| Variable          | Default                                            | Purpose                                                                   |
-| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
-| `PORT`            | `3001`                                             | HTTP listen port.                                                         |
-| `CORS_ORIGINS`    | Local development and `oopsallproxies.com` origins | Comma-separated allowed browser origins when using a separate API origin. |
-| `IMAGE_CACHE_DIR` | `cached-images` next to the compiled server        | Writable image cache directory.                                           |
-| `LOG_LEVEL`       | `info`                                             | Pino log level.                                                           |
-| `SCRYFALL_HOST`   | `https://api.scryfall.com`                         | Upstream API origin; overridden in server tests.                          |
+```sh
+(cd worker && npx wrangler login)   # once
+npm run deploy                      # builds the client, then runs wrangler deploy
+```
 
-Build with `npm run build`. Serve `client/dist` as static files and route `/api/*` to `npm start --prefix server`. The server container can be built from the repository root with `docker build -f server/dockerfile .`.
+To serve it at `www.oopsallproxies.com`, add the domain to Cloudflare, then attach it to the `oops-all-proxies` Worker under **Settings → Domains & Routes**, or add a `routes` entry with `"custom_domain": true` to [worker/wrangler.jsonc](worker/wrangler.jsonc). The Worker's edge cache only works on a custom domain, not on `workers.dev`.
 
-The server limits API batches and concurrent upstream work, enforces request/download timeouts and image size limits, validates image hosts and every redirect, writes cache entries atomically, and prunes the cache to a seven-day/512 MB retention policy. It has no public upload or cache-deletion endpoint. A deployment should provide a writable cache directory and its usual edge traffic controls.
+The Worker serves one route, `/api/cards/images/front?id=…`, for public Google Drive images. It follows redirects only between Google's download hosts, accepts only PNG, JPEG, WebP, AVIF and GIF files up to 30 MB, and keeps images in Cloudflare's edge cache for seven days. On the free plan, Cloudflare allows 100,000 Worker requests per day; requests for the site's own files do not count.
 
 ## Architecture
 
-- React, TypeScript, Zustand, Tailwind CSS and dnd-kit in `client/`.
+- React components on Preact (`preact/compat`), TypeScript, Zustand, Tailwind CSS and dnd-kit in `client/`.
 - IndexedDB storage keeps originals in separate immutable records, coalesces rapid edits, falls back to byte snapshots when a browser rejects Blob storage, and avoids saving generated preview images. Uploads are copied into memory so later changes to the source files cannot break them.
 - Shared `printLayout`, `printGuides`, `cardSources` and `canvasProcessing` helpers define printed output.
-- PDF generation (`pdf-lib`), ZIP generation (`JSZip`) and the artwork picker load on demand.
-- Express, Axios and Bottleneck in `server/` handle card lookups and bounded image caching.
+- PDFs and ZIPs are written by small built-in writers (`pdfWriter.ts`, `zipWriter.ts`) that assemble the file from Blob parts, so card images are not copied into page memory. The sheet grid, PDF and ZIP export and the artwork picker load on demand.
+- `client/src/helpers/scryfall.ts` searches Scryfall from the browser within Scryfall's limits: 2 card searches per second and 10 other requests per second. Deck import combines cards that need the same kind of search into one `or` query, prefers the card named exactly as written, and caches searches for an hour.
+- A Cloudflare Worker in `worker/` fetches public Google Drive images for MPC imports.
 
 ## Credits
 

@@ -189,7 +189,14 @@ function DeckList() {
       uploadedBackFiles: s.uploadedBackFiles,
     }))
   );
-  const previewStatus = usePreviewStore((s) => s.status);
+  // Only failed fronts change the list, not every preview's progress.
+  const failedPreviews = usePreviewStore(
+    useShallow((s) =>
+      Object.keys(s.status).filter(
+        (key) => key.endsWith(":false") && s.status[key] === "error"
+      )
+    )
+  );
   const ui = useUiStore(
     useShallow((s) => ({
       filter: s.deckFilter,
@@ -201,7 +208,7 @@ function DeckList() {
     }))
   );
   const groups = useMemo(() => groupDeck(cards, images), [cards, images]);
-  const failed = (uuid: string) => previewStatus[`${uuid}:false`] === "error";
+  const failed = (uuid: string) => failedPreviews.includes(`${uuid}:false`);
   const rows = groups.map((group) => {
     const status: RowStatus = needsArtwork(group.card, images)
       ? "missing"
@@ -278,9 +285,7 @@ function DeckList() {
               status={status}
               hasOwnBack={!!images.originalSelectedBackImages[group.uuids[0]]}
               active={!!ui.highlighted && group.uuids.includes(ui.highlighted)}
-              shownCopy={
-                ui.requested ? group.uuids.indexOf(ui.requested) : -1
-              }
+              shownCopy={ui.requested ? group.uuids.indexOf(ui.requested) : -1}
             />
           ))}
         </ul>

@@ -3,7 +3,13 @@ import type { LoadingProgressState } from "@/store/loading";
 import type { LayoutPreset } from "@/store/settings";
 import type { CardOption } from "@/types/Card";
 import { saveAs } from "file-saver";
-import { PDFDocument, rgb, type PDFPage, type PDFImage } from "pdf-lib";
+import {
+  PdfWriter,
+  drawImageOps,
+  drawLineOps,
+  drawRectangleOps,
+  type PdfColor,
+} from "./pdfWriter";
 import { renderCardImage } from "./renderCardImage";
 import { cardSource } from "./cardSources";
 import { cardBleedOptions } from "./cardBleedOptions";
@@ -41,31 +47,36 @@ function parseHexColor(value: string) {
       : normalized.padEnd(6, "0");
   const parsed = Number.parseInt(expanded.slice(0, 6), 16);
   if (Number.isNaN(parsed)) {
-    return rgb(0, 0, 0);
+    return { r: 0, g: 0, b: 0 };
   }
   const r = (parsed >> 16) & 0xff;
   const g = (parsed >> 8) & 0xff;
   const b = parsed & 0xff;
-  return rgb(r / 255, g / 255, b / 255);
+  return { r: r / 255, g: g / 255, b: b / 255 };
 }
 
 function drawGuides(
-  page: PDFPage,
+  page: string[],
   lines: GuideLine[],
   pageHeightMm: number,
   width: number,
-  color: ReturnType<typeof rgb>,
+  color: PdfColor,
   x = 0,
   y = 0
 ) {
   for (const line of lines)
-    page.drawLine({
-      start: toPdfPoint(pageHeightMm, { x: line.x1 + x, y: line.y1 + y }),
-      end: toPdfPoint(pageHeightMm, { x: line.x2 + x, y: line.y2 + y }),
-      thickness: mmToPt(width),
-      color,
-    });
+    page.push(
+      ...drawLineOps(
+        toPdfPoint(pageHeightMm, { x: line.x1 + x, y: line.y1 + y }),
+        toPdfPoint(pageHeightMm, { x: line.x2 + x, y: line.y2 + y }),
+        mmToPt(width),
+        color
+      )
+    );
 }
+
+// Renders run one at a time; downloading a few cards ahead hides the network.
+const PREFETCH = 3;
 
 function chunkPages<T>(items: readonly T[], size: number): T[][] {
   const chunkSize = Math.max(1, size | 0);
@@ -261,165 +272,233 @@ export async function exportProxyPagesToPdf({
 
   emitProgress();
 
+  const cardImageSource = (card: CardOption, isBack: boolean) => {
+    const { source, hasBakedBleed } = cardSource(
+      card,
+      {
+        originalSelectedImages,
+        originalSelectedBackImages,
+        uploadedFiles,
+        uploadedBackFiles,
+      },
+      isBack,
+      customCardbackUrl,
+      customCardbackHasBleed
+    );
+    const artwork = cardBleedOptions(card, {
+      source: bleedSource,
+      insetMm: scanInsetMm,
+      borders: borderBleed,
+      cornerRadiusMm: scanCornerRadiusMm,
+    });
+    return {
+      source,
+      hasBakedBleed,
+      artwork,
+      variantKey: JSON.stringify([hasBakedBleed, artwork]),
+    };
+  };
+
   const renderBatch = async (
     batchPages: (CardOption | null)[][],
     batchStartIndex: number
   ) => {
     throwIfAborted();
-    const pdfDoc = await PDFDocument.create();
-    const embedded = new Map<string | File, Map<string, PDFImage>>();
-
-    for (
-      let pageIndexInBatch = 0;
-      pageIndexInBatch < batchPages.length;
-      pageIndexInBatch++
-    ) {
-      const pageCards = batchPages[pageIndexInBatch];
-      const globalPageIndex = batchStartIndex + pageIndexInBatch;
-      const currentPageType = pageTypes[globalPageIndex];
-      const isCurrentPageBack = currentPageType === "back";
-
-      // Determine if we should show guides on this page
-      const shouldShowGuides =
-        useCornerGuides && !(isCurrentPageBack && disableBackPageGuides);
-
-      throwIfAborted();
-      currentPageCardCount = pageCards.filter(Boolean).length;
-      processedCardsOnPage = 0;
-      emitProgress();
-
-      const page = pdfDoc.addPage(pageSize);
-      page.drawRectangle({
-        x: 0,
-        y: 0,
-        width: pageSize[0],
-        height: pageSize[1],
-        color: rgb(1, 1, 1),
-      });
-
-      for (let idx = 0; idx < pageCards.length; idx++) {
-        throwIfAborted();
-        const card = pageCards[idx];
+    const pdf = new PdfWriter();
+    const embedded = new Map<string | File, Map<string, number>>();
+    const prefetch = new AbortController();
+    const signal = abortSignal
+      ? AbortSignal.any([abortSignal, prefetch.signal])
+      : prefetch.signal;
+    type Render = {
+      start: () => Promise<Blob>;
+      promise?: Promise<Blob>;
+    };
+    const renders = new Map<string | File, Map<string, Render>>();
+    const order: Render[] = [];
+    batchPages.forEach((pageCards, pageIndexInBatch) => {
+      const isBack = pageTypes[batchStartIndex + pageIndexInBatch] === "back";
+      for (const card of pageCards) {
         if (!card) continue;
-        const col = idx % columns;
-        const row = Math.floor(idx / columns);
-
-        const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
-        const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
-
-        const { source, hasBakedBleed } = cardSource(
+        const { source, hasBakedBleed, artwork, variantKey } = cardImageSource(
           card,
-          {
-            originalSelectedImages,
-            originalSelectedBackImages,
-            uploadedFiles,
-            uploadedBackFiles,
-          },
-          isCurrentPageBack,
-          customCardbackUrl,
-          customCardbackHasBleed
+          isBack
         );
-        if (!source)
-          throw new Error(
-            `Missing image for “${card.name}”. Choose artwork or upload its image before exporting.`
-          );
-        let uploadUrl: string | undefined;
-        const artwork = cardBleedOptions(card, {
-          source: bleedSource,
-          insetMm: scanInsetMm,
-          borders: borderBleed,
-          cornerRadiusMm: scanCornerRadiusMm,
-        });
-        const variantKey = JSON.stringify([hasBakedBleed, artwork]);
-        try {
-          let cardImage = embedded.get(source)?.get(variantKey);
-          if (!cardImage) {
-            const src =
-              typeof source === "string"
-                ? source
-                : (uploadUrl = URL.createObjectURL(source));
-            const { blob } = await renderCardImage(
-              src,
-              bleedMm,
-              hasBakedBleed,
-              exportDpi,
-              {
-                signal: abortSignal,
-                quality: jpegQuality,
-                artwork,
+        if (!source || renders.get(source)?.has(variantKey)) continue;
+        const render: Render = {
+          start: () =>
+            (render.promise ??= (async () => {
+              const uploadUrl =
+                typeof source === "string"
+                  ? undefined
+                  : URL.createObjectURL(source);
+              try {
+                const { blob } = await renderCardImage(
+                  uploadUrl ?? (source as string),
+                  bleedMm,
+                  hasBakedBleed,
+                  exportDpi,
+                  { signal, quality: jpegQuality, artwork }
+                );
+                return blob;
+              } finally {
+                if (uploadUrl) URL.revokeObjectURL(uploadUrl);
               }
-            );
-            throwIfAborted();
-            cardImage = await pdfDoc.embedJpg(await blob.arrayBuffer());
-            const variants =
-              embedded.get(source) ?? new Map<string, PDFImage>();
-            variants.set(variantKey, cardImage);
-            embedded.set(source, variants);
-          }
+            })()),
+        };
+        // Failures are reported when their card is reached, in page order.
+        const startAndWatch = render.start;
+        render.start = () => {
+          const promise = startAndWatch();
+          promise.catch(() => {});
+          return promise;
+        };
+        const variants = renders.get(source) ?? new Map<string, Render>();
+        variants.set(variantKey, render);
+        renders.set(source, variants);
+        order.push(render);
+      }
+    });
+    let consumed = 0;
+    const startAhead = () => {
+      for (const render of order.slice(consumed, consumed + PREFETCH))
+        render.start();
+    };
+
+    try {
+      for (
+        let pageIndexInBatch = 0;
+        pageIndexInBatch < batchPages.length;
+        pageIndexInBatch++
+      ) {
+        const pageCards = batchPages[pageIndexInBatch];
+        const globalPageIndex = batchStartIndex + pageIndexInBatch;
+        const currentPageType = pageTypes[globalPageIndex];
+        const isCurrentPageBack = currentPageType === "back";
+
+        // Determine if we should show guides on this page
+        const shouldShowGuides =
+          useCornerGuides && !(isCurrentPageBack && disableBackPageGuides);
+
+        throwIfAborted();
+        currentPageCardCount = pageCards.filter(Boolean).length;
+        processedCardsOnPage = 0;
+        emitProgress();
+
+        const page = drawRectangleOps(0, 0, pageSize[0], pageSize[1], {
+          r: 1,
+          g: 1,
+          b: 1,
+        });
+        const pageImages = new Map<string, number>();
+
+        for (let idx = 0; idx < pageCards.length; idx++) {
           throwIfAborted();
-          page.drawImage(cardImage, {
-            x: mmToPt(cardXmm),
-            y: mmToPt(pageHeightMm - cardYmm - cardHeightMm),
-            width: mmToPt(cardWidthMm),
-            height: mmToPt(cardHeightMm),
-          });
-        } catch (error) {
-          throwIfAborted();
-          throw new Error(
-            `Could not export “${card.name}”. Retry or replace its image. ${error instanceof Error ? error.message : ""}`,
-            { cause: error }
+          const card = pageCards[idx];
+          if (!card) continue;
+          const col = idx % columns;
+          const row = Math.floor(idx / columns);
+
+          const cardXmm = startXmm + col * (cardWidthMm + spacingMm);
+          const cardYmm = startYmm + row * (cardHeightMm + spacingMm);
+
+          const { source, variantKey } = cardImageSource(
+            card,
+            isCurrentPageBack
           );
-        } finally {
-          if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+          if (!source)
+            throw new Error(
+              `Missing image for “${card.name}”. Choose artwork or upload its image before exporting.`
+            );
+          try {
+            let cardImage = embedded.get(source)?.get(variantKey);
+            if (!cardImage) {
+              const render = renders.get(source)!.get(variantKey)!;
+              consumed = Math.max(consumed, order.indexOf(render) + 1);
+              startAhead();
+              const blob = await render.start();
+              throwIfAborted();
+              cardImage = await pdf.addJpeg(blob);
+              const variants =
+                embedded.get(source) ?? new Map<string, number>();
+              variants.set(variantKey, cardImage);
+              embedded.set(source, variants);
+            }
+            throwIfAborted();
+            const name = `Image-${cardImage}`;
+            pageImages.set(name, cardImage);
+            page.push(
+              ...drawImageOps(
+                name,
+                mmToPt(cardXmm),
+                mmToPt(pageHeightMm - cardYmm - cardHeightMm),
+                mmToPt(cardWidthMm),
+                mmToPt(cardHeightMm)
+              )
+            );
+          } catch (error) {
+            throwIfAborted();
+            throw new Error(
+              `Could not export “${card.name}”. Retry or replace its image. ${error instanceof Error ? error.message : ""}`,
+              { cause: error }
+            );
+          }
+
+          if (shouldShowGuides && guideWidthMm > 0) {
+            drawGuides(
+              page,
+              cornerGuideLines(
+                bleedMm,
+                roundedCornerGuides,
+                cornerGuideOffsetMm
+              ),
+              pageHeightMm,
+              guideWidthMm,
+              guideColorRgb,
+              cardXmm,
+              cardYmm
+            );
+          }
+
+          processedCards += 1;
+          processedCardsOnPage += 1;
+          emitProgress();
+          // Let the browser paint progress and receive cancellation between cards.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
 
         if (shouldShowGuides && guideWidthMm > 0) {
           drawGuides(
             page,
-            cornerGuideLines(bleedMm, roundedCornerGuides, cornerGuideOffsetMm),
+            edgeGuideLines({
+              pageWidth,
+              pageHeight,
+              pageSizeUnit,
+              columns,
+              rows,
+              bleedEdgeWidth: bleedMm,
+              cardSpacingMm: spacingMm,
+            }),
             pageHeightMm,
             guideWidthMm,
-            guideColorRgb,
-            cardXmm,
-            cardYmm
+            { r: 0, g: 0, b: 0 }
           );
         }
 
-        processedCards += 1;
-        processedCardsOnPage += 1;
-        emitProgress();
-        // Let the browser paint progress and receive cancellation between cards.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        pdf.addPage(pageSize, page, pageImages);
+        currentPageIndex += 1;
       }
-
-      if (shouldShowGuides && guideWidthMm > 0) {
-        drawGuides(
-          page,
-          edgeGuideLines({
-            pageWidth,
-            pageHeight,
-            pageSizeUnit,
-            columns,
-            rows,
-            bleedEdgeWidth: bleedMm,
-            cardSpacingMm: spacingMm,
-          }),
-          pageHeightMm,
-          guideWidthMm,
-          rgb(0, 0, 0)
-        );
-      }
-
-      currentPageIndex += 1;
+    } finally {
+      prefetch.abort();
     }
 
-    return pdfDoc.save({ useObjectStreams: true });
+    return pdf.finish();
   };
 
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
     const batchPages = batches[batchIndex];
     const batchStartIndex = batchIndex * effectivePagesPerBatch;
-    const pdfBytes = await renderBatch(batchPages, batchStartIndex);
+    const blob = await renderBatch(batchPages, batchStartIndex);
     throwIfAborted();
     const fileSuffix =
       totalBatches > 1
@@ -430,9 +509,10 @@ export async function exportProxyPagesToPdf({
       : isBackSide
         ? "_backs"
         : "";
-    const bytesCopy = pdfBytes.slice();
-    const blob = new Blob([bytesCopy.buffer], { type: "application/pdf" });
-    saveAs(blob, `oops-all-proxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`);
+    saveAs(
+      blob,
+      `oops-all-proxies_${dateSlug}${backSideSuffix}${fileSuffix}.pdf`
+    );
   }
 
   onProgress?.({

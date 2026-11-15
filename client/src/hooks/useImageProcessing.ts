@@ -2,10 +2,15 @@ import { useCallback, useEffect, useRef } from "react";
 import {
   createTaskQueue,
   blobToDataUrl,
-  toProxied,
+  resolveImageUrl,
   PREVIEW_CARD_DPI,
 } from "../helpers/ImageHelper";
 import { renderCardImage } from "../helpers/renderCardImage";
+import {
+  cachedPreview,
+  previewSourceKey,
+  prunePreviews,
+} from "../helpers/previewCache";
 import { cardSource } from "../helpers/cardSources";
 import { cardBleedOptions } from "../helpers/cardBleedOptions";
 import { useCardsStore, usePreviewStore, useSettingsStore } from "../store";
@@ -26,10 +31,44 @@ type PreviewJob = {
   controller: AbortController;
   promise?: Promise<void>;
 };
-const queuePreview = createTaskQueue(3);
-// Uploads and MPC sources can be very large. Decode/render one at a time,
-// while ordinary Scryfall cards retain concurrent network loading.
+// Downloads overlap; decoding and rendering still take one shared slot.
+const queuePreview = createTaskQueue(9);
+// Local uploads can be very large and need no download. One at a time.
 const queueUploadPreview = createTaskQueue(1);
+
+// The cached render each card slot shows, while the slot still shows it.
+const slots = new Map<string, { key: string; src: string }>();
+let shown: Set<string> | null = null;
+const isShown = (key: string) => {
+  if (!shown) {
+    const { selectedImages, selectedBackFaceImages } = useCardsStore.getState();
+    shown = new Set();
+    for (const [slot, value] of slots) {
+      const [uuid, back] = slot.split(":");
+      const src = (back === "true" ? selectedBackFaceImages : selectedImages)[
+        uuid
+      ];
+      if (src === value.src) shown.add(value.key);
+      else slots.delete(slot);
+    }
+  }
+  return shown.has(key);
+};
+let pruneQueued = false;
+useCardsStore.subscribe((state, previous) => {
+  if (
+    state.selectedImages === previous.selectedImages &&
+    state.selectedBackFaceImages === previous.selectedBackFaceImages
+  )
+    return;
+  shown = null;
+  if (pruneQueued) return;
+  pruneQueued = true;
+  setTimeout(() => {
+    pruneQueued = false;
+    prunePreviews(isShown);
+  });
+});
 
 export function useImageProcessing({
   bleedEdgeWidth,
@@ -129,45 +168,57 @@ export function useImageProcessing({
       const { setStatus } = usePreviewStore.getState();
       setStatus(key, "loading");
       const enqueue =
-        hasBakedBleed ||
-        typeof source !== "string" ||
-        /^(data:|blob:)/.test(source)
+        typeof source !== "string" || /^(data:|blob:)/.test(source)
           ? queueUploadPreview
           : queuePreview;
       job.promise = enqueue(async () => {
-        let uploadUrl: string | undefined;
         try {
           if (!isCurrent()) return;
           if (!source)
             throw new Error(
               "Image source is missing. Upload the image again or choose another artwork."
             );
-          const src =
-            typeof source === "string"
-              ? toProxied(source)
-              : (uploadUrl = URL.createObjectURL(source));
-          const { blob, report } = await renderCardImage(
-            src,
+          const artwork = cardBleedOptions(card, {
+            source: bleedSource,
+            insetMm: scanInsetMm,
+            borders: borderBleed,
+            cornerRadiusMm: scanCornerRadiusMm,
+          });
+          const cacheKey = JSON.stringify([
+            previewSourceKey(source),
             bleedEdgeWidth,
             hasBakedBleed,
             dpi,
-            {
-              signal: job.controller.signal,
-              quality: 0.85,
-              artwork: cardBleedOptions(card, {
-                source: bleedSource,
-                insetMm: scanInsetMm,
-                borders: borderBleed,
-                cornerRadiusMm: scanCornerRadiusMm,
-              }),
-            }
+            artwork,
+          ]);
+          const preview = await cachedPreview(
+            cacheKey,
+            async (signal) => {
+              const uploadUrl =
+                typeof source === "string"
+                  ? undefined
+                  : URL.createObjectURL(source);
+              try {
+                const { blob, report } = await renderCardImage(
+                  uploadUrl ?? resolveImageUrl(source as string),
+                  bleedEdgeWidth,
+                  hasBakedBleed,
+                  dpi,
+                  { signal, quality: 0.85, artwork }
+                );
+                return { src: await blobToDataUrl(blob), report };
+              } finally {
+                if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+              }
+            },
+            isShown,
+            job.controller.signal
           );
           if (!isCurrent()) return;
-          const preview = await blobToDataUrl(blob);
-          if (!isCurrent()) return;
+          slots.set(key, { key: cacheKey, src: preview.src });
           useCardsStore
             .getState()
-            .setProcessedImage(card.uuid, back, preview, report);
+            .setProcessedImage(card.uuid, back, preview.src, preview.report);
           setStatus(key, "idle");
         } catch (error) {
           if (isCurrent()) {
@@ -181,7 +232,6 @@ export function useImageProcessing({
             );
           }
         } finally {
-          if (uploadUrl) URL.revokeObjectURL(uploadUrl);
           if (inFlight.current.get(key) === job) inFlight.current.delete(key);
         }
       });

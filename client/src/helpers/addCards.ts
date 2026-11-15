@@ -1,10 +1,7 @@
-import axios from "axios";
-import { API_BASE } from "@/constants";
 import { cardKey, MAX_CARDS, parseDeckToInfos } from "@/helpers/CardInfoHelper";
-import {
-  makeUploadedFileToken,
-  processWithConcurrency,
-} from "@/helpers/ImageHelper";
+import { makeUploadedFileToken } from "@/helpers/imageUtils";
+import { processWithConcurrency } from "@/helpers/concurrency";
+import { preloadSheetGrid } from "@/helpers/sheetGridLoader";
 import {
   getMpcImageUrl,
   inferCardNameFromFilename,
@@ -12,6 +9,7 @@ import {
   tryParseMpcSchemaXml,
 } from "@/helpers/Mpc";
 import { plural } from "@/helpers/plural";
+import { findCardsArt } from "@/helpers/scryfall";
 import { copyUpload } from "@/helpers/uploads";
 import { useCardsStore, useLoadingStore } from "@/store";
 import { errorMessage, notify } from "@/store/notifications";
@@ -67,6 +65,7 @@ export async function importDecklist(
   language: string
 ): Promise<boolean> {
   if (useLoadingStore.getState().loadingTask) return false;
+  preloadSheetGrid();
   const controller = new AbortController();
   try {
     const infos = parseDeckToInfos(text);
@@ -79,32 +78,17 @@ export async function importDecklist(
         "This workspace holds up to 1,000 cards. Reduce the list or clear some cards first."
       );
     const unique = [...new Map(infos.map((ci) => [cardKey(ci), ci])).values()];
-    const batches = Array.from(
-      { length: Math.ceil(unique.length / 75) },
-      (_, i) => unique.slice(i * 75, (i + 1) * 75)
-    );
     useLoadingStore.getState().setLoadingTask("Fetching cards", {
       onCancel: () => controller.abort(),
       cancelLabel: "Cancel import",
     });
-    const results = new Map<string, CardOption>();
-    let completed = 0;
-    await processWithConcurrency(
-      batches,
-      async (batch) => {
-        const response = await axios.post<CardOption[]>(
-          `${API_BASE}/api/cards/images`,
-          { cardQueries: batch, language, cardArt: "art" },
-          { signal: controller.signal, timeout: 180000 }
-        );
-        for (const [i, card] of response.data.entries())
-          results.set(cardKey(card.query ?? batch[i]), card);
-        useLoadingStore
-          .getState()
-          .setLoadingProgress((++completed / batches.length) * 100);
-      },
-      2,
-      controller.signal
+    const results = await findCardsArt(
+      unique,
+      language,
+      true,
+      controller.signal,
+      (done, total) =>
+        useLoadingStore.getState().setLoadingProgress((done / total) * 100)
     );
     controller.signal.throwIfAborted();
     const originals: Record<string, string> = {};
@@ -147,6 +131,7 @@ export async function uploadImages(
 ): Promise<boolean> {
   if (!files.length) return false;
   if (useLoadingStore.getState().loadingTask) return false;
+  preloadSheetGrid();
   const controller = new AbortController();
   try {
     if (files.length + useCardsStore.getState().cards.length > MAX_CARDS)
@@ -204,6 +189,7 @@ export async function uploadImages(
 }
 
 export async function importMpcFile(file: File): Promise<boolean> {
+  preloadSheetGrid();
   try {
     if (file.size > 2 * 1024 * 1024)
       throw new Error("Choose an MPC XML or text file under 2 MB.");

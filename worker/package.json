@@ -1,0 +1,23 @@
+{
+  "name": "worker",
+  "private": true,
+  "version": "0.0.0",
+  "author": "Michael Pearce",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"require('fs').mkdirSync('../client/dist',{recursive:true})\" && wrangler dev --ip 127.0.0.1 --port 8787",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261115.1",
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.162.0"
+  }
+}

@@ -3,7 +3,7 @@
 See the [project README](../README.md) for setup, features, configuration and print instructions.
 
 ```sh
-npm run dev        # Vite with /api proxy to localhost:3001
+npm run dev        # Vite; /api goes to the Worker on 127.0.0.1:8787
 npm run lint
 npm test           # Vitest unit tests
 npm run build      # TypeScript check and production bundle

@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oops-all-proxies",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-13",
+  // The built client is served as static assets. Only /api requests run the
+  // Worker, so page loads do not count against the Workers request quota.
+  "assets": {
+    "directory": "../client/dist",
+    "run_worker_first": ["/api/*"],
+  },
+}

@@ -13,25 +13,23 @@ export const isUploadedFileToken = (
 ): value is UploadedFileToken =>
   typeof value === "string" && value.startsWith(UPLOADED_FILE_TOKEN_PREFIX);
 
-export function toProxied(url: string) {
+// Card images load straight from Scryfall's CDN, which allows cross-origin
+// reads. Only Google Drive (MPC) images go through this site's /api route.
+export function resolveImageUrl(url: string) {
   if (!url) return url;
-  // Persist portable MPC/proxy routes; resolve the configured API origin only
-  // when requesting an image, including snapshots from an older deployment.
+  // Saved decks keep portable /api paths; resolve the configured API origin
+  // only when requesting, including paths saved by an older deployment.
   const apiPath = url.match(
     /^(?:https?:\/\/[^/]+)?(\/api\/cards\/images\/(?:front|proxy)\?.*)$/
   )?.[1];
-  if (apiPath) return `${API_BASE}${apiPath}`;
-  if (
-    url.startsWith("data:") ||
-    url.startsWith("blob:") ||
-    isUploadedFileToken(url)
-  )
-    return url;
-  if (url.startsWith("/") && !url.startsWith("//")) return url;
-  if (API_BASE && url.startsWith(`${API_BASE}/api/cards/images/`)) return url;
-  const prefix = `${API_BASE}/api/cards/images/proxy?url=`;
-  if (url.startsWith(prefix)) return url;
-  return `${prefix}${encodeURIComponent(url)}`;
+  if (apiPath?.startsWith("/api/cards/images/front?"))
+    return `${API_BASE}${apiPath}`;
+  if (apiPath) {
+    // Decks saved before the image proxy was removed.
+    const original = new URLSearchParams(apiPath.split("?")[1]).get("url");
+    return original && /^https:\/\//i.test(original) ? original : url;
+  }
+  return url;
 }
 
 export async function blobToDataUrl(blob: Blob) {
@@ -102,7 +100,7 @@ export async function loadImageWithBlobFetch(
 
 export async function fetchImageBlob(src: string, signal?: AbortSignal) {
   const timeout = AbortSignal.timeout(30000);
-  const response = await fetch(toProxied(src), {
+  const response = await fetch(resolveImageUrl(src), {
     credentials: "omit",
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });

@@ -39,81 +39,101 @@ const SETS = [
   })),
 ];
 
+// Scryfall's API and image CDN allow cross-origin reads; the mocks must too.
+const CORS = { "Access-Control-Allow-Origin": "*" };
+const CARD_CDN = "https://cards.scryfall.io/";
+// Full card images; thumbnails are the "-normal.jpg" variants.
+const isCardImage = (url: string) =>
+  url.startsWith(CARD_CDN) && url.endsWith(".png");
+const searchTerm = (q: string, key: string): string | undefined => {
+  const match = q.match(new RegExp(`(?:^|\\s)${key}("(?:[^"\\\\]|\\\\.)*")`));
+  return match ? JSON.parse(match[1]) : undefined;
+};
+function scryfallCard(name: string, set: string, number = "123") {
+  const image = (png: string) => ({
+    png,
+    normal: png.replace(".png", "-normal.jpg"),
+  });
+  const front = `${CARD_CDN}${encodeURIComponent(name)}-${set}.png`;
+  return name === "Day // Night"
+    ? {
+        name,
+        set,
+        collector_number: number,
+        card_faces: [
+          { name: "Day", image_uris: image(front) },
+          { name: "Night", image_uris: image(`${CARD_CDN}night-${set}.png`) },
+        ],
+      }
+    : { name, set, collector_number: number, image_uris: image(front) };
+}
+
 async function mockCards(page: Page) {
-  await page.route("https://cards.scryfall.io/**", (route) =>
+  await page.route(`${CARD_CDN}**`, (route) =>
+    route.fulfill({ contentType: "image/png", body: fixture, headers: CORS })
+  );
+  await page.route("**/api/cards/images/front?**", (route) =>
     route.fulfill({ contentType: "image/png", body: fixture })
   );
-  await page.route("**/api/cards/images**", async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    if (url.pathname.endsWith("/proxy") || url.pathname.endsWith("/front"))
-      return route.fulfill({ contentType: "image/png", body: fixture });
-    if (url.pathname.endsWith("/sets"))
-      return route.fulfill({
-        json: { data: SETS },
-      });
-    if (url.pathname.endsWith("/autocomplete"))
-      return route.fulfill({
-        json: { data: ["Sol Ring", "Fire // Ice", "Day // Night"] },
-      });
-    if (req.method() === "POST") {
-      const body = req.postDataJSON();
-      const infos =
-        body.cardQueries || body.cardNames.map((name: string) => ({ name }));
-      const cards = infos.flatMap(
-        (q: { name: string; set?: string; number?: string }) => {
-          if (q.name === UNKNOWN_CARD)
-            return [{ name: q.name, query: q, imageUrls: [] }];
-          return (
-            body.cardArt !== "prints"
-              ? [q.set || "c21"]
-              : q.name === MANY_PRINTS
-                ? SETS.slice(2).map((set) => set.code)
-                : ["c21", "cmr"]
-          ).map((set) => {
-            const front = `https://cards.scryfall.io/${encodeURIComponent(q.name)}-${set}.png`;
-            const faces = [
-              {
-                name: q.name === "Day // Night" ? "Day" : q.name,
-                imageUrl: front,
-                thumbUrl: front.replace(".png", "-normal.jpg"),
-                faceIndex: 0,
-              },
-            ];
-            if (q.name === "Day // Night")
-              faces.push({
-                name: "Night",
-                imageUrl: `https://cards.scryfall.io/night-${set}.png`,
-                thumbUrl: `https://cards.scryfall.io/night-${set}-normal.jpg`,
-                faceIndex: 1,
-              });
-            return {
-              name: q.name,
-              set,
-              number: q.number || "123",
-              query: q,
-              imageUrls: faces.map((f) => f.imageUrl),
-              faces,
-            };
-          });
-        }
-      );
+  await page.route("https://api.scryfall.com/**", (route) => {
+    const url = new URL(route.request().url());
+    const reply = (json: unknown, status = 200) =>
+      route.fulfill({ status, json, headers: CORS });
+    if (url.pathname === "/sets") return reply({ data: SETS });
+    if (url.pathname === "/cards/autocomplete")
+      return reply({ data: ["Sol Ring", "Fire // Ice", "Day // Night"] });
+    if (url.pathname !== "/cards/search")
+      return reply({ object: "error" }, 404);
+    const q = url.searchParams.get("q") ?? "";
+    // One exact name, or several joined with "or".
+    const names = [...q.matchAll(/!("(?:[^"\\]|\\.)*")/g)].map(
+      (match) => JSON.parse(match[1]) as string
+    );
+    const cards = names.flatMap((name) => {
+      // Like Scryfall for a typo: no card matches.
+      if (name === UNKNOWN_CARD) return [];
+      const found = q.includes("unique:prints")
+        ? (name === MANY_PRINTS
+            ? SETS.slice(2).map((set) => set.code)
+            : ["c21", "cmr"]
+          ).map((set) => scryfallCard(name, set))
+        : [
+            scryfallCard(
+              name,
+              searchTerm(q, "set:") ?? "c21",
+              searchTerm(q, "number:")
+            ),
+          ];
       // Like Scryfall, a name search can return a different card that
       // contains the name.
-      if (body.cardArt === "prints" && infos[0]?.name === "Lightning Bolt") {
-        const url = "https://cards.scryfall.io/emeritus-sos.png";
-        cards.push({
+      if (q.includes("unique:prints") && name === "Lightning Bolt")
+        found.push({
           name: OTHER_CARD,
           set: "cmr",
-          number: "7",
-          query: infos[0],
-          imageUrls: [url],
-          faces: [{ name: OTHER_CARD, imageUrl: url, faceIndex: 0 }],
-        });
-      }
-      return route.fulfill({ json: cards });
-    }
-    return route.fulfill({ status: 404 });
+          collector_number: "7",
+          image_uris: { png: `${CARD_CDN}emeritus-sos.png` },
+        } as ReturnType<typeof scryfallCard>);
+      // Sorted by name, that card comes before Lightning Bolt itself.
+      else if (name === "Lightning Bolt")
+        found.unshift({
+          name: OTHER_CARD,
+          set: "sos",
+          collector_number: "113",
+          card_faces: [
+            {
+              name: "Emeritus of Conflict",
+              image_uris: { png: `${CARD_CDN}emeritus-sos.png` },
+            },
+            {
+              name: "Lightning Bolt",
+              image_uris: { png: `${CARD_CDN}bolt-face-sos.png` },
+            },
+          ],
+        } as unknown as ReturnType<typeof scryfallCard>);
+      return found;
+    });
+    if (!cards.length) return reply({ object: "error" }, 404);
+    return reply({ data: cards, has_more: false });
   });
 }
 async function addDeck(page: Page, deck: string) {
@@ -413,8 +433,7 @@ test("exact printings, custom-grid second page actions and artwork replacement",
   ).toBeVisible();
   const zipSources: string[] = [];
   page.on("request", (request) => {
-    if (request.url().includes("/proxy?"))
-      zipSources.push(new URL(request.url()).searchParams.get("url") || "");
+    if (isCardImage(request.url())) zipSources.push(request.url());
   });
   const zipBytes = await saveDownload(page, "Download original images · ZIP");
   const zip = await JSZip.loadAsync(zipBytes);
@@ -689,8 +708,8 @@ test("failed exports are visible and cancelling an import keeps the existing dec
       .getByRole("button", { name: "Sol Ring, change artwork", exact: true })
       .getByRole("img")
   ).toBeVisible();
-  await page.route("**/api/cards/images/proxy?**", (route) =>
-    route.fulfill({ status: 502, json: { error: "Image unavailable" } })
+  await page.route(`${CARD_CDN}**`, (route) =>
+    route.fulfill({ status: 502, body: "Image unavailable", headers: CORS })
   );
   await openExport(page);
   await exportDialog(page)
@@ -707,11 +726,14 @@ test("failed exports are visible and cancelling an import keeps the existing dec
   const requestStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  await page.route("**/api/cards/images", async (route) => {
-    started();
-    await requestRelease;
-    await route.abort();
-  });
+  await page.route(
+    "https://api.scryfall.com/cards/search?**",
+    async (route) => {
+      started();
+      await requestRelease;
+      await route.abort();
+    }
+  );
   await openAddCards(page);
   await page.getByLabel("Decklist", { exact: true }).fill("1 Counterspell");
   await page.getByRole("button", { name: "Add to deck", exact: true }).click();
@@ -1683,17 +1705,11 @@ test("artwork picker uses direct normal thumbnails and keeps original PNG select
       )
     )
     .toBe(true);
-  expect(requests.some((url) => url.includes("/proxy?"))).toBe(false);
+  expect(requests.some(isCardImage)).toBe(false);
   await choice.click();
   await expect(art.getByRole("img")).toBeVisible();
   await saveDownload(page, "Download original images · ZIP");
-  expect(
-    requests.some(
-      (url) =>
-        url.includes("/proxy?") &&
-        decodeURIComponent(url).includes("Sol%20Ring-cmr.png")
-    )
-  ).toBe(true);
+  expect(requests).toContain(`${CARD_CDN}Sol%20Ring-cmr.png`);
 });
 
 test("editing the uploaded source file does not change originals or reloads", async ({
@@ -1758,10 +1774,14 @@ test("failed per-card bleed previews show an error and can be retried", async ({
   await card.click();
   await page.getByText("Bleed for this card", { exact: true }).click();
   let fail = true;
-  await page.route("**/api/cards/images/proxy?**", (route) =>
+  await page.route(`${CARD_CDN}**`, (route) =>
     fail
-      ? route.fulfill({ status: 503, body: "Unavailable" })
-      : route.fulfill({ contentType: "image/png", body: fixture })
+      ? route.fulfill({ status: 503, body: "Unavailable", headers: CORS })
+      : route.fulfill({
+          contentType: "image/png",
+          body: fixture,
+          headers: CORS,
+        })
   );
   await page
     .getByLabel("Card border bleed", { exact: true })
@@ -2001,8 +2021,7 @@ test("undo reverses a flip and an artwork change as whole actions", async ({
   await expect(solRing.getByRole("img")).toBeVisible();
   const requested: string[] = [];
   page.on("request", (request) => {
-    if (request.url().includes("/proxy?"))
-      requested.push(new URL(request.url()).searchParams.get("url") || "");
+    if (isCardImage(request.url())) requested.push(request.url());
   });
   await page
     .getByRole("button", { name: "Flip Day // Night", exact: true })
@@ -2062,8 +2081,7 @@ test("undo while a preview is still rendering leaves the restored card intact", 
   await expect(preview).toBeVisible();
   const originalPreview = await preview.getAttribute("src");
   const isChosenPrinting = (url: string) =>
-    new URL(url).searchParams.get("url") ===
-    "https://cards.scryfall.io/Sol%20Ring-cmr.png";
+    url === `${CARD_CDN}Sol%20Ring-cmr.png`;
   let started!: () => void, release!: () => void, settled!: () => void;
   const requestStarted = new Promise<void>((resolve) => (started = resolve));
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -2072,12 +2090,12 @@ test("undo while a preview is still rendering leaves the restored card intact", 
     page.on(event, (request) => {
       if (isChosenPrinting(request.url())) settled();
     });
-  await page.route("**/api/cards/images/proxy?**", async (route) => {
+  await page.route(`${CARD_CDN}**`, async (route) => {
     if (!isChosenPrinting(route.request().url())) return route.fallback();
     started();
     await released;
     await route
-      .fulfill({ contentType: "image/png", body: logo })
+      .fulfill({ contentType: "image/png", body: logo, headers: CORS })
       .catch(() => {});
   });
   await solRing.click();
@@ -2668,8 +2686,7 @@ test("every card action is reachable from the deck on A1 at fit page", async ({
   await expect.poll(() => savedUploads(page)).toEqual({ fronts: 1, backs: 1 });
   const requested: string[] = [];
   page.on("request", (request) => {
-    if (request.url().includes("/proxy?"))
-      requested.push(new URL(request.url()).searchParams.get("url") || "");
+    if (isCardImage(request.url())) requested.push(request.url());
   });
   const pdf = await pdfInfo(await saveDownload(page, "Export fronts PDF"));
   expect(pdf).toHaveLength(1);
@@ -3069,7 +3086,8 @@ test("an unknown card asks for artwork and never offers retry", async ({
     const url = request.url();
     if (
       request.resourceType() === "image" ||
-      /\/api\/cards\/images\/(proxy|front)/.test(url)
+      url.startsWith(CARD_CDN) ||
+      url.includes("/api/cards/images/front")
     )
       imageRequests.push(decodeURIComponent(url));
   });
@@ -3099,9 +3117,9 @@ test("controls stay off the artwork until hover or focus", async ({ page }) => {
   const logo = await readFile(
     new URL("../client/public/logo.png", import.meta.url)
   );
-  await page.route("**/api/cards/images/proxy?**", (route) =>
-    /night/i.test(new URL(route.request().url()).searchParams.get("url") ?? "")
-      ? route.fulfill({ contentType: "image/png", body: logo })
+  await page.route(`${CARD_CDN}**`, (route) =>
+    /night/i.test(route.request().url())
+      ? route.fulfill({ contentType: "image/png", body: logo, headers: CORS })
       : route.fallback()
   );
   await addDeck(page, "1 Sol Ring\n1 Counterspell\n1 Day // Night");
@@ -3296,16 +3314,30 @@ async function zipRequests(page: Page) {
     .getByRole("button", { name: /, change artwork$/ })
     .all())
     await expect(art.getByRole("img")).toBeVisible();
-  const requested: string[] = [];
-  const listener = (request: { url(): string }) => {
-    if (request.url().includes("/proxy?"))
-      requested.push(new URL(request.url()).searchParams.get("url") || "");
+  const sources = new Map<string, Buffer>();
+  const routePattern = `${CARD_CDN}**`;
+  const handler = async (route: import("@playwright/test").Route) => {
+    const url = route.request().url();
+    const bytes = Buffer.concat([fixture, Buffer.from(url)]);
+    sources.set(url, bytes);
+    await route.fulfill({
+      contentType: "image/png",
+      body: bytes,
+      headers: CORS,
+    });
   };
-  page.on("request", listener);
+  await page.route(routePattern, handler);
   const zip = await JSZip.loadAsync(
     await saveDownload(page, "Download original images · ZIP")
   );
-  page.off("request", listener);
+  await page.unroute(routePattern, handler);
+  const requested: string[] = [];
+  for (const entry of Object.values(zip.files)) {
+    const bytes = await entry.async("nodebuffer");
+    const source = [...sources].find(([, expected]) => bytes.equals(expected));
+    if (source) requested.push(source[0]);
+    else expect(bytes).toEqual(fixture);
+  }
   return { files: Object.keys(zip.files).length, requested: requested.sort() };
 }
 

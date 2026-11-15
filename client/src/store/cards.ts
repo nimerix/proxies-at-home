@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import {
   isUploadedFileToken,
   makeUploadedFileToken,
-} from "../helpers/ImageHelper";
+} from "../helpers/imageUtils";
 import {
   createIndexedDBStorage,
   reportStorageError,

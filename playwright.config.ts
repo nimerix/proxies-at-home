@@ -1,4 +1,6 @@
 import { defineConfig } from "@playwright/test";
+// E2E_PORT lets two checkouts run the browser tests at the same time.
+const port = Number(process.env.E2E_PORT ?? 4173);
 export default defineConfig({
   testDir: "./tests",
   timeout: 60000,
@@ -14,15 +16,15 @@ export default defineConfig({
       : []),
   ],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: `http://127.0.0.1:${port}`,
     viewport: { width: 1440, height: 1000 },
     colorScheme: "light",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run preview --prefix client -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173",
+    command: `npm run preview --prefix client -- --host 127.0.0.1 --port ${port} --strictPort`,
+    url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
   },
 });

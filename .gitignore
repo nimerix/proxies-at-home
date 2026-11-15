@@ -1,9 +1,6 @@
-server/src/cached-images/*
-server/src/uploaded-images/*
-server/dist/*
-
 node_modules/
 *.local
 test-results/
 playwright-report/
 .artifacts/
+.wrangler/

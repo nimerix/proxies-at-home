@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { AlertTriangle, Minus, MoreHorizontal, Plus } from "lucide-react";
 import type { DeckGroup } from "@/helpers/deckGroups";
-import { makeUploadedFileToken } from "@/helpers/ImageHelper";
+import { makeUploadedFileToken } from "@/helpers/imageUtils";
 import { canMoveGroup, moveGroup, type MoveTarget } from "@/helpers/deckGroups";
 import { plural } from "@/helpers/plural";
 import { copyUpload } from "@/helpers/uploads";

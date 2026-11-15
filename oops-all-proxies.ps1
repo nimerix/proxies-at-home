@@ -17,7 +17,7 @@ function Invoke-Install {
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Pop-Location
 
-    Push-Location "$PSScriptRoot\server"
+    Push-Location "$PSScriptRoot\worker"
         npm install
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Pop-Location

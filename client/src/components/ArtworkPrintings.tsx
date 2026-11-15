@@ -1,8 +1,6 @@
-import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 import { Check, ImageOff, Replace, Search } from "lucide-react";
-import { API_BASE } from "../constants";
-import { toProxied } from "../helpers/ImageHelper";
+import { resolveImageUrl } from "../helpers/ImageHelper";
 import {
   replacedUploads,
   scopeOptions,
@@ -11,32 +9,23 @@ import {
 } from "../helpers/artworkScope";
 import { needsArtwork } from "../helpers/deckGroups";
 import { plural } from "../helpers/plural";
+import {
+  autocompleteCardNames,
+  findPrintings,
+  getSets,
+  type FoundCard,
+  type SetInfo,
+} from "../helpers/scryfall";
 import { useArtworkModalStore, useCardsStore, usePreviewStore } from "../store";
 import { errorMessage, notify } from "../store/notifications";
 import { deckEdit } from "../store/undo";
 import type { CardOption } from "../types/Card";
 
-type SetInfo = { code: string; name: string; released_at?: string };
-let setsPromise: Promise<SetInfo[]> | null = null;
-function getSets() {
-  if (!setsPromise)
-    setsPromise = axios
-      .get<{ data: SetInfo[] }>(`${API_BASE}/api/cards/images/sets`, {
-        timeout: 15000,
-      })
-      .then((res) => res.data.data)
-      .catch(() => {
-        setsPromise = null;
-        return [];
-      });
-  return setsPromise;
-}
-
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 // A printing named for both faces ("Delver of Secrets // Insectile
 // Aberration") is the same card as its front face's name.
-const isOtherCard = (print: CardOption, name: string) =>
+const isOtherCard = (print: FoundCard, name: string) =>
   !sameName(print.name, name) && !sameName(print.name.split(" // ")[0], name);
 
 function scopeLabel(scope: ArtworkScope, count: number, name: string) {
@@ -123,7 +112,7 @@ export function ArtworkPrintings({
   const [query, setQuery] = useState(card.name);
   const [requestedName, setRequestedName] = useState(card.name);
   const [attempt, setAttempt] = useState(0);
-  const [prints, setPrints] = useState<CardOption[]>([]);
+  const [prints, setPrints] = useState<FoundCard[]>([]);
   const [sets, setSets] = useState<SetInfo[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
@@ -148,15 +137,9 @@ export function ArtworkPrintings({
         setSuggestions([]);
         return;
       }
-      void axios
-        .get<{ data: string[] }>(`${API_BASE}/api/cards/images/autocomplete`, {
-          params: { q: query.trim() },
-          signal: controller.signal,
-          timeout: 10000,
-        })
-        .then((res) => {
-          if (!controller.signal.aborted)
-            setSuggestions(res.data.data.slice(0, 10));
+      void autocompleteCardNames(query.trim(), controller.signal)
+        .then((names) => {
+          if (!controller.signal.aborted) setSuggestions(names.slice(0, 10));
         })
         .catch(() => {
           if (!controller.signal.aborted) setSuggestions([]);
@@ -173,15 +156,10 @@ export function ArtworkPrintings({
     setError(null);
     setPrints([]);
     setFilter("");
-    void axios
-      .post<CardOption[]>(
-        `${API_BASE}/api/cards/images`,
-        { cardNames: [requestedName], cardArt: "prints", language },
-        { signal: controller.signal, timeout: 60000 }
-      )
-      .then((res) => {
+    void findPrintings(requestedName, language, true, controller.signal)
+      .then((found) => {
         if (!controller.signal.aborted)
-          setPrints(res.data.filter((p) => p.imageUrls?.length));
+          setPrints(found.filter((p) => p.imageUrls.length));
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setError(errorMessage(error));
@@ -206,7 +184,7 @@ export function ArtworkPrintings({
     );
   }, [prints, filter, setInfo]);
 
-  function choose(print: CardOption, url: string, faceIndex: number) {
+  function choose(print: FoundCard, url: string, faceIndex: number) {
     const state = useCardsStore.getState();
     const current = state.cards.find((c) => c.uuid === card.uuid) ?? card;
     const differs = (c: CardOption) =>
@@ -453,7 +431,7 @@ export function ArtworkPrintings({
                   >
                     <span className="artwork-thumb">
                       <Thumbnail
-                        src={face?.thumbUrl || toProxied(url)}
+                        src={face?.thumbUrl || resolveImageUrl(url)}
                         alt={`${face?.name ?? print.name}, ${meta}`}
                       />
                       {selected && (
